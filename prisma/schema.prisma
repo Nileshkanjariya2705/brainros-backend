@@ -1,0 +1,580 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String            @id @default(uuid()) @db.Uuid
+  phone            String?           @unique
+  mobileNumber     String?           @unique @map("mobile_number")
+  email            String?           @unique
+  passwordHash     String?           @map("password_hash")
+  isActive         Boolean           @default(true) @map("is_active")
+  isVerified       Boolean           @default(false) @map("is_verified")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  userRoles        UserRole[]
+  student          Student?
+  otpVerifications OtpVerification[]
+  refreshTokens    RefreshToken[]
+  createdQuestions Question[]
+  createdExams     Exam[]            @relation("ExamCreatedBy")
+  approvedExams    Exam[]            @relation("ExamApprovedBy")
+
+  @@map("users")
+}
+
+model Role {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String     @unique
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model StudentClass {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  students    Student[]
+
+  @@map("student_classes")
+}
+
+model PreferredLanguage {
+  id                          String                      @id @default(uuid()) @db.Uuid
+  name                        String                      @unique
+  description                 String?
+  createdAt                   DateTime                    @default(now()) @map("created_at")
+  updatedAt                   DateTime                    @updatedAt @map("updated_at")
+  students                    Student[]
+  questions                   Question[]
+  questionTranslations        QuestionTranslation[]
+  questionOptionTranslations  QuestionOptionTranslation[]
+  attempts                    Attempt[]
+
+  @@map("preferred_languages")
+}
+
+model ExamTarget {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  students    Student[]
+  subjects    Subject[]
+  exams       Exam[]
+
+  @@map("exam_targets")
+}
+
+model Student {
+  id                  String            @id @default(uuid()) @db.Uuid
+  userId              String            @unique @map("user_id") @db.Uuid
+  studentId           String            @unique @map("student_id")
+  name                String
+  state               String
+  district            String
+  schoolCollege       String            @map("school_college")
+  classId             String            @map("class_id") @db.Uuid
+  examTargetId        String            @map("exam_target_id") @db.Uuid
+  preferredLanguageId String            @map("preferred_language_id") @db.Uuid
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  examTarget          ExamTarget        @relation(fields: [examTargetId], references: [id])
+  studentClass        StudentClass      @relation(fields: [classId], references: [id])
+  preferredLanguage   PreferredLanguage @relation(fields: [preferredLanguageId], references: [id])
+  attempts            Attempt[]
+
+  @@map("students")
+}
+
+model OtpPurpose {
+  id               String            @id @default(uuid()) @db.Uuid
+  name             String            @unique
+  description      String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  otpVerifications OtpVerification[]
+
+  @@map("otp_purposes")
+}
+
+model OtpVerification {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String?    @map("user_id") @db.Uuid
+  phone      String
+  otpHash    String     @map("otp_hash")
+  purposeId  String     @map("purpose_id") @db.Uuid
+  expiresAt  DateTime   @map("expires_at")
+  verifiedAt DateTime?  @map("verified_at")
+  attempts   Int        @default(0)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  user       User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  otpPurpose OtpPurpose @relation(fields: [purposeId], references: [id])
+
+  @@index([phone])
+  @@index([userId])
+  @@map("otp_verifications")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ACADEMIC HIERARCHY
+// ═══════════════════════════════════════════════════════════════════
+
+model Subject {
+  id            String         @id @default(uuid()) @db.Uuid
+  examTargetId  String         @map("exam_target_id") @db.Uuid
+  name          String
+  code          String?
+  displayOrder  Int            @default(0) @map("display_order")
+  isActive      Boolean        @default(true) @map("is_active")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  examTarget    ExamTarget     @relation(fields: [examTargetId], references: [id])
+  chapters      Chapter[]
+  questions     Question[]
+  examSections  ExamSection[]
+  subjectResults SubjectResult[]
+
+  @@unique([examTargetId, name])
+  @@index([examTargetId])
+  @@map("subjects")
+}
+
+model Chapter {
+  id             String          @id @default(uuid()) @db.Uuid
+  subjectId      String          @map("subject_id") @db.Uuid
+  name           String
+  code           String?
+  displayOrder   Int             @default(0) @map("display_order")
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topics         Topic[]
+  questions      Question[]
+  chapterResults ChapterResult[]
+
+  @@unique([subjectId, name])
+  @@index([subjectId])
+  @@map("chapters")
+}
+
+model Topic {
+  id           String     @id @default(uuid()) @db.Uuid
+  chapterId    String     @map("chapter_id") @db.Uuid
+  name         String
+  displayOrder Int        @default(0) @map("display_order")
+  isActive     Boolean    @default(true) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  chapter      Chapter    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  subTopics    SubTopic[]
+  questions    Question[]
+
+  @@unique([chapterId, name])
+  @@index([chapterId])
+  @@map("topics")
+}
+
+model SubTopic {
+  id           String     @id @default(uuid()) @db.Uuid
+  topicId      String     @map("topic_id") @db.Uuid
+  name         String
+  displayOrder Int        @default(0) @map("display_order")
+  isActive     Boolean    @default(true) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  topic        Topic      @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  questions    Question[]
+
+  @@unique([topicId, name])
+  @@index([topicId])
+  @@map("sub_topics")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// QUESTION BANK
+// ═══════════════════════════════════════════════════════════════════
+
+model DifficultyLevel {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String     @unique
+  displayOrder Int        @default(0) @map("display_order")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  questions    Question[]
+
+  @@map("difficulty_levels")
+}
+
+model QuestionType {
+  id               String             @id @default(uuid()) @db.Uuid
+  name             String             @unique
+  code             String             @unique
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  questions        Question[]
+  examScoringRules ExamScoringRule[]
+
+  @@map("question_types")
+}
+
+model Question {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  subjectId           String                    @map("subject_id") @db.Uuid
+  chapterId           String                    @map("chapter_id") @db.Uuid
+  topicId             String?                   @map("topic_id") @db.Uuid
+  subTopicId          String?                   @map("sub_topic_id") @db.Uuid
+  difficultyId        String                    @map("difficulty_id") @db.Uuid
+  questionTypeId      String                    @map("question_type_id") @db.Uuid
+  defaultLanguageId   String                    @map("default_language_id") @db.Uuid
+  correctAnswer       Json?                     @map("correct_answer")
+  marks               Float                     @default(4)
+  negativeMarks       Float                     @default(1) @map("negative_marks")
+  isActive            Boolean                   @default(true) @map("is_active")
+  createdById         String                    @map("created_by_id") @db.Uuid
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  subject             Subject                   @relation(fields: [subjectId], references: [id])
+  chapter             Chapter                   @relation(fields: [chapterId], references: [id])
+  topic               Topic?                    @relation(fields: [topicId], references: [id])
+  subTopic            SubTopic?                 @relation(fields: [subTopicId], references: [id])
+  difficulty          DifficultyLevel           @relation(fields: [difficultyId], references: [id])
+  questionType        QuestionType              @relation(fields: [questionTypeId], references: [id])
+  defaultLanguage     PreferredLanguage         @relation(fields: [defaultLanguageId], references: [id])
+  createdBy           User                      @relation(fields: [createdById], references: [id])
+  translations        QuestionTranslation[]
+  options             QuestionOption[]
+  examQuestions       ExamQuestion[]
+
+  @@index([subjectId])
+  @@index([chapterId])
+  @@index([difficultyId])
+  @@index([questionTypeId])
+  @@index([isActive])
+  @@map("questions")
+}
+
+model QuestionTranslation {
+  id           String            @id @default(uuid()) @db.Uuid
+  questionId   String            @map("question_id") @db.Uuid
+  languageId   String            @map("language_id") @db.Uuid
+  questionText String            @map("question_text")
+  explanation  String?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  question     Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  language     PreferredLanguage @relation(fields: [languageId], references: [id])
+
+  @@unique([questionId, languageId])
+  @@map("question_translations")
+}
+
+model QuestionOption {
+  id           String                      @id @default(uuid()) @db.Uuid
+  questionId   String                      @map("question_id") @db.Uuid
+  optionLabel  String                      @map("option_label")
+  isCorrect    Boolean                     @default(false) @map("is_correct")
+  displayOrder Int                         @default(0) @map("display_order")
+  createdAt    DateTime                    @default(now()) @map("created_at")
+  updatedAt    DateTime                    @updatedAt @map("updated_at")
+  question     Question                    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  translations QuestionOptionTranslation[]
+  answers      Answer[]
+
+  @@index([questionId])
+  @@map("question_options")
+}
+
+model QuestionOptionTranslation {
+  id         String            @id @default(uuid()) @db.Uuid
+  optionId   String            @map("option_id") @db.Uuid
+  languageId String            @map("language_id") @db.Uuid
+  optionText String            @map("option_text")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+  option     QuestionOption    @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  language   PreferredLanguage @relation(fields: [languageId], references: [id])
+
+  @@unique([optionId, languageId])
+  @@map("question_option_translations")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXAM SYSTEM
+// ═══════════════════════════════════════════════════════════════════
+
+model ExamStatus {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  exams     Exam[]
+
+  @@map("exam_statuses")
+}
+
+model Exam {
+  id                         String            @id @default(uuid()) @db.Uuid
+  examTargetId               String            @map("exam_target_id") @db.Uuid
+  title                      String
+  description                String?
+  totalQuestions              Int               @map("total_questions")
+  totalMarks                 Float             @map("total_marks")
+  durationMinutes            Int               @map("duration_minutes")
+  defaultMarksPerQuestion    Float             @default(4) @map("default_marks_per_question")
+  defaultNegativeMarks       Float             @default(1) @map("default_negative_marks")
+  statusId                   String            @map("status_id") @db.Uuid
+  examDate                   DateTime?         @map("exam_date")
+  startTime                  DateTime?         @map("start_time")
+  endTime                    DateTime?         @map("end_time")
+  createdById                String            @map("created_by_id") @db.Uuid
+  approvedById               String?           @map("approved_by_id") @db.Uuid
+  approvedAt                 DateTime?         @map("approved_at")
+  activatedAt                DateTime?         @map("activated_at")
+  createdAt                  DateTime          @default(now()) @map("created_at")
+  updatedAt                  DateTime          @updatedAt @map("updated_at")
+  examTarget                 ExamTarget        @relation(fields: [examTargetId], references: [id])
+  status                     ExamStatus        @relation(fields: [statusId], references: [id])
+  createdBy                  User              @relation("ExamCreatedBy", fields: [createdById], references: [id])
+  approvedBy                 User?             @relation("ExamApprovedBy", fields: [approvedById], references: [id])
+  sections                   ExamSection[]
+  examQuestions              ExamQuestion[]
+  scoringRules               ExamScoringRule[]
+  attempts                   Attempt[]
+
+  @@index([examTargetId])
+  @@index([statusId])
+  @@index([examDate])
+  @@map("exams")
+}
+
+model ExamSection {
+  id             String         @id @default(uuid()) @db.Uuid
+  examId         String         @map("exam_id") @db.Uuid
+  subjectId      String         @map("subject_id") @db.Uuid
+  name           String
+  totalQuestions  Int           @map("total_questions")
+  displayOrder   Int            @default(0) @map("display_order")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  exam           Exam           @relation(fields: [examId], references: [id], onDelete: Cascade)
+  subject        Subject        @relation(fields: [subjectId], references: [id])
+  examQuestions  ExamQuestion[]
+
+  @@index([examId])
+  @@map("exam_sections")
+}
+
+model ExamQuestion {
+  id            String           @id @default(uuid()) @db.Uuid
+  examId        String           @map("exam_id") @db.Uuid
+  sectionId     String           @map("section_id") @db.Uuid
+  questionId    String           @map("question_id") @db.Uuid
+  displayOrder  Int              @default(0) @map("display_order")
+  marks         Float?
+  negativeMarks Float?           @map("negative_marks")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  exam          Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  section       ExamSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  question      Question         @relation(fields: [questionId], references: [id])
+  answers       Answer[]
+  timeLogs      QuestionTimeLog[]
+
+  @@unique([examId, questionId])
+  @@index([examId])
+  @@index([sectionId])
+  @@map("exam_questions")
+}
+
+model ExamScoringRule {
+  id                        String        @id @default(uuid()) @db.Uuid
+  examId                    String        @map("exam_id") @db.Uuid
+  questionTypeId            String?       @map("question_type_id") @db.Uuid
+  marksPerQuestion          Float         @map("marks_per_question")
+  negativeMarksPerQuestion  Float         @default(0) @map("negative_marks_per_question")
+  createdAt                 DateTime      @default(now()) @map("created_at")
+  updatedAt                 DateTime      @updatedAt @map("updated_at")
+  exam                      Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  questionType              QuestionType? @relation(fields: [questionTypeId], references: [id])
+
+  @@map("exam_scoring_rules")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STUDENT EXAM ATTEMPTS
+// ═══════════════════════════════════════════════════════════════════
+
+model AttemptStatus {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  attempts  Attempt[]
+
+  @@map("attempt_statuses")
+}
+
+model Attempt {
+  id              String          @id @default(uuid()) @db.Uuid
+  studentId       String          @map("student_id") @db.Uuid
+  examId          String          @map("exam_id") @db.Uuid
+  statusId        String          @map("status_id") @db.Uuid
+  languageId      String          @map("language_id") @db.Uuid
+  startedAt       DateTime?       @map("started_at")
+  submittedAt     DateTime?       @map("submitted_at")
+  serverStartTime DateTime?       @map("server_start_time")
+  serverEndTime   DateTime?       @map("server_end_time")
+  ipAddress       String?         @map("ip_address")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  student         Student         @relation(fields: [studentId], references: [id])
+  exam            Exam            @relation(fields: [examId], references: [id])
+  status          AttemptStatus   @relation(fields: [statusId], references: [id])
+  language        PreferredLanguage @relation(fields: [languageId], references: [id])
+  answers         Answer[]
+  timeLogs        QuestionTimeLog[]
+  result          Result?
+
+  @@unique([studentId, examId])
+  @@index([studentId])
+  @@index([examId])
+  @@index([statusId])
+  @@map("attempts")
+}
+
+model Answer {
+  id              String          @id @default(uuid()) @db.Uuid
+  attemptId       String          @map("attempt_id") @db.Uuid
+  examQuestionId  String          @map("exam_question_id") @db.Uuid
+  selectedOptionId String?        @map("selected_option_id") @db.Uuid
+  numericalAnswer  Float?        @map("numerical_answer")
+  selectedOptions  Json?         @map("selected_options")
+  isMarkedForReview Boolean      @default(false) @map("is_marked_for_review")
+  answeredAt       DateTime?     @map("answered_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  attempt         Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examQuestion    ExamQuestion   @relation(fields: [examQuestionId], references: [id])
+  selectedOption  QuestionOption? @relation(fields: [selectedOptionId], references: [id])
+
+  @@unique([attemptId, examQuestionId])
+  @@index([attemptId])
+  @@map("answers")
+}
+
+model QuestionTimeLog {
+  id               String       @id @default(uuid()) @db.Uuid
+  attemptId        String       @map("attempt_id") @db.Uuid
+  examQuestionId   String       @map("exam_question_id") @db.Uuid
+  startTime        DateTime     @map("start_time")
+  endTime          DateTime?    @map("end_time")
+  timeSpentSeconds Int          @default(0) @map("time_spent_seconds")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  attempt          Attempt      @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examQuestion     ExamQuestion @relation(fields: [examQuestionId], references: [id])
+
+  @@index([attemptId])
+  @@map("question_time_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RESULTS & ANALYTICS
+// ═══════════════════════════════════════════════════════════════════
+
+model Result {
+  id              String          @id @default(uuid()) @db.Uuid
+  attemptId       String          @unique @map("attempt_id") @db.Uuid
+  totalQuestions  Int             @map("total_questions")
+  correctAnswers  Int             @map("correct_answers")
+  wrongAnswers    Int             @map("wrong_answers")
+  unattempted     Int
+  totalScore      Float           @map("total_score")
+  maxScore        Float           @map("max_score")
+  percentage      Float
+  accuracy        Float
+  calculatedAt    DateTime        @default(now()) @map("calculated_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  attempt         Attempt         @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  subjectResults  SubjectResult[]
+  chapterResults  ChapterResult[]
+
+  @@map("results")
+}
+
+model SubjectResult {
+  id              String   @id @default(uuid()) @db.Uuid
+  resultId        String   @map("result_id") @db.Uuid
+  subjectId       String   @map("subject_id") @db.Uuid
+  totalQuestions  Int      @map("total_questions")
+  correctAnswers  Int      @map("correct_answers")
+  wrongAnswers    Int      @map("wrong_answers")
+  unattempted     Int
+  score           Float
+  maxScore        Float    @map("max_score")
+  accuracy        Float
+  createdAt       DateTime @default(now()) @map("created_at")
+  result          Result   @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  subject         Subject  @relation(fields: [subjectId], references: [id])
+
+  @@unique([resultId, subjectId])
+  @@index([resultId])
+  @@map("subject_results")
+}
+
+model ChapterResult {
+  id                String   @id @default(uuid()) @db.Uuid
+  resultId          String   @map("result_id") @db.Uuid
+  chapterId         String   @map("chapter_id") @db.Uuid
+  totalQuestions    Int      @map("total_questions")
+  correctAnswers    Int      @map("correct_answers")
+  wrongAnswers      Int      @map("wrong_answers")
+  unattempted       Int
+  score             Float
+  accuracy          Float
+  performanceStatus String   @map("performance_status")
+  createdAt         DateTime @default(now()) @map("created_at")
+  result            Result   @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  chapter           Chapter  @relation(fields: [chapterId], references: [id])
+
+  @@unique([resultId, chapterId])
+  @@index([resultId])
+  @@map("chapter_results")
+}
