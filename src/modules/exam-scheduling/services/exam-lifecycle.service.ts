@@ -1,0 +1,350 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ExamLifecycleAction } from '@prisma/client';
+
+export const VALID_LIFECYCLE_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ['SUBMITTED', 'CANCELLED'],
+  SUBMITTED: ['APPROVED', 'CANCELLED'],
+  APPROVED: ['SCHEDULED', 'CANCELLED'],
+  SCHEDULED: ['ACTIVE', 'CANCELLED', 'SCHEDULED'], // reschedule stays SCHEDULED
+  ACTIVE: ['ENDED', 'CANCELLED'],
+  ENDED: ['EVALUATING'],
+  EVALUATING: ['COMPLETED'],
+  COMPLETED: [],
+  CANCELLED: [],
+};
+
+@Injectable()
+export class ExamLifecycleService {
+  private readonly logger = new Logger(ExamLifecycleService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Asserts whether a transition between two statuses is valid
+   */
+  validateTransition(fromStatus: string, toStatus: string): void {
+    const allowed = VALID_LIFECYCLE_TRANSITIONS[fromStatus] || [];
+    if (!allowed.includes(toStatus)) {
+      throw new BadRequestException(
+        `Invalid exam status transition from '${fromStatus}' to '${toStatus}'. Allowed transitions: [${allowed.join(
+          ', ',
+        )}]`,
+      );
+    }
+  }
+
+  /**
+   * Helper to ensure ExamStatus record exists in DB
+   */
+  async getOrCreateExamStatus(statusName: string, tx?: any) {
+    const db = tx || this.prisma;
+    let status = await db.examStatus.findUnique({
+      where: { name: statusName },
+    });
+
+    if (!status) {
+      status = await db.examStatus.create({
+        data: { name: statusName },
+      });
+    }
+    return status;
+  }
+
+  /**
+   * Record lifecycle audit trail
+   */
+  async recordHistory(
+    params: {
+      examId: string;
+      examVersionId?: string | null;
+      scheduleId?: string | null;
+      action: ExamLifecycleAction;
+      fromStatus: string;
+      toStatus: string;
+      performedById: string;
+      comment?: string | null;
+      metadata?: any;
+    },
+    tx?: any,
+  ) {
+    const db = tx || this.prisma;
+    return db.examLifecycleHistory.create({
+      data: {
+        examId: params.examId,
+        examVersionId: params.examVersionId || null,
+        scheduleId: params.scheduleId || null,
+        action: params.action,
+        fromStatus: params.fromStatus,
+        toStatus: params.toStatus,
+        performedById: params.performedById,
+        comment: params.comment || null,
+        metadata: params.metadata || null,
+      },
+    });
+  }
+
+  /**
+   * Admin submits Exam: DRAFT -> SUBMITTED
+   */
+  async submitExam(examId: string, performedById: string, comment?: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        status: true,
+        versions: true,
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found`);
+    }
+
+    this.validateTransition(exam.status.name, 'SUBMITTED');
+
+    // Preconditions: Must have at least 1 generated ExamVersion
+    if (!exam.versions || exam.versions.length === 0) {
+      throw new BadRequestException(
+        'Cannot submit an exam without at least one generated ExamVersion. Please generate an exam version first.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const submittedStatus = await this.getOrCreateExamStatus('SUBMITTED', tx);
+
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: { statusId: submittedStatus.id },
+        include: { status: true },
+      });
+
+      await this.recordHistory(
+        {
+          examId,
+          examVersionId: exam.versions[0]?.id || null,
+          action: 'SUBMIT',
+          fromStatus: exam.status.name,
+          toStatus: 'SUBMITTED',
+          performedById,
+          comment,
+        },
+        tx,
+      );
+
+      this.logger.log(`Exam '${examId}' submitted by user '${performedById}'`);
+      return updated;
+    });
+  }
+
+  /**
+   * Super Admin approves Exam: SUBMITTED -> APPROVED
+   */
+  async approveExam(examId: string, performedById: string, comment?: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        status: true,
+        versions: true,
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found`);
+    }
+
+    this.validateTransition(exam.status.name, 'APPROVED');
+
+    return this.prisma.$transaction(async (tx) => {
+      const approvedStatus = await this.getOrCreateExamStatus('APPROVED', tx);
+
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: {
+          statusId: approvedStatus.id,
+          approvedById: performedById,
+          approvedAt: new Date(),
+        },
+        include: { status: true },
+      });
+
+      await this.recordHistory(
+        {
+          examId,
+          examVersionId: exam.versions[0]?.id || null,
+          action: 'APPROVE',
+          fromStatus: exam.status.name,
+          toStatus: 'APPROVED',
+          performedById,
+          comment,
+        },
+        tx,
+      );
+
+      this.logger.log(`Exam '${examId}' approved by Super Admin '${performedById}'`);
+      return updated;
+    });
+  }
+
+  /**
+   * Cancel Exam: from valid pre-live states -> CANCELLED
+   */
+  async cancelExam(examId: string, performedById: string, reason?: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        status: true,
+        schedules: { where: { status: { in: ['SCHEDULED', 'ACTIVE'] } } },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found`);
+    }
+
+    this.validateTransition(exam.status.name, 'CANCELLED');
+
+    return this.prisma.$transaction(async (tx) => {
+      const cancelledStatus = await this.getOrCreateExamStatus('CANCELLED', tx);
+
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: { statusId: cancelledStatus.id },
+        include: { status: true },
+      });
+
+      // Mark any active/scheduled schedules as CANCELLED
+      if (exam.schedules && exam.schedules.length > 0) {
+        for (const sch of exam.schedules) {
+          await tx.examSchedule.update({
+            where: { id: sch.id },
+            data: {
+              status: 'CANCELLED',
+              cancelledById: performedById,
+              cancelledAt: new Date(),
+            },
+          });
+        }
+      }
+
+      await this.recordHistory(
+        {
+          examId,
+          action: 'CANCEL',
+          fromStatus: exam.status.name,
+          toStatus: 'CANCELLED',
+          performedById,
+          comment: reason,
+        },
+        tx,
+      );
+
+      this.logger.log(`Exam '${examId}' cancelled by user '${performedById}'`);
+      return updated;
+    });
+  }
+
+  /**
+   * Super Admin activates Exam: SCHEDULED/APPROVED -> ACTIVE
+   */
+  async activateExam(examId: string, performedById: string, tx?: any) {
+    const db = tx || this.prisma;
+    const exam = await db.exam.findUnique({
+      where: { id: examId },
+      include: { status: true },
+    });
+
+    if (!exam) throw new NotFoundException(`Exam '${examId}' not found`);
+
+    const activeStatus = await this.getOrCreateExamStatus('ACTIVE', db);
+
+    const updated = await db.exam.update({
+      where: { id: examId },
+      data: {
+        statusId: activeStatus.id,
+        activatedAt: new Date(),
+      },
+      include: { status: true },
+    });
+
+    await this.recordHistory(
+      {
+        examId,
+        action: 'ACTIVATE',
+        fromStatus: exam.status.name,
+        toStatus: 'ACTIVE',
+        performedById,
+        comment: 'Super Admin activated exam for live testing',
+      },
+      db,
+    );
+
+    return updated;
+  }
+
+  /**
+   * Transition Exam to ENDED: ACTIVE -> ENDED
+   */
+  async endExam(examId: string, performedById?: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        status: true,
+        schedules: { where: { status: 'ACTIVE' } },
+      },
+    });
+
+    if (!exam || exam.status.name !== 'ACTIVE') return exam;
+
+    return this.prisma.$transaction(async (tx) => {
+      const endedStatus = await this.getOrCreateExamStatus('ENDED', tx);
+
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: { statusId: endedStatus.id },
+        include: { status: true },
+      });
+
+      if (exam.schedules.length > 0) {
+        await tx.examSchedule.updateMany({
+          where: { examId, status: 'ACTIVE' },
+          data: { status: 'ENDED' },
+        });
+      }
+
+      await this.recordHistory(
+        {
+          examId,
+          action: 'END',
+          fromStatus: 'ACTIVE',
+          toStatus: 'ENDED',
+          performedById: performedById || exam.createdById,
+          comment: 'Exam live window concluded.',
+        },
+        tx,
+      );
+
+      this.logger.log(`Exam '${examId}' transitioned to ENDED.`);
+      return updated;
+    });
+  }
+
+  /**
+   * Get lifecycle audit history for an exam
+   */
+  async getExamLifecycleHistory(examId: string) {
+    return this.prisma.examLifecycleHistory.findMany({
+      where: { examId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        performedBy: { select: { id: true, email: true } },
+        examVersion: { select: { id: true, versionNumber: true } },
+        schedule: true,
+      },
+    });
+  }
+}

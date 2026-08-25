@@ -20,6 +20,15 @@ export class ResultController {
     return this.resultService.getResult(attemptId);
   }
 
+  /**
+   * Complete Brainros Analysis Engine Report
+   * Includes Overall, Subject, Chapter, Time, Strategy, and Recommendations
+   */
+  @Get(':attemptId/analysis')
+  getFullAnalysis(@Param('attemptId') attemptId: string) {
+    return this.resultService.getFullAnalysis(attemptId);
+  }
+
   @Get(':attemptId/subjects')
   getSubjectResults(@Param('attemptId') attemptId: string) {
     return this.resultService.getSubjectResults(attemptId);
@@ -28,6 +37,21 @@ export class ResultController {
   @Get(':attemptId/chapters')
   getChapterResults(@Param('attemptId') attemptId: string) {
     return this.resultService.getChapterResults(attemptId);
+  }
+
+  @Get(':attemptId/time-analysis')
+  getTimeAnalysis(@Param('attemptId') attemptId: string) {
+    return this.resultService.getTimeAnalysis(attemptId);
+  }
+
+  @Get(':attemptId/strategy')
+  getAttemptStrategy(@Param('attemptId') attemptId: string) {
+    return this.resultService.getAttemptStrategy(attemptId);
+  }
+
+  @Get(':attemptId/recommendations')
+  getRecommendations(@Param('attemptId') attemptId: string) {
+    return this.resultService.getRecommendations(attemptId);
   }
 
   @Get(':attemptId/review')

@@ -1,13 +1,20 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalysisEngineService } from './services/analysis-engine.service';
+import { DEFAULT_PERFORMANCE_THRESHOLDS, PerformanceThresholds } from './interfaces/analysis.interface';
 
 @Injectable()
 export class ResultService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ResultService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly analysisEngine: AnalysisEngineService,
+  ) {}
 
   /**
    * Calculate and persist results for a submitted attempt.
-   * This is the core scoring engine — runs as a single transaction.
+   * Runs as a single atomic transaction.
    */
   async calculateResult(attemptId: string) {
     const attempt = await this.prisma.attempt.findUnique({
@@ -20,6 +27,7 @@ export class ResultService {
             scoringRules: { include: { questionType: true } },
           },
         },
+        timeLogs: true,
       },
     });
 
@@ -28,8 +36,20 @@ export class ResultService {
       throw new BadRequestException('Attempt must be submitted before calculating results');
     }
 
-    // Skip if result already calculated
+    // Skip recalculation if result already calculated
     if (attempt.result) return attempt.result;
+
+    // Resolve configurable thresholds per exam
+    let thresholds = DEFAULT_PERFORMANCE_THRESHOLDS;
+    if (attempt.exam.performanceThresholds && typeof attempt.exam.performanceThresholds === 'object') {
+      const custom = attempt.exam.performanceThresholds as Partial<PerformanceThresholds>;
+      thresholds = {
+        excellent: custom.excellent ?? DEFAULT_PERFORMANCE_THRESHOLDS.excellent,
+        strong: custom.strong ?? DEFAULT_PERFORMANCE_THRESHOLDS.strong,
+        good: custom.good ?? DEFAULT_PERFORMANCE_THRESHOLDS.good,
+        weak: custom.weak ?? DEFAULT_PERFORMANCE_THRESHOLDS.weak,
+      };
+    }
 
     // Fetch all exam questions with their correct answers
     const examQuestions = await this.prisma.examQuestion.findMany({
@@ -51,7 +71,14 @@ export class ResultService {
     });
     const answerMap = new Map(answers.map((a) => [a.examQuestionId, a]));
 
-    // Build scoring rules map: questionTypeId → { marks, negativeMarks }
+    // Map time logs
+    const questionTimeMap = new Map<string, number>();
+    for (const log of attempt.timeLogs) {
+      const prev = questionTimeMap.get(log.examQuestionId) || 0;
+      questionTimeMap.set(log.examQuestionId, prev + log.timeSpentSeconds);
+    }
+
+    // Build scoring rules map: questionTypeId -> { marks, negativeMarks }
     const scoringRules = new Map<string, { marks: number; negativeMarks: number }>();
     for (const rule of attempt.exam.scoringRules) {
       if (rule.questionTypeId) {
@@ -73,12 +100,14 @@ export class ResultService {
     const subjectMap = new Map<string, {
       totalQuestions: number; correct: number; wrong: number;
       unattempted: number; score: number; maxScore: number;
+      timeSpent: number;
     }>();
 
     // Chapter-level accumulators
     const chapterMap = new Map<string, {
       totalQuestions: number; correct: number; wrong: number;
-      unattempted: number; score: number;
+      unattempted: number; score: number; maxScore: number;
+      timeSpent: number;
     }>();
 
     for (const eq of examQuestions) {
@@ -86,9 +115,10 @@ export class ResultService {
       const question = eq.question;
       const subjectId = eq.section.subjectId;
       const chapterId = question.chapterId;
+      const timeSpent = questionTimeMap.get(eq.id) || 0;
 
       // Determine marks for this question
-      const rule = scoringRules.get(question.questionTypeId);
+      const rule = question.questionTypeId ? scoringRules.get(question.questionTypeId) : undefined;
       const marksForCorrect = eq.marks ?? rule?.marks ?? attempt.exam.defaultMarksPerQuestion;
       const marksForWrong = eq.negativeMarks ?? rule?.negativeMarks ?? attempt.exam.defaultNegativeMarks;
 
@@ -97,12 +127,12 @@ export class ResultService {
       // Init accumulators
       if (!subjectMap.has(subjectId)) {
         subjectMap.set(subjectId, {
-          totalQuestions: 0, correct: 0, wrong: 0, unattempted: 0, score: 0, maxScore: 0,
+          totalQuestions: 0, correct: 0, wrong: 0, unattempted: 0, score: 0, maxScore: 0, timeSpent: 0,
         });
       }
       if (!chapterMap.has(chapterId)) {
         chapterMap.set(chapterId, {
-          totalQuestions: 0, correct: 0, wrong: 0, unattempted: 0, score: 0,
+          totalQuestions: 0, correct: 0, wrong: 0, unattempted: 0, score: 0, maxScore: 0, timeSpent: 0,
         });
       }
 
@@ -110,17 +140,19 @@ export class ResultService {
       const chap = chapterMap.get(chapterId)!;
       subj.totalQuestions++;
       subj.maxScore += marksForCorrect;
+      subj.timeSpent += timeSpent;
       chap.totalQuestions++;
+      chap.maxScore += marksForCorrect;
+      chap.timeSpent += timeSpent;
 
       if (!answer || (!answer.selectedOptionId && answer.numericalAnswer === null && !answer.selectedOptions)) {
-        // Unattempted
         totalUnattempted++;
         subj.unattempted++;
         chap.unattempted++;
         continue;
       }
 
-      // Evaluate correctness based on question type
+      // Evaluate correctness
       const isCorrect = this.evaluateAnswer(question, answer);
 
       if (isCorrect) {
@@ -145,7 +177,13 @@ export class ResultService {
     const attempted = totalCorrect + totalWrong;
     const accuracy = attempted > 0 ? (totalCorrect / attempted) * 100 : 0;
 
-    // ─── Persist results in a transaction ──────────────────────
+    // Time calculations
+    const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : 0;
+    const submittedAt = attempt.submittedAt ? new Date(attempt.submittedAt).getTime() : Date.now();
+    const timeUsedSeconds = Math.max(0, Math.floor((submittedAt - startedAt) / 1000));
+    const averageTimePerQuestion = totalQuestions > 0 ? Math.round((timeUsedSeconds / totalQuestions) * 10) / 10 : 0;
+
+    // ─── Persist results in transaction ────────────────────────
     return this.prisma.$transaction(async (tx) => {
       const result = await tx.result.create({
         data: {
@@ -154,16 +192,22 @@ export class ResultService {
           correctAnswers: totalCorrect,
           wrongAnswers: totalWrong,
           unattempted: totalUnattempted,
-          totalScore: Math.max(totalScore, 0), // Floor at 0
+          totalScore: Math.max(totalScore, 0),
           maxScore,
           percentage: Math.round(percentage * 100) / 100,
           accuracy: Math.round(accuracy * 100) / 100,
+          timeUsedSeconds,
+          averageTimePerQuestion,
         },
       });
 
-      // Subject results
+      // Subject results with status & time metrics
       for (const [subjectId, data] of subjectMap) {
-        const attempted = data.correct + data.wrong;
+        const subjAttempted = data.correct + data.wrong;
+        const subjAccuracy = subjAttempted > 0 ? Math.round((data.correct / subjAttempted) * 10000) / 100 : 0;
+        const subjPercentage = data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
+        const subjStatus = this.analysisEngine.evaluateStatus(subjAccuracy, subjAttempted, thresholds);
+
         await tx.subjectResult.create({
           data: {
             resultId: result.id,
@@ -174,21 +218,21 @@ export class ResultService {
             unattempted: data.unattempted,
             score: Math.max(data.score, 0),
             maxScore: data.maxScore,
-            accuracy: attempted > 0 ? Math.round((data.correct / attempted) * 10000) / 100 : 0,
+            accuracy: subjAccuracy,
+            percentage: subjPercentage,
+            timeSpentSeconds: data.timeSpent,
+            averageTimePerQuestion: data.totalQuestions > 0 ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10 : 0,
+            performanceStatus: subjStatus,
           },
         });
       }
 
-      // Chapter results
+      // Chapter results with configurable threshold status & time metrics
       for (const [chapterId, data] of chapterMap) {
-        const attempted = data.correct + data.wrong;
-        const chapterAccuracy = attempted > 0 ? (data.correct / attempted) * 100 : 0;
-        let performanceStatus = 'NOT_ATTEMPTED';
-        if (attempted > 0) {
-          if (chapterAccuracy >= 80) performanceStatus = 'STRONG';
-          else if (chapterAccuracy >= 50) performanceStatus = 'MODERATE';
-          else performanceStatus = 'WEAK';
-        }
+        const chapAttempted = data.correct + data.wrong;
+        const chapAccuracy = chapAttempted > 0 ? Math.round((data.correct / chapAttempted) * 10000) / 100 : 0;
+        const chapPercentage = data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
+        const performanceStatus = this.analysisEngine.evaluateStatus(chapAccuracy, chapAttempted, thresholds);
 
         await tx.chapterResult.create({
           data: {
@@ -199,7 +243,11 @@ export class ResultService {
             wrongAnswers: data.wrong,
             unattempted: data.unattempted,
             score: Math.max(data.score, 0),
-            accuracy: Math.round(chapterAccuracy * 100) / 100,
+            maxScore: data.maxScore,
+            accuracy: chapAccuracy,
+            percentage: chapPercentage,
+            timeSpentSeconds: data.timeSpent,
+            averageTimePerQuestion: data.totalQuestions > 0 ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10 : 0,
             performanceStatus,
           },
         });
@@ -210,7 +258,7 @@ export class ResultService {
   }
 
   /**
-   * Get result for an attempt
+   * Get basic result for an attempt
    */
   async getResult(attemptId: string) {
     const result = await this.prisma.result.findUnique({
@@ -229,6 +277,7 @@ export class ResultService {
                 totalQuestions: true,
                 totalMarks: true,
                 durationMinutes: true,
+                performanceThresholds: true,
                 examTarget: { select: { id: true, name: true } },
               },
             },
@@ -238,6 +287,13 @@ export class ResultService {
     });
     if (!result) throw new NotFoundException('Result not found. Exam may not be submitted yet.');
     return result;
+  }
+
+  /**
+   * Get Full Comprehensive Brainros Analysis Report
+   */
+  async getFullAnalysis(attemptId: string) {
+    return this.analysisEngine.generateFullAnalysis(attemptId);
   }
 
   /**
@@ -274,6 +330,30 @@ export class ResultService {
         },
       },
     });
+  }
+
+  /**
+   * Get time analysis only
+   */
+  async getTimeAnalysis(attemptId: string) {
+    const full = await this.analysisEngine.generateFullAnalysis(attemptId);
+    return full.timeAnalysis;
+  }
+
+  /**
+   * Get attempt strategy only
+   */
+  async getAttemptStrategy(attemptId: string) {
+    const full = await this.analysisEngine.generateFullAnalysis(attemptId);
+    return full.attemptStrategy;
+  }
+
+  /**
+   * Get recommendations only
+   */
+  async getRecommendations(attemptId: string) {
+    const full = await this.analysisEngine.generateFullAnalysis(attemptId);
+    return full.recommendations;
   }
 
   /**
@@ -354,14 +434,11 @@ export class ResultService {
       case 'SCQ':
       case 'TF':
       case 'AR': {
-        // Single correct: compare selectedOptionId with the correct option
         if (!answer.selectedOptionId) return false;
         const correctOption = question.options.find((o: any) => o.isCorrect);
         return correctOption ? answer.selectedOptionId === correctOption.id : false;
       }
-
       case 'MCQ': {
-        // Multiple correct: compare selected set with correct set
         const selected = answer.selectedOptions as string[] | null;
         if (!selected || selected.length === 0) return false;
         const correctIds = new Set<string>(question.options.filter((o: any) => o.isCorrect).map((o: any) => o.id));
@@ -372,13 +449,10 @@ export class ResultService {
         }
         return true;
       }
-
       case 'NUM': {
-        // Numerical: compare with correctAnswer JSON field
         if (answer.numericalAnswer === null || answer.numericalAnswer === undefined) return false;
         const correctValue = question.correctAnswer;
         if (correctValue === null || correctValue === undefined) return false;
-        // Support exact match or range
         if (typeof correctValue === 'number') {
           return Math.abs(answer.numericalAnswer - correctValue) < 0.001;
         }
@@ -387,7 +461,6 @@ export class ResultService {
         }
         return false;
       }
-
       default:
         return false;
     }

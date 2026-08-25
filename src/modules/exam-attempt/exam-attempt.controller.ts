@@ -1,6 +1,7 @@
 import {
-  Controller, Get, Post, Put, Param, Body, UseGuards, Req,
+  Controller, Get, Post, Put, Patch, Param, Body, UseGuards, Req,
 } from '@nestjs/common';
+
 import { ExamAttemptService } from './exam-attempt.service';
 import { StartAttemptDto, SaveAnswerDto, BulkSaveAnswersDto, SaveTimeLogDto } from './dto/attempt.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -55,9 +56,35 @@ export class ExamAttemptController {
     return this.attemptService.submitAttempt(attemptId, user.studentId);
   }
 
+  /**
+   * Switch exam language during active attempt (zero answer loss / zero timer reset)
+   * PATCH /attempts/:id/language
+   */
+  @Put(':id/language')
+  @Roles('STUDENT')
+  switchAttemptLanguagePut(
+    @Param('id') attemptId: string,
+    @Body('languageId') languageId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.attemptService.switchAttemptLanguage(attemptId, languageId, user.studentId);
+  }
+
+  @Patch(':id/language')
+  @Roles('STUDENT')
+  switchAttemptLanguagePatch(
+    @Param('id') attemptId: string,
+    @Body('languageId') languageId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.attemptService.switchAttemptLanguage(attemptId, languageId, user.studentId);
+  }
+
+
   @Get(':id/status')
   @Roles('STUDENT')
   getAttemptStatus(@Param('id') attemptId: string, @CurrentUser() user: any) {
+
     return this.attemptService.getAttemptStatus(attemptId, user.studentId);
   }
 
@@ -68,8 +95,8 @@ export class ExamAttemptController {
   }
 
   @Get('my-history')
-  @Roles('STUDENT')
+  @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN', 'PARENT', 'INSTITUTION_ADMIN')
   getMyAttempts(@CurrentUser() user: any) {
-    return this.attemptService.getStudentAttempts(user.studentId);
+    return this.attemptService.getStudentAttempts(user?.studentId, user?.userId);
   }
 }

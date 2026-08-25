@@ -372,11 +372,14 @@ export class ExamService {
   }
 
   /**
-   * Get exams available for students (ACTIVE status, matching their examTarget)
+   * Get exams available for students (ACTIVE status, matching their examTarget).
+   * Enriches each exam with the active schedule window (startTime, endTime, timeRemainingSeconds)
+   * so the frontend can display real-time countdown information.
    */
   async getAvailableExams(examTargetId: string) {
     const activeStatus = await this.prisma.examStatus.findUnique({ where: { name: 'ACTIVE' } });
-    return this.prisma.exam.findMany({
+
+    const exams = await this.prisma.exam.findMany({
       where: {
         examTargetId,
         statusId: activeStatus!.id,
@@ -384,61 +387,121 @@ export class ExamService {
       include: {
         examTarget: { select: { id: true, name: true } },
         status: { select: { id: true, name: true } },
-        _count: { select: { examQuestions: true } },
+        schedules: {
+          where: { status: 'ACTIVE' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+        _count: { select: { examQuestions: true, attempts: true } },
       },
       orderBy: { examDate: 'asc' },
+    });
+
+    const now = new Date();
+    return exams.map((exam) => {
+      const activeSchedule = exam.schedules?.[0] ?? null;
+      return {
+        ...exam,
+        schedules: undefined, // strip raw schedules array from response
+        activeSchedule: activeSchedule
+          ? {
+              id: activeSchedule.id,
+              startTime: activeSchedule.startTime,
+              endTime: activeSchedule.endTime,
+              status: activeSchedule.status,
+              timeRemainingSeconds: Math.max(
+                0,
+                Math.floor((new Date(activeSchedule.endTime).getTime() - now.getTime()) / 1000),
+              ),
+            }
+          : null,
+      };
     });
   }
 
   /**
    * Get exam questions for the exam interface (student-facing, no correct answers)
+   * Supports multilingual presentation with 4-tier fallback (Attempt Language -> Exam Default -> Question Default -> English)
    */
   async getExamQuestionsForAttempt(examId: string, languageId: string) {
-    const questions = await this.prisma.examQuestion.findMany({
-      where: { examId },
-      orderBy: { displayOrder: 'asc' },
-      include: {
-        section: { select: { id: true, name: true, subjectId: true } },
-        question: {
-          include: {
-            questionType: { select: { id: true, name: true, code: true } },
-            translations: {
-              where: { languageId },
-              select: { questionText: true, explanation: false },
-            },
-            options: {
-              orderBy: { displayOrder: 'asc' },
-              select: {
-                id: true,
-                optionLabel: true,
-                displayOrder: true,
-                // isCorrect is NOT included - students must not see answers
-                translations: {
-                  where: { languageId },
-                  select: { optionText: true },
+    const [questions, examLanguages] = await Promise.all([
+      this.prisma.examQuestion.findMany({
+        where: { examId },
+        orderBy: { displayOrder: 'asc' },
+        include: {
+          section: { select: { id: true, name: true, subjectId: true } },
+          question: {
+            include: {
+              questionType: { select: { id: true, name: true, code: true } },
+              translations: true,
+              options: {
+                orderBy: { displayOrder: 'asc' },
+                include: {
+                  translations: true,
                 },
               },
             },
           },
         },
-      },
-    });
+      }),
+      this.prisma.examLanguage.findMany({
+        where: { examId },
+        orderBy: { isDefault: 'desc' },
+      }),
+    ]);
 
-    return questions.map((eq) => ({
-      examQuestionId: eq.id,
-      displayOrder: eq.displayOrder,
-      marks: eq.marks,
-      negativeMarks: eq.negativeMarks,
-      section: eq.section,
-      questionType: eq.question.questionType,
-      questionText: eq.question.translations[0]?.questionText ?? '',
-      options: eq.question.options.map((o) => ({
-        id: o.id,
-        optionLabel: o.optionLabel,
-        optionText: o.translations[0]?.optionText ?? '',
-      })),
-    }));
+    const examDefaultLanguageId = examLanguages.find((el) => el.isDefault)?.languageId;
+
+    return questions.map((eq) => {
+      const q = eq.question;
+
+      // 4-Tier Fallback:
+      // 1. Attempt Language
+      // 2. Exam Default Language
+      // 3. Question Default Language
+      // 4. First Available Translation
+      const matchedTranslation =
+        q.translations.find((t) => t.languageId === languageId) ||
+        (examDefaultLanguageId ? q.translations.find((t) => t.languageId === examDefaultLanguageId) : null) ||
+        q.translations.find((t) => t.languageId === q.defaultLanguageId) ||
+        q.translations[0];
+
+      return {
+        examQuestionId: eq.id,
+        questionId: q.id,
+        displayOrder: eq.displayOrder,
+        marks: eq.marks,
+        negativeMarks: eq.negativeMarks,
+        section: eq.section,
+        type: q.type,
+        questionType: q.questionType,
+        passage: matchedTranslation?.passageText || q.passage || null,
+        assertion: matchedTranslation?.assertionText || q.assertion || null,
+        reason: matchedTranslation?.reasonText || q.reason || null,
+        questionText: matchedTranslation?.questionText ?? '',
+        options: q.options.map((o) => {
+          // Option translation fallback
+          const matchedOptTranslation =
+            o.translations.find((ot) => ot.languageId === languageId) ||
+            (examDefaultLanguageId ? o.translations.find((ot) => ot.languageId === examDefaultLanguageId) : null) ||
+            o.translations.find((ot) => ot.languageId === q.defaultLanguageId) ||
+            o.translations[0];
+
+          return {
+            id: o.id,
+            optionKey: o.optionKey,
+            optionLabel: o.optionLabel,
+            optionText: matchedOptTranslation?.optionText || o.optionText || o.optionLabel || '',
+            matchColumn: o.matchColumn,
+            matchPairKey: o.matchPairKey,
+            displayOrder: o.displayOrder,
+            // isCorrect is EXCLUDED from student-facing API
+          };
+        }),
+      };
+    });
   }
+
 
   /**
    * Internal helper to load full exam

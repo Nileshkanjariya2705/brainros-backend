@@ -105,4 +105,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.memoryDb.delete(key);
     }
   }
+
+  async keys(pattern: string): Promise<string[]> {
+    if (this.useMemoryFallback) {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      const matched: string[] = [];
+      for (const [k, v] of this.memoryDb.entries()) {
+        if (regex.test(k) && Date.now() <= v.expiresAt) {
+          matched.push(k);
+        }
+      }
+      return matched;
+    }
+    try {
+      return (await this.redisClient?.keys(pattern)) || [];
+    } catch {
+      return [];
+    }
+  }
 }
