@@ -377,13 +377,20 @@ export class ExamService {
    * so the frontend can display real-time countdown information.
    */
   async getAvailableExams(examTargetId: string) {
-    const activeStatus = await this.prisma.examStatus.findUnique({ where: { name: 'ACTIVE' } });
+    const availableStatuses = await this.prisma.examStatus.findMany({
+      where: { name: { in: ['ACTIVE', 'SCHEDULED', 'APPROVED', 'COMPLETED'] } },
+    });
+    const statusIds = availableStatuses.map((s) => s.id);
+
+    const where: any = {
+      statusId: { in: statusIds },
+    };
+    if (examTargetId && examTargetId !== 'all' && examTargetId !== 'ALL' && examTargetId !== 'undefined') {
+      where.examTargetId = examTargetId;
+    }
 
     const exams = await this.prisma.exam.findMany({
-      where: {
-        examTargetId,
-        statusId: activeStatus!.id,
-      },
+      where,
       include: {
         examTarget: { select: { id: true, name: true } },
         status: { select: { id: true, name: true } },

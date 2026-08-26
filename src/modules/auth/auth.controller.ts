@@ -1,83 +1,370 @@
-import { Controller, Get, Post, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Delete,
+  Param,
+  UseGuards,
+  Request,
+  Response,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { Response as ExpressResponse } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
-import { SendOtpDto } from './dto/send-otp.dto';
-import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { LoginEmailDto } from './dto/login-email.dto';
+import { LoginStudentIdDto } from './dto/login-student-id.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpLoginDto } from './dto/verify-otp.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
+import {
+  RequestPasswordlessLoginOtpDto,
+  VerifyPasswordlessLoginOtpDto,
+} from './dto/passwordless-login.dto';
+import { ResendOtpDto } from './dto/resend-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { CurrentUser } from './decorators/current-user.decorator';
+import { Throttle } from '@nestjs/throttler';
+import {
+  REFRESH_COOKIE_NAME,
+  getRefreshCookieOptions,
+  getRefreshCookieClearOptions,
+} from './utils/cookie.util';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  // ═══════════════════════════════════════════════════════════════
+  // 1. REGISTRATION ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════
 
   /**
-   * Send SMS OTP to mobile number
-   * POST /auth/otp/send
+   * Submit registration data: creates pending registration state in Redis,
+   * sends OTP to mobile number, and returns requiresOtp.
+   * POST /auth/register
    */
-  @Post('otp/send')
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('register')
   @HttpCode(HttpStatus.OK)
-  async sendOtp(@Body() dto: SendOtpDto) {
-    return this.authService.sendOtp(dto.mobileNumber);
+  async register(@Body() dto: RegisterStudentDto, @Request() req: any) {
+    return this.authService.registerStudent(dto, req);
   }
 
   /**
-   * Verify SMS OTP and login/register
-   * POST /auth/otp/verify
+   * Verify registration OTP: activates User, creates Student profile,
+   * generates Student ID, creates session, and sets HttpOnly refresh cookie.
+   * POST /auth/verify-registration-otp
    */
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @Post('verify-registration-otp')
+  @HttpCode(HttpStatus.CREATED)
+  async verifyRegistrationOtp(
+    @Body() dto: VerifyRegistrationOtpDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.verifyRegistrationOtp(dto, req);
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Alias: POST /auth/register/verify-otp
+   */
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @Post('register/verify-otp')
+  @HttpCode(HttpStatus.CREATED)
+  async verifyRegistrationOtpAlias(
+    @Body() dto: VerifyRegistrationOtpDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    return this.verifyRegistrationOtp(dto, req, res);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2. UNIFIED PASSWORDLESS LOGIN ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Request passwordless login OTP: Accepts Email, Student ID, or Mobile number.
+   * Sends OTP to the verified mobile number associated with the account.
+   * POST /auth/login/request-otp
+   */
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('login/request-otp')
+  @HttpCode(HttpStatus.OK)
+  async requestPasswordlessLoginOtp(
+    @Body() dto: RequestPasswordlessLoginOtpDto,
+    @Request() req: any,
+  ) {
+    return this.authService.requestPasswordlessLoginOtp(dto, req);
+  }
+
+  /**
+   * Verify passwordless login OTP: Validates OTP, creates LoginSession,
+   * sets HttpOnly refresh cookie, and returns access token + user details.
+   * POST /auth/login/verify-otp
+   */
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @Post('login/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyPasswordlessLoginOtp(
+    @Body() dto: VerifyPasswordlessLoginOtpDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.verifyPasswordlessLoginOtp(dto, req);
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 3. OTP RESEND ENDPOINT
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Resend OTP (with cooldown and attempt protection)
+   * POST /auth/otp/resend
+   */
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('otp/resend')
+  @HttpCode(HttpStatus.OK)
+  async resendOtp(@Body() dto: ResendOtpDto, @Request() req: any) {
+    return this.authService.resendOtp(dto, req);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 4. GENERAL / BACKWARD-COMPATIBLE OTP ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════
+
+  @Post('otp/request')
+  @HttpCode(HttpStatus.OK)
+  async requestOtp(@Body() dto: RequestOtpDto, @Request() req: any) {
+    return this.authService.sendOtp(dto.phone, dto.purpose as any, req);
+  }
+
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.mobileNumber, dto.otp);
+  async verifyOtpAndLogin(
+    @Body() dto: VerifyOtpLoginDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.verifyOtpAndLogin(
+      dto.mobileNumber,
+      dto.otp,
+      dto.purpose,
+      req,
+    );
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
   }
 
-  /**
-   * Register a new student (direct registration)
-   * POST /auth/register/student
-   */
-  @Post('register/student')
-  @HttpCode(HttpStatus.CREATED)
-  async registerStudent(@Body() dto: RegisterStudentDto) {
-    return this.authService.registerStudent(dto);
+  // ═══════════════════════════════════════════════════════════════
+  // 5. LEGACY PASSWORD & OAUTH ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════
+
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('login/email')
+  @HttpCode(HttpStatus.OK)
+  async loginWithEmail(
+    @Body() dto: LoginEmailDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.loginWithEmail(dto.email, dto.password, req);
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('login/student-id')
+  @HttpCode(HttpStatus.OK)
+  async loginWithStudentId(
+    @Body() dto: LoginStudentIdDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.loginWithStudentId(
+      dto.studentId,
+      dto.password,
+      req,
+    );
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
+  }
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async loginWithGoogle(
+    @Body() dto: GoogleLoginDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.loginWithGoogle(dto.idToken, req);
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+    return result;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 6. TOKEN REFRESH & SESSION MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════
+
   /**
-   * Refresh JWT Session
+   * Rotate and refresh Access + Refresh Token pair using HttpOnly cookie or header.
    * POST /auth/refresh
    */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshSession(dto.refreshToken);
+  async refreshSession(
+    @Headers('x-refresh-token') headerToken: string,
+    @Body('refreshToken') bodyToken: string,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const cookieToken =
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken;
+    const refreshToken = cookieToken || headerToken || bodyToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is missing.');
+    }
+
+    const result = await this.authService.refreshSession(refreshToken, req);
+
+    if (result.data?.refreshToken) {
+      res.cookie(
+        REFRESH_COOKIE_NAME,
+        result.data.refreshToken,
+        getRefreshCookieOptions(this.configService),
+      );
+    }
+
+    return result;
   }
 
   /**
-   * Logout session (Revoke Refresh Token)
+   * Revoke current session and clear HttpOnly cookie.
    * POST /auth/logout
    */
+  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Body() dto: RefreshTokenDto) {
-    return this.authService.logout(dto.refreshToken);
+  async logout(
+    @Headers('x-refresh-token') headerToken: string,
+    @Body('refreshToken') bodyToken: string,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const cookieToken =
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken;
+    const refreshToken = cookieToken || headerToken || bodyToken;
+
+    if (refreshToken) {
+      await this.authService.logout(refreshToken, req).catch(() => {});
+    }
+
+    res.clearCookie(
+      REFRESH_COOKIE_NAME,
+      getRefreshCookieClearOptions(this.configService),
+    );
+
+    return { message: 'Logged out successfully.' };
   }
 
   /**
-   * Get Current Authenticated User profile details
-   * GET /auth/me
+   * Revoke all user sessions and clear HttpOnly cookie.
+   * POST /auth/logout-all
    */
-  @Get('me')
   @UseGuards(JwtAuthGuard)
-  async getMe(@CurrentUser() user: { userId: string }) {
-    return this.authService.getMe(user.userId);
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.logoutAll(req.user.userId, req);
+    res.clearCookie(
+      REFRESH_COOKIE_NAME,
+      getRefreshCookieClearOptions(this.configService),
+    );
+    return result;
   }
 
-  /**
-   * Get registration options list (Classes, Languages, Exam Targets)
-   * GET /auth/options
-   */
+  @UseGuards(JwtAuthGuard)
+  @Get('sessions')
+  async getSessions(@Request() req: any) {
+    return this.authService.getSessions(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('sessions/:id')
+  async revokeSession(@Param('id') sessionId: string, @Request() req: any) {
+    return this.authService.revokeSession(req.user.userId, sessionId, req);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async getMe(@Request() req: any) {
+    const userProfile = await this.authService.getMe(req.user.userId);
+    return {
+      message: 'Profile retrieved successfully',
+      data: userProfile,
+    };
+  }
+
   @Get('options')
-  @HttpCode(HttpStatus.OK)
   async getRegisterOptions() {
-    return this.authService.getRegisterOptions();
+    const options = await this.authService.getRegisterOptions();
+    return {
+      message: 'Registration options retrieved successfully',
+      data: options,
+    };
   }
 }

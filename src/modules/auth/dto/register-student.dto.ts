@@ -1,10 +1,10 @@
-import { IsNotEmpty, IsString, Matches, IsEmail, IsOptional, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString, Matches, IsOptional, IsEmail, IsUUID } from 'class-validator';
 
 export class RegisterStudentDto {
   @IsNotEmpty()
   @IsString()
   @Matches(/^\+?[1-9]\d{1,14}$/, {
-    message: 'Phone number must be a valid E.164 phone number format',
+    message: 'Phone number must be a valid E.164 phone number format (e.g. +919876543210 or 9876543210)',
   })
   phone: string;
 
@@ -13,30 +13,42 @@ export class RegisterStudentDto {
   name: string;
 
   @IsOptional()
-  @IsEmail({}, { message: 'Invalid email format' })
+  @IsEmail()
   email?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  state: string;
+  password?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  district: string;
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
+  @IsUUID()
+  stateId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  districtId?: string;
 
   @IsNotEmpty()
   @IsString()
   schoolCollege: string;
 
   @IsNotEmpty()
-  @IsUUID('4', { message: 'classId must be a valid UUID' })
+  @IsUUID()
   classId: string;
 
   @IsNotEmpty()
-  @IsUUID('4', { message: 'preferredLanguageId must be a valid UUID' })
+  @IsUUID()
   preferredLanguageId: string;
 
   @IsNotEmpty()
-  @IsUUID('4', { message: 'examTargetId must be a valid UUID' })
+  @IsUUID()
   examTargetId: string;
 }

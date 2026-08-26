@@ -4,10 +4,14 @@ import { AuthController } from './auth.controller';
 import { OtpService } from './services/otp.service';
 import { TokenService } from './services/token.service';
 import { PasswordService } from './services/password.service';
+import { SessionService } from './services/session.service';
+import { OAuthService } from './services/oauth.service';
+import { SecurityEventService } from './services/security-event.service';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TwoFactorProvider } from './otp/two-factor.provider';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
@@ -16,6 +20,7 @@ import { TwoFactorProvider } from './otp/two-factor.provider';
       secret: process.env.JWT_SECRET || 'super-secret-jwt-key-replace-in-production',
       signOptions: { expiresIn: '15m' },
     }),
+    RedisModule,
   ],
   controllers: [AuthController],
   providers: [
@@ -23,9 +28,20 @@ import { TwoFactorProvider } from './otp/two-factor.provider';
     OtpService,
     TokenService,
     PasswordService,
+    SessionService,
+    OAuthService,
+    SecurityEventService,
     JwtStrategy,
     TwoFactorProvider,
   ],
-  exports: [AuthService, PassportModule, JwtModule],
+  exports: [
+    AuthService,
+    PassportModule,
+    JwtModule,
+    SecurityEventService,
+    SessionService,
+    TokenService,
+    OtpService,
+  ],
 })
 export class AuthModule {}

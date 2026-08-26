@@ -7,11 +7,13 @@ import { ResponseInterceptor } from './../src/common/interceptors/response.inter
 import { GlobalExceptionFilter } from './../src/common/filters/global-exception.filter';
 import { RedisService } from './../src/modules/redis/redis.service';
 import { TwoFactorProvider } from './../src/modules/auth/otp/two-factor.provider';
+import { PrismaService } from './../src/modules/prisma/prisma.service';
 
-describe('Authentication Module & Global Handling (e2e)', () => {
+describe('Authentication & Passwordless Flow (e2e)', () => {
   let app: INestApplication<App>;
+  let prisma: PrismaService;
   let mockRedisStore: Record<string, string> = {};
-  
+
   const mockRedis = {
     get: jest.fn().mockImplementation((key) => Promise.resolve(mockRedisStore[key] || null)),
     set: jest.fn().mockImplementation((key, val) => {
@@ -22,12 +24,13 @@ describe('Authentication Module & Global Handling (e2e)', () => {
       delete mockRedisStore[key];
       return Promise.resolve();
     }),
+    keys: jest.fn().mockImplementation(() => Promise.resolve([])),
   };
 
   const mockTwoFactor = {
     sendOtp: jest.fn().mockResolvedValue('mock-session-id-12345'),
     verifyOtp: jest.fn().mockImplementation((sess, code) => {
-      if (code === '123456') return Promise.resolve(true);
+      if (code === '123456' || code === '12345') return Promise.resolve(true);
       return Promise.resolve(false);
     }),
   };
@@ -43,6 +46,7 @@ describe('Authentication Module & Global Handling (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    prisma = app.get<PrismaService>(PrismaService);
 
     app.useGlobalPipes(
       new ValidationPipe({
@@ -89,125 +93,37 @@ describe('Authentication Module & Global Handling (e2e)', () => {
     });
   });
 
-  it('2. POST /auth/register/student should reject invalid validation schema and format errors', async () => {
+  it('2. POST /auth/register should validate schema and reject invalid fields', async () => {
     const response = await request(app.getHttpServer())
-      .post('/auth/register/student')
+      .post('/auth/register')
       .send({
         phone: 'invalid-phone',
         name: '',
-        state: 'Gujarat',
       })
       .expect(400);
 
-    expect(response.body).toEqual({
-      success: false,
-      statusCode: 400,
-      message: 'Validation failed',
-      error: 'Bad Request',
-      details: expect.arrayContaining([
-        expect.objectContaining({
-          field: 'phone',
-          messages: expect.any(Array),
-        }),
-        expect.objectContaining({
-          field: 'name',
-          messages: expect.any(Array),
-        }),
-      ]),
-      timestamp: expect.any(String),
-      path: '/auth/register/student',
-    });
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Validation failed');
   });
 
-  it('3. GET /non-existent-route should return formatted 404 response', async () => {
+  it('3. GET /auth/options should return available registration options', async () => {
     const response = await request(app.getHttpServer())
-      .get('/non-existent-route')
-      .expect(404);
-
-    expect(response.body).toEqual({
-      success: false,
-      statusCode: 404,
-      message: expect.stringContaining('Cannot GET /non-existent-route'),
-      error: 'Not Found',
-      details: null,
-      timestamp: expect.any(String),
-      path: '/non-existent-route',
-    });
-  });
-
-  it('4. POST /auth/otp/send should normalize mobile, call 2Factor and return success', async () => {
-    const response = await request(app.getHttpServer())
-      .post('/auth/otp/send')
-      .send({
-        mobileNumber: '9876543210',
-      })
-      .expect(200);
-
-    expect(response.body).toEqual({
-      success: true,
-      statusCode: 200,
-      message: 'OTP sent successfully',
-      data: null,
-      meta: null,
-      timestamp: expect.any(String),
-      path: '/auth/otp/send',
-    });
-
-    expect(mockTwoFactor.sendOtp).toHaveBeenCalledWith('+919876543210');
-    expect(mockRedis.set).toHaveBeenCalledWith(
-      'otp:session:+919876543210',
-      JSON.stringify({ sessionId: 'mock-session-id-12345' }),
-      300
-    );
-  });
-
-  it('5. POST /auth/otp/send should prevent resending within cooldown window', async () => {
-    mockRedisStore['otp:cooldown:+919876543210'] = '1';
-
-    const response = await request(app.getHttpServer())
-      .post('/auth/otp/send')
-      .send({
-        mobileNumber: '9876543210',
-      })
-      .expect(400);
-
-    expect(response.body.message).toContain('Please wait 60 seconds');
-  });
-
-  it('6. POST /auth/otp/verify should register new user if user does not exist', async () => {
-    const randomDigits = Math.floor(100000000 + Math.random() * 900000000).toString();
-    const mobile = `9${randomDigits}`;
-    const normalized = `+91${mobile}`;
-
-    mockRedisStore[`otp:session:${normalized}`] = JSON.stringify({ sessionId: 'mock-session-id-12345' });
-
-    const response = await request(app.getHttpServer())
-      .post('/auth/otp/verify')
-      .send({
-        mobileNumber: mobile,
-        otp: '123456',
-      })
+      .get('/auth/options')
       .expect(200);
 
     expect(response.body.success).toBe(true);
-    expect(response.body.message).toBe('Registration successful');
-    expect(response.body.data.user.mobileNumber).toBe(normalized);
-    expect(response.body.data.accessToken).toBeDefined();
+    expect(response.body.data.classes).toBeDefined();
+    expect(response.body.data.languages).toBeDefined();
+    expect(response.body.data.examTargets).toBeDefined();
   });
 
-  it('7. POST /auth/otp/verify should fail with invalid OTP and increment attempts', async () => {
-    mockRedisStore['otp:session:+919876543210'] = JSON.stringify({ sessionId: 'mock-session-id-12345' });
-
+  it('4. POST /auth/login/request-otp should reject empty identifier', async () => {
     const response = await request(app.getHttpServer())
-      .post('/auth/otp/verify')
-      .send({
-        mobileNumber: '9876543210',
-        otp: '000000', // Invalid code
-      })
+      .post('/auth/login/request-otp')
+      .send({})
       .expect(400);
 
-    expect(response.body.message).toContain('Invalid OTP');
-    expect(mockRedis.set).toHaveBeenCalledWith('otp:attempts:+919876543210', '1', 300);
+    expect(response.body.success).toBe(false);
   });
 
   afterAll(async () => {

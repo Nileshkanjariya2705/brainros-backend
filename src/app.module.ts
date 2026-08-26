@@ -1,59 +1,61 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { PrismaModule } from './modules/prisma/prisma.module';
+import { RedisModule } from './modules/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { StudentModule } from './modules/student/student.module';
+import { NotificationModule } from './modules/notification/notification.module';
+import { InstitutionModule } from './modules/institution/institution.module';
 import { AdminModule } from './modules/admin/admin.module';
-import { PrismaModule } from './modules/prisma/prisma.module';
-import { ConfigModule } from '@nestjs/config';
-import { RedisModule } from './modules/redis/redis.module';
 import { AcademicModule } from './modules/academic/academic.module';
 import { QuestionBankModule } from './modules/question-bank/question-bank.module';
 import { ExamModule } from './modules/exam/exam.module';
-import { ExamAttemptModule } from './modules/exam-attempt/exam-attempt.module';
-import { ResultModule } from './modules/result/result.module';
-import { RegionalLanguageModule } from './modules/regional-language/regional-language.module';
 import { ExamGeneratorModule } from './modules/exam-generator/exam-generator.module';
 import { ExamSchedulingModule } from './modules/exam-scheduling/exam-scheduling.module';
+import { ExamAttemptModule } from './modules/exam-attempt/exam-attempt.module';
 import { TimeAnalysisModule } from './modules/time-analysis/time-analysis.module';
 import { AttemptStrategyModule } from './modules/attempt-strategy/attempt-strategy.module';
+import { ResultModule } from './modules/result/result.module';
 import { RankEngineModule } from './modules/rank-engine/rank-engine.module';
 import { PredictedRankModule } from './modules/predicted-rank/predicted-rank.module';
 import { PerformanceTrendModule } from './modules/performance-trend/performance-trend.module';
 import { ParentDashboardModule } from './modules/parent-dashboard/parent-dashboard.module';
-import { InstitutionModule } from './modules/institution/institution.module';
-import { NotificationModule } from './modules/notification/notification.module';
+import { RegionalLanguageModule } from './modules/regional-language/regional-language.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: parseInt(process.env.THROTTLE_TTL || '60', 10) * 1000,
+        limit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
+      },
+    ]),
     PrismaModule,
     RedisModule,
     AuthModule,
     StudentModule,
+    NotificationModule,
+    InstitutionModule,
     AdminModule,
     AcademicModule,
     QuestionBankModule,
-    RegionalLanguageModule,
+    ExamModule,
     ExamGeneratorModule,
     ExamSchedulingModule,
-    ExamModule,
     ExamAttemptModule,
-    ResultModule,
     TimeAnalysisModule,
     AttemptStrategyModule,
+    ResultModule,
     RankEngineModule,
     PredictedRankModule,
     PerformanceTrendModule,
     ParentDashboardModule,
-    InstitutionModule,
-    NotificationModule,
+    RegionalLanguageModule,
   ],
-
-
-
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}
-

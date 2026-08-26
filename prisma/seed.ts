@@ -1,180 +1,133 @@
 import { PrismaClient } from '@prisma/client';
+import { SeedContext, SeederResult } from './seeders/types';
+import { seedMasterData } from './seeders/01-master-data.seeder';
+import { seedUsersAndRoles } from './seeders/02-users-and-roles.seeder';
+import { seedInstitutions } from './seeders/03-institutions.seeder';
+import { seedAcademicQuestions } from './seeders/04-academic-questions.seeder';
+import { seedExamsAndBlueprints } from './seeders/05-exams-and-blueprints.seeder';
+import { seedSchedulesAndAttempts } from './seeders/06-schedules-and-attempts.seeder';
+import { seedResultsAndAnalytics } from './seeders/07-results-and-analytics.seeder';
+import { seedNotificationsAndAudit } from './seeders/08-notifications-and-audit.seeder';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding database...\n');
+  console.log('════════════════════════════════════════════════════════════════');
+  console.log('🚀 BRAINROS EXAM MANAGEMENT SYSTEM — DETERMINISTIC SEED PIPELINE');
+  console.log('════════════════════════════════════════════════════════════════\n');
 
-  // ─── Roles ────────────────────────────────────────────────────
-  console.log('Seeding roles...');
-  const roles = [
-    'SUPER_ADMIN',
-    'ADMIN',
-    'STUDENT',
-    'PARENT',
-    'INSTITUTION',
-    'SALES_AGENT',
-    'ACCOUNTANT',
-  ];
-
-  for (const roleName of roles) {
-    await prisma.role.upsert({
-      where: { name: roleName },
-      update: {},
-      create: { name: roleName },
-    });
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ SAFETY ABORT: Seeding is disabled in production environment.');
+    process.exit(1);
   }
 
-  // ─── Exam Targets ────────────────────────────────────────────
-  console.log('Seeding exam targets...');
-  const examTargets = [
-    { name: 'NEET', description: 'National Eligibility cum Entrance Test' },
-    { name: 'JEE', description: 'Joint Entrance Examination' },
-    { name: 'CET', description: 'Common Entrance Test' },
+  const ctx: SeedContext = {
+    prisma,
+    roles: new Map(),
+    permissions: new Map(),
+    classes: new Map(),
+    languages: new Map(),
+    examTargets: new Map(),
+    difficulties: new Map(),
+    questionTypes: new Map(),
+    examStatuses: new Map(),
+    attemptStatuses: new Map(),
+    states: new Map(),
+    districts: new Map(),
+    users: new Map(),
+    students: new Map(),
+    institutions: new Map(),
+    batches: new Map(),
+    subjects: new Map(),
+    chapters: new Map(),
+    topics: new Map(),
+    subTopics: new Map(),
+    questions: new Map(),
+    questionOptions: new Map(),
+    exams: new Map(),
+    examSections: new Map(),
+    examQuestions: new Map(),
+    examVersions: new Map(),
+    examSchedules: new Map(),
+    attempts: new Map(),
+    results: new Map(),
+  };
+
+  const seeders = [
+    { step: 1, name: 'Master Data & Reference Enums', fn: seedMasterData },
+    { step: 2, name: 'Users, Roles & Student Profiles', fn: seedUsersAndRoles },
+    { step: 3, name: 'Institutions, Batches & Memberships', fn: seedInstitutions },
+    { step: 4, name: 'Academic Hierarchy & Question Bank', fn: seedAcademicQuestions },
+    { step: 5, name: 'Exams, Blueprints & Version Snapshots', fn: seedExamsAndBlueprints },
+    { step: 6, name: 'Schedules, Lifecycle & Student Attempts', fn: seedSchedulesAndAttempts },
+    { step: 7, name: 'Results, Analytics, Rankings & Predictions', fn: seedResultsAndAnalytics },
+    { step: 8, name: 'Notifications, Reports, Audits & Feature Gates', fn: seedNotificationsAndAudit },
   ];
 
-  for (const exam of examTargets) {
-    await prisma.examTarget.upsert({
-      where: { name: exam.name },
-      update: { description: exam.description },
-      create: exam,
-    });
+  const results: SeederResult[] = [];
+  const totalStart = Date.now();
+
+  for (const s of seeders) {
+    console.log(`[${s.step}/${seeders.length}] Running ${s.name}...`);
+    try {
+      const res = await s.fn(ctx);
+      results.push(res);
+      console.log(`  ✓ Completed in ${res.timeMs}ms`);
+    } catch (err) {
+      console.error(`\n❌ Error in ${s.name}:`, err);
+      throw err;
+    }
   }
 
-  // ─── Student Classes ─────────────────────────────────────────
-  console.log('Seeding student classes...');
-  const classes = [
-    { name: 'CLASS_11', description: '11th Standard / 1st PUC' },
-    { name: 'CLASS_12', description: '12th Standard / 2nd PUC' },
-    { name: 'DROPPER', description: 'Repeater / Dropper' },
-  ];
+  const totalTime = Date.now() - totalStart;
 
-  for (const cls of classes) {
-    await prisma.studentClass.upsert({
-      where: { name: cls.name },
-      update: { description: cls.description },
-      create: cls,
-    });
+  // Aggregate stats
+  const totalCreated: Record<string, number> = {};
+  const totalReused: Record<string, number> = {};
+
+  for (const r of results) {
+    for (const [k, v] of Object.entries(r.createdCounts)) {
+      totalCreated[k] = (totalCreated[k] || 0) + v;
+    }
+    for (const [k, v] of Object.entries(r.reusedCounts)) {
+      totalReused[k] = (totalReused[k] || 0) + v;
+    }
   }
 
-  // ─── Preferred Languages ─────────────────────────────────────
-  console.log('Seeding preferred languages...');
-  const languages = [
-    { name: 'ENGLISH' },
-    { name: 'KANNADA' },
-    { name: 'HINDI' },
-    { name: 'TAMIL' },
-    { name: 'TELUGU' },
-    { name: 'MARATHI' },
-    { name: 'MALAYALAM' },
-    { name: 'BENGALI' },
-    { name: 'GUJARATI' },
-  ];
+  console.log('\n════════════════════════════════════════════════════════════════');
+  console.log('📊 DUMMY DATA SEEDING SUMMARY');
+  console.log('════════════════════════════════════════════════════════════════');
 
-  for (const lang of languages) {
-    await prisma.preferredLanguage.upsert({
-      where: { name: lang.name },
-      update: {},
-      create: lang,
-    });
+  const allKeys = Array.from(
+    new Set([...Object.keys(totalCreated), ...Object.keys(totalReused)]),
+  ).sort();
+
+  console.log(
+    'ENTITY'.padEnd(32) +
+      'CREATED'.padStart(10) +
+      'REUSED'.padStart(10) +
+      'TOTAL'.padStart(10),
+  );
+  console.log('─'.repeat(62));
+
+  for (const key of allKeys) {
+    const c = totalCreated[key] || 0;
+    const r = totalReused[key] || 0;
+    console.log(
+      key.padEnd(32) +
+        String(c).padStart(10) +
+        String(r).padStart(10) +
+        String(c + r).padStart(10),
+    );
   }
 
-  // ─── OTP Purposes ────────────────────────────────────────────
-  console.log('Seeding OTP purposes...');
-  const purposes = [
-    { name: 'LOGIN', description: 'OTP authentication for logging in' },
-    { name: 'REGISTRATION', description: 'OTP verification during new student signup' },
-    { name: 'CHANGE_PHONE', description: 'OTP verification for updating mobile number' },
-  ];
-
-  for (const purp of purposes) {
-    await prisma.otpPurpose.upsert({
-      where: { name: purp.name },
-      update: { description: purp.description },
-      create: purp,
-    });
-  }
-
-  // ─── Difficulty Levels ───────────────────────────────────────
-  console.log('Seeding difficulty levels...');
-  const difficultyLevels = [
-    { name: 'EASY', displayOrder: 1 },
-    { name: 'MEDIUM', displayOrder: 2 },
-    { name: 'HARD', displayOrder: 3 },
-    { name: 'VERY_HARD', displayOrder: 4 },
-  ];
-
-  for (const dl of difficultyLevels) {
-    await prisma.difficultyLevel.upsert({
-      where: { name: dl.name },
-      update: { displayOrder: dl.displayOrder },
-      create: dl,
-    });
-  }
-
-  // ─── Question Types ──────────────────────────────────────────
-  console.log('Seeding question types...');
-  const questionTypes = [
-    { name: 'Single Correct MCQ', code: 'SCQ' },
-    { name: 'Multiple Correct MCQ', code: 'MCQ' },
-    { name: 'Numerical', code: 'NUM' },
-    { name: 'True/False', code: 'TF' },
-    { name: 'Assertion & Reasoning', code: 'AR' },
-  ];
-
-  for (const qt of questionTypes) {
-    await prisma.questionType.upsert({
-      where: { code: qt.code },
-      update: { name: qt.name },
-      create: qt,
-    });
-  }
-
-  // ─── Exam Statuses ───────────────────────────────────────────
-  console.log('Seeding exam statuses...');
-  const examStatuses = [
-    'DRAFT',
-    'PENDING_APPROVAL',
-    'APPROVED',
-    'ACTIVE',
-    'COMPLETED',
-    'CANCELLED',
-  ];
-
-  for (const statusName of examStatuses) {
-    await prisma.examStatus.upsert({
-      where: { name: statusName },
-      update: {},
-      create: { name: statusName },
-    });
-  }
-
-  // ─── Attempt Statuses ────────────────────────────────────────
-  console.log('Seeding attempt statuses...');
-  const attemptStatuses = [
-    'NOT_STARTED',
-    'IN_PROGRESS',
-    'SUBMITTED',
-    'AUTO_SUBMITTED',
-    'EXPIRED',
-    'INTERRUPTED',
-    'RECOVERED',
-  ];
-
-  for (const statusName of attemptStatuses) {
-    await prisma.attemptStatus.upsert({
-      where: { name: statusName },
-      update: {},
-      create: { name: statusName },
-    });
-  }
-
-  console.log('\n🌱 Seeding complete! ✅');
+  console.log('─'.repeat(62));
+  console.log(`✨ All seeders executed successfully in ${(totalTime / 1000).toFixed(2)}s ✅\n`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Fatal seed failure:', e);
     process.exit(1);
   })
   .finally(async () => {

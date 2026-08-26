@@ -7,6 +7,62 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// AUTH & IDENTITY ENUMS
+// ═══════════════════════════════════════════════════════════════════
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  DISABLED
+  DELETED
+}
+
+enum StudentStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+  ARCHIVED
+}
+
+enum OtpPurposeEnum {
+  LOGIN
+  REGISTER
+  CHANGE_MOBILE
+  RESET_PASSWORD
+  VERIFY_MOBILE
+  VERIFY_EMAIL
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  OTP_REQUESTED
+  OTP_VERIFIED
+  OTP_FAILED
+  PASSWORD_CHANGED
+  REFRESH_REUSE_DETECTED
+  SESSION_REVOKED
+  LOGOUT
+  LOGOUT_ALL
+  ACCOUNT_LOCKED
+  ROLE_CHANGED
+  PERMISSION_CHANGED
+  GOOGLE_LINKED
+  MOBILE_CHANGED
+  EMAIL_CHANGED
+  REGISTER_SUCCESS
+  TOKEN_REFRESHED
+}
+
 enum QuestionStatus {
   DRAFT
   SUBMITTED
@@ -68,14 +124,22 @@ model User {
   mobileNumber       String?                 @unique @map("mobile_number")
   email              String?                 @unique
   passwordHash       String?                 @map("password_hash")
+  status             UserStatus              @default(PENDING)
   isActive           Boolean                 @default(true) @map("is_active")
   isVerified         Boolean                 @default(false) @map("is_verified")
+  emailVerifiedAt    DateTime?               @map("email_verified_at")
+  mobileVerifiedAt   DateTime?               @map("mobile_verified_at")
+  lastLoginAt        DateTime?               @map("last_login_at")
+  authVersion        Int                     @default(1) @map("auth_version")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @updatedAt @map("updated_at")
   userRoles          UserRole[]
   student            Student?
   otpVerifications   OtpVerification[]
   refreshTokens      RefreshToken[]
+  loginSessions      LoginSession[]
+  externalIdentities ExternalIdentity[]
+  securityEvents     SecurityEvent[]
   createdQuestions   Question[]              @relation("QuestionCreatedBy")
   submittedQuestions Question[]              @relation("QuestionSubmittedBy")
   reviewedQuestions  Question[]              @relation("QuestionReviewedBy")
@@ -94,17 +158,23 @@ model User {
   institutionAdmins  InstitutionAdmin[]
   notificationPreferences NotificationPreference[]
 
+  @@index([status])
+  @@index([email])
+  @@index([mobileNumber])
   @@map("users")
 }
 
 
 
 model Role {
-  id        String     @id @default(uuid()) @db.Uuid
-  name      String     @unique
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
-  userRoles UserRole[]
+  id              String           @id @default(uuid()) @db.Uuid
+  name            String           @unique
+  description     String?
+  isActive        Boolean          @default(true) @map("is_active")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
 
   @@map("roles")
 }
@@ -169,24 +239,33 @@ model Student {
   id                  String            @id @default(uuid()) @db.Uuid
   userId              String            @unique @map("user_id") @db.Uuid
   studentId           String            @unique @map("student_id")
+  studentCode         String?           @unique @map("student_code")
   name                String
   state               String
   district            String
+  stateId             String?           @map("state_id") @db.Uuid
+  districtId          String?           @map("district_id") @db.Uuid
   schoolCollege       String            @map("school_college")
   classId             String            @map("class_id") @db.Uuid
   examTargetId        String            @map("exam_target_id") @db.Uuid
   preferredLanguageId String            @map("preferred_language_id") @db.Uuid
+  status              StudentStatus     @default(ACTIVE)
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
   user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   examTarget          ExamTarget        @relation(fields: [examTargetId], references: [id])
   studentClass        StudentClass      @relation(fields: [classId], references: [id])
   preferredLanguage   PreferredLanguage @relation(fields: [preferredLanguageId], references: [id])
+  stateRef            State?            @relation(fields: [stateId], references: [id])
+  districtRef         District?         @relation(fields: [districtId], references: [id])
   attempts            Attempt[]
   candidateRanks      CandidateRank[]
   parentLinks         ParentStudentLink[]
   batchMemberships    BatchStudent[]
 
+  @@index([status])
+  @@index([stateId])
+  @@index([districtId])
   @@map("students")
 }
 
@@ -220,16 +299,140 @@ model OtpVerification {
 }
 
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  tokenHash  String    @unique @map("token_hash")
-  expiresAt  DateTime  @map("expires_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  sessionId         String?   @map("session_id") @db.Uuid
+  tokenHash         String    @unique @map("token_hash")
+  expiresAt         DateTime  @map("expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  replacedByTokenId String?   @unique @map("replaced_by_token_id") @db.Uuid
+  lastUsedAt        DateTime? @map("last_used_at")
+  metadata          Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session           LoginSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  replacedByToken   RefreshToken? @relation("TokenRotation", fields: [replacedByTokenId], references: [id])
+  previousToken     RefreshToken? @relation("TokenRotation")
 
   @@index([userId])
+  @@index([sessionId])
   @@map("refresh_tokens")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RBAC PERMISSION MODEL
+// ═══════════════════════════════════════════════════════════════════
+
+model Permission {
+  id              String           @id @default(uuid()) @db.Uuid
+  code            String           @unique
+  description     String?
+  isActive        Boolean          @default(true) @map("is_active")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LOGIN SESSION & SECURITY
+// ═══════════════════════════════════════════════════════════════════
+
+model LoginSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  deviceId        String?   @map("device_id")
+  userAgent       String?   @map("user_agent")
+  ipAddress       String?   @map("ip_address")
+  lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
+  expiresAt       DateTime  @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens   RefreshToken[]
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("login_sessions")
+}
+
+model ExternalIdentity {
+  id              String       @id @default(uuid()) @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  provider        AuthProvider
+  providerSubject String       @map("provider_subject")
+  email           String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("external_identities")
+}
+
+model SecurityEvent {
+  id          String            @id @default(uuid()) @db.Uuid
+  userId      String?           @map("user_id") @db.Uuid
+  eventType   SecurityEventType @map("event_type")
+  ipAddress   String?           @map("ip_address")
+  userAgent   String?           @map("user_agent")
+  metadata    Json?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  user        User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("security_events")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// GEOGRAPHIC MASTER DATA
+// ═══════════════════════════════════════════════════════════════════
+
+model State {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @unique
+  code        String     @unique
+  countryCode String     @default("IN") @map("country_code")
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  districts   District[]
+  students    Student[]
+
+  @@map("states")
+}
+
+model District {
+  id        String    @id @default(uuid()) @db.Uuid
+  stateId   String    @map("state_id") @db.Uuid
+  name      String
+  code      String?
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  state     State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([stateId, name])
+  @@index([stateId])
+  @@map("districts")
 }
 
 // ═══════════════════════════════════════════════════════════════════

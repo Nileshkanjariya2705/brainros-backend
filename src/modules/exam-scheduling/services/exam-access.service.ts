@@ -10,8 +10,8 @@ import { ExamLifecycleService } from './exam-lifecycle.service';
 export interface ExamAccessValidationResult {
   isAllowed: boolean;
   examId: string;
-  examVersionId: string;
-  scheduleId: string;
+  examVersionId?: string;
+  scheduleId?: string;
   serverTime: Date;
   startTime: Date;
   endTime: Date;
@@ -53,7 +53,7 @@ export class ExamAccessService {
       throw new NotFoundException(`Exam with ID '${examId}' not found`);
     }
 
-    const currentStatus = exam.status.name;
+    const currentStatus = exam.status?.name;
 
     // 1. Status Lifecycle Checks
     if (currentStatus === 'CANCELLED') {
@@ -85,14 +85,14 @@ export class ExamAccessService {
       });
     }
 
-    if (currentStatus === 'ENDED' || currentStatus === 'EVALUATING' || currentStatus === 'COMPLETED') {
+    if (currentStatus === 'ENDED' || currentStatus === 'EVALUATING') {
       throw new ForbiddenException({
         code: 'EXAM_ENDED',
         message: 'The examination window for this test has ended.',
       });
     }
 
-    if (currentStatus !== 'ACTIVE') {
+    if (currentStatus !== 'ACTIVE' && currentStatus !== 'COMPLETED') {
       throw new ForbiddenException({
         code: 'EXAM_ACCESS_DENIED',
         message: `Exam status is '${currentStatus}'. Student access is denied.`,
@@ -100,73 +100,85 @@ export class ExamAccessService {
     }
 
     // 2. Active Schedule Check
-    const activeSchedule = exam.schedules[0];
-    if (!activeSchedule || activeSchedule.status !== 'ACTIVE') {
-      throw new ForbiddenException({
-        code: 'EXAM_NOT_ACTIVE',
-        message: 'No active schedule found for this exam.',
-      });
-    }
+    const activeSchedule = exam.schedules?.[0];
 
-    const startTime = new Date(activeSchedule.startTime);
-    const endTime = new Date(activeSchedule.endTime);
-
-    // 3. Exact Server-Time Boundary Evaluation (Microsecond/Millisecond precision)
-    // Rule: serverNow must be >= startTime
-    if (serverNow.getTime() < startTime.getTime()) {
-      const waitSeconds = Math.ceil((startTime.getTime() - serverNow.getTime()) / 1000);
-      throw new ForbiddenException({
-        code: 'EXAM_NOT_YET_STARTED',
-        message: `This exam is scheduled to start at ${startTime.toISOString()}. Please wait ${waitSeconds} seconds.`,
-        serverTime: serverNow.toISOString(),
-        startTime: startTime.toISOString(),
-        waitSeconds,
-      });
-    }
-
-    // Rule: serverNow must be < endTime
-    if (serverNow.getTime() >= endTime.getTime()) {
-      // Lazy auto-transition to ENDED
-      this.lifecycleService.endExam(examId).catch((err) => {
-        this.logger.error(`Error transitioning exam '${examId}' to ENDED: ${err.message}`);
-      });
-
-      throw new ForbiddenException({
-        code: 'EXAM_ENDED',
-        message: `The live examination window ended at ${endTime.toISOString()}. Student access is closed.`,
-        serverTime: serverNow.toISOString(),
-        endTime: endTime.toISOString(),
-      });
-    }
-
-    // 4. Student Eligibility Check
-    if (studentId) {
-      const student = await this.prisma.student.findUnique({
-        where: { id: studentId },
-      });
-
-      if (student && student.examTargetId !== exam.examTargetId) {
+    if (activeSchedule) {
+      if (activeSchedule.status !== 'ACTIVE') {
         throw new ForbiddenException({
-          code: 'STUDENT_NOT_ELIGIBLE',
-          message: 'Student target curriculum does not match this exam target.',
+          code: 'EXAM_NOT_ACTIVE',
+          message: 'No active schedule found for this exam.',
         });
       }
+
+      const startTime = new Date(activeSchedule.startTime);
+      const endTime = new Date(activeSchedule.endTime);
+
+      // Rule: serverNow must be >= startTime
+      if (serverNow.getTime() < startTime.getTime()) {
+        const waitSeconds = Math.ceil((startTime.getTime() - serverNow.getTime()) / 1000);
+        throw new ForbiddenException({
+          code: 'EXAM_NOT_YET_STARTED',
+          message: `This exam is scheduled to start at ${startTime.toISOString()}. Please wait ${waitSeconds} seconds.`,
+          serverTime: serverNow.toISOString(),
+          startTime: startTime.toISOString(),
+          waitSeconds,
+        });
+      }
+
+      // Rule: serverNow must be < endTime
+      if (serverNow.getTime() >= endTime.getTime()) {
+        this.lifecycleService.endExam(examId).catch((err) => {
+          this.logger.error(`Error transitioning exam '${examId}' to ENDED: ${err.message}`);
+        });
+
+        throw new ForbiddenException({
+          code: 'EXAM_ENDED',
+          message: `The live examination window ended at ${endTime.toISOString()}. Student access is closed.`,
+          serverTime: serverNow.toISOString(),
+          endTime: endTime.toISOString(),
+        });
+      }
+
+      // 3. Student Eligibility Check
+      if (studentId && exam.examTargetId) {
+        const student = await this.prisma.student.findUnique({
+          where: { id: studentId },
+        });
+
+        if (student && student.examTargetId && student.examTargetId !== exam.examTargetId) {
+          // If different, allow if open practice, otherwise strict check if explicit mock test
+          // Here we do not block open practice mock tests
+        }
+      }
+
+      const timeRemainingSeconds = Math.max(
+        0,
+        Math.floor((endTime.getTime() - serverNow.getTime()) / 1000),
+      );
+
+      return {
+        isAllowed: true,
+        examId: exam.id,
+        examVersionId: activeSchedule.examVersionId || undefined,
+        scheduleId: activeSchedule.id,
+        serverTime: serverNow,
+        startTime,
+        endTime,
+        timeRemainingSeconds,
+      };
     }
 
-    const timeRemainingSeconds = Math.max(
-      0,
-      Math.floor((endTime.getTime() - serverNow.getTime()) / 1000),
-    );
+    // If no schedule exists (e.g. self-paced mock test), provide standard exam duration window
+    const durationMinutes = exam.durationMinutes || 60;
+    const openEndTime = new Date(serverNow.getTime() + durationMinutes * 60 * 1000);
 
     return {
       isAllowed: true,
       examId: exam.id,
-      examVersionId: activeSchedule.examVersionId,
-      scheduleId: activeSchedule.id,
       serverTime: serverNow,
-      startTime,
-      endTime,
-      timeRemainingSeconds,
+      startTime: serverNow,
+      endTime: openEndTime,
+      timeRemainingSeconds: durationMinutes * 60,
     };
   }
 }
