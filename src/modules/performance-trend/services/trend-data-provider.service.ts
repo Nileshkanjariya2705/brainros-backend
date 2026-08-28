@@ -11,11 +11,16 @@ export class TrendDataProviderService {
   /**
    * Load all completed/evaluated mock attempts for a student matching filters in a single query
    */
-  async loadStudentMockAttempts(studentId: string, filters: GetTrendsQueryDto) {
+  async loadStudentMockAttempts(studentIdOrUserId: string, filters: GetTrendsQueryDto) {
+    const student = await this.prisma.student?.findFirst?.({
+      where: { OR: [{ id: studentIdOrUserId }, { userId: studentIdOrUserId }] },
+    });
+    const resolvedStudentId = student ? student.id : studentIdOrUserId;
+
     const whereClause: any = {
-      studentId,
+      studentId: resolvedStudentId,
       result: { isNot: null }, // Only evaluated attempts
-      status: { code: { in: ['EVALUATED', 'SUBMITTED', 'AUTO_SUBMITTED'] } },
+      status: { name: { in: ['EVALUATED', 'SUBMITTED', 'AUTO_SUBMITTED'] } },
     };
 
     // Filter by examId
@@ -66,7 +71,7 @@ export class TrendDataProviderService {
       take: filters.limit || 10,
     });
 
-    this.logger.debug(`Loaded ${attempts.length} evaluated mock attempts for student '${studentId}'`);
+    this.logger.debug(`Loaded ${attempts.length} evaluated mock attempts for student '${studentIdOrUserId}'`);
     return attempts;
   }
 }

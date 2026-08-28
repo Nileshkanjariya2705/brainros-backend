@@ -1,6 +1,12 @@
 import {
-  IsNotEmpty, IsUUID, IsOptional, IsBoolean,
-  IsNumber, IsArray, IsDateString,
+  IsNotEmpty,
+  IsUUID,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  IsArray,
+  IsDateString,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -24,18 +30,21 @@ export class SaveAnswerDto {
   examQuestionId: string;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== '')
   @IsUUID('4')
-  selectedOptionId?: string;
+  selectedOptionId?: string | null;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== '')
   @IsNumber()
   @Type(() => Number)
-  numericalAnswer?: number;
+  numericalAnswer?: number | null;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
   @IsArray()
   @IsUUID('4', { each: true })
-  selectedOptions?: string[];
+  selectedOptions?: string[] | null;
 
   @IsOptional()
   @IsBoolean()

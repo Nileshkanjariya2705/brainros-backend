@@ -32,8 +32,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import {
   REFRESH_COOKIE_NAME,
-  getRefreshCookieOptions,
-  getRefreshCookieClearOptions,
+  setAuthCookies,
+  clearAuthCookies,
 } from './utils/cookie.util';
 
 @Controller('auth')
@@ -73,13 +73,10 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const result = await this.authService.verifyRegistrationOtp(dto, req);
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -130,13 +127,10 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const result = await this.authService.verifyPasswordlessLoginOtp(dto, req);
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -178,13 +172,10 @@ export class AuthController {
       dto.purpose,
       req,
     );
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -201,13 +192,10 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const result = await this.authService.loginWithEmail(dto.email, dto.password, req);
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -224,13 +212,10 @@ export class AuthController {
       dto.password,
       req,
     );
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -242,13 +227,10 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const result = await this.authService.loginWithGoogle(dto.idToken, req);
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
     return result;
   }
 
@@ -269,7 +251,7 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const cookieToken =
-      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken;
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken || req.cookies?.refresh_token;
     const refreshToken = cookieToken || headerToken || bodyToken;
 
     if (!refreshToken) {
@@ -277,20 +259,16 @@ export class AuthController {
     }
 
     const result = await this.authService.refreshSession(refreshToken, req);
-
-    if (result.data?.refreshToken) {
-      res.cookie(
-        REFRESH_COOKIE_NAME,
-        result.data.refreshToken,
-        getRefreshCookieOptions(this.configService),
-      );
-    }
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
 
     return result;
   }
 
   /**
-   * Revoke current session and clear HttpOnly cookie.
+   * Revoke current session and clear HttpOnly cookies.
    * POST /auth/logout
    */
   @UseGuards(JwtAuthGuard)
@@ -303,23 +281,20 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const cookieToken =
-      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken;
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken || req.cookies?.refresh_token;
     const refreshToken = cookieToken || headerToken || bodyToken;
 
     if (refreshToken) {
       await this.authService.logout(refreshToken, req).catch(() => {});
     }
 
-    res.clearCookie(
-      REFRESH_COOKIE_NAME,
-      getRefreshCookieClearOptions(this.configService),
-    );
+    clearAuthCookies(res, this.configService);
 
     return { message: 'Logged out successfully.' };
   }
 
   /**
-   * Revoke all user sessions and clear HttpOnly cookie.
+   * Revoke all user sessions and clear HttpOnly cookies.
    * POST /auth/logout-all
    */
   @UseGuards(JwtAuthGuard)
@@ -330,10 +305,7 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const result = await this.authService.logoutAll(req.user.userId, req);
-    res.clearCookie(
-      REFRESH_COOKIE_NAME,
-      getRefreshCookieClearOptions(this.configService),
-    );
+    clearAuthCookies(res, this.configService);
     return result;
   }
 

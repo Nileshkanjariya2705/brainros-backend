@@ -947,9 +947,25 @@ export class AuthService {
   async refreshSession(refreshToken: string, req?: any) {
     const ctx = this.extractRequestContext(req);
     const tokens = await this.tokenService.refreshAccessTokens(refreshToken, ctx);
+
+    let user: any = null;
+    if (tokens.userId) {
+      user = await this.loadUserWithRoles(tokens.userId);
+    }
+
     return {
       message: 'Token refreshed successfully',
       data: {
+        user: user ? this.buildUserResponse(user) : undefined,
+        student: user?.student
+          ? {
+              id: user.student.id,
+              studentId: user.student.studentId,
+              studentCode: user.student.studentCode,
+              name: user.student.name,
+            }
+          : null,
+        session: tokens.sessionId ? { sessionId: tokens.sessionId } : undefined,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,

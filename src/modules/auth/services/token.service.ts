@@ -9,6 +9,8 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+  userId?: string;
+  sessionId?: string;
 }
 
 export interface AccessTokenPayload {
@@ -107,6 +109,8 @@ export class TokenService {
       accessToken,
       refreshToken: rawRefreshToken,
       expiresIn: this.getAccessExpirySeconds(),
+      userId,
+      sessionId,
     };
   }
 
@@ -260,6 +264,8 @@ export class TokenService {
       accessToken,
       refreshToken: newRawRefreshToken,
       expiresIn: this.getAccessExpirySeconds(),
+      userId: dbToken.userId,
+      sessionId,
     };
   }
 

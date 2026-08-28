@@ -12,6 +12,7 @@ import {
   UpsertFullQuestionTranslationDto,
 } from '../dto/create-translation.dto';
 import { LanguageService } from './language.service';
+import { MANDATORY_LANGUAGE_CODES } from '../constants/supported-languages.constant';
 
 @Injectable()
 export class TranslationService {
@@ -291,6 +292,21 @@ export class TranslationService {
       defaultLanguageId: question.defaultLanguageId,
       completeness: matrix,
       isFullyTranslatedAllLanguages: matrix.every((m) => m.isComplete),
+    };
+  }
+
+  /**
+   * Validate that all 9 mandatory regional languages are translated for a question
+   */
+  async validateQuestionMandatoryTranslations(questionId: string): Promise<{ isValid: boolean; missingLanguages: string[] }> {
+    const completeness = await this.getTranslationCompleteness(questionId);
+    const missing = completeness.completeness
+      .filter((c) => MANDATORY_LANGUAGE_CODES.includes(c.languageCode as any) && !c.isComplete)
+      .map((c) => c.languageName);
+
+    return {
+      isValid: missing.length === 0,
+      missingLanguages: missing,
     };
   }
 }

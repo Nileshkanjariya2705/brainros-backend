@@ -36,7 +36,10 @@ export class PredictionQueryService {
       throw new NotFoundException(`Attempt '${attemptId}' not found`);
     }
 
-    if (attempt.studentId !== studentId) {
+    if (
+      attempt.studentId !== studentId &&
+      attempt.student?.userId !== studentId
+    ) {
       throw new ForbiddenException('You do not own this attempt');
     }
 

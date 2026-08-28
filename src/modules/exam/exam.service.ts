@@ -163,8 +163,8 @@ export class ExamService {
    * List exams with filters and pagination
    */
   async findExams(filter: ExamFilterDto) {
-    const page = filter.page ?? 1;
-    const limit = filter.limit ?? 20;
+    const page = filter?.page ? Number(filter.page) : 1;
+    const limit = filter?.limit ? Number(filter.limit) : 20;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -440,11 +440,15 @@ export class ExamService {
           question: {
             include: {
               questionType: { select: { id: true, name: true, code: true } },
-              translations: true,
+              translations: {
+                include: { language: { select: { id: true, code: true, name: true } } },
+              },
               options: {
                 orderBy: { displayOrder: 'asc' },
                 include: {
-                  translations: true,
+                  translations: {
+                    include: { language: { select: { id: true, code: true, name: true } } },
+                  },
                 },
               },
             },
@@ -468,10 +472,25 @@ export class ExamService {
       // 3. Question Default Language
       // 4. First Available Translation
       const matchedTranslation =
-        q.translations.find((t) => t.languageId === languageId) ||
+        q.translations.find((t) => t.languageId === languageId || t.language?.code === languageId) ||
         (examDefaultLanguageId ? q.translations.find((t) => t.languageId === examDefaultLanguageId) : null) ||
         q.translations.find((t) => t.languageId === q.defaultLanguageId) ||
         q.translations[0];
+
+      // Build question translations map for instant client-side switching (indexed by ID & code)
+      const qTranslationsMap: Record<string, { questionText: string; passageText?: string | null; assertionText?: string | null; reasonText?: string | null }> = {};
+      q.translations.forEach((t) => {
+        const transObj = {
+          questionText: t.questionText,
+          passageText: t.passageText || null,
+          assertionText: t.assertionText || null,
+          reasonText: t.reasonText || null,
+        };
+        qTranslationsMap[t.languageId] = transObj;
+        if (t.language?.code) {
+          qTranslationsMap[t.language.code.toLowerCase()] = transObj;
+        }
+      });
 
       return {
         examQuestionId: eq.id,
@@ -485,20 +504,33 @@ export class ExamService {
         passage: matchedTranslation?.passageText || q.passage || null,
         assertion: matchedTranslation?.assertionText || q.assertion || null,
         reason: matchedTranslation?.reasonText || q.reason || null,
-        questionText: matchedTranslation?.questionText ?? '',
-        options: q.options.map((o) => {
+        questionText: matchedTranslation?.questionText || (q as any).questionText || '',
+        translations: qTranslationsMap,
+        options: (q.options || []).map((o) => {
           // Option translation fallback
           const matchedOptTranslation =
-            o.translations.find((ot) => ot.languageId === languageId) ||
-            (examDefaultLanguageId ? o.translations.find((ot) => ot.languageId === examDefaultLanguageId) : null) ||
-            o.translations.find((ot) => ot.languageId === q.defaultLanguageId) ||
-            o.translations[0];
+            o.translations?.find((ot) => ot.languageId === languageId || ot.language?.code === languageId) ||
+            (examDefaultLanguageId ? o.translations?.find((ot) => ot.languageId === examDefaultLanguageId) : null) ||
+            o.translations?.find((ot) => ot.languageId === q.defaultLanguageId) ||
+            o.translations?.[0];
+
+          const optTranslationsMap: Record<string, { optionText: string }> = {};
+          (o.translations || []).forEach((ot) => {
+            const optTransObj = {
+              optionText: ot.optionText || o.optionText || o.optionLabel || '',
+            };
+            optTranslationsMap[ot.languageId] = optTransObj;
+            if (ot.language?.code) {
+              optTranslationsMap[ot.language.code.toLowerCase()] = optTransObj;
+            }
+          });
 
           return {
             id: o.id,
             optionKey: o.optionKey,
-            optionLabel: o.optionLabel,
-            optionText: matchedOptTranslation?.optionText || o.optionText || o.optionLabel || '',
+            optionLabel: o.optionLabel || o.optionKey || '',
+            optionText: matchedOptTranslation?.optionText || o.optionText || o.optionLabel || o.optionKey || '',
+            translations: optTranslationsMap,
             matchColumn: o.matchColumn,
             matchPairKey: o.matchPairKey,
             displayOrder: o.displayOrder,

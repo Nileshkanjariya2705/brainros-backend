@@ -24,19 +24,30 @@ export async function seedAcademicQuestions(ctx: SeedContext): Promise<SeederRes
   const kannadaLang = ctx.languages.get('kn');
 
   const neetTarget = ctx.examTargets.get('NEET')!;
-  const jeeTarget = ctx.examTargets.get('JEE_MAIN')!;
+  const jeeTarget = ctx.examTargets.get('JEE') || ctx.examTargets.get('JEE_MAIN')!;
+  const catTarget = ctx.examTargets.get('CAT');
 
   // 1. Subjects Setup
   const subjectsData = [
-    // NEET Subjects
+    // NEET Subjects (Physics, Chemistry, Biology / Botany & Zoology)
     { target: neetTarget, name: 'Physics (NEET)', code: 'NEET_PHY', displayOrder: 1 },
     { target: neetTarget, name: 'Chemistry (NEET)', code: 'NEET_CHEM', displayOrder: 2 },
-    { target: neetTarget, name: 'Botany', code: 'NEET_BOT', displayOrder: 3 },
-    { target: neetTarget, name: 'Zoology', code: 'NEET_ZOO', displayOrder: 4 },
-    // JEE Subjects
+    { target: neetTarget, name: 'Biology', code: 'NEET_BIO', displayOrder: 3 },
+    { target: neetTarget, name: 'Botany', code: 'NEET_BOT', displayOrder: 4 },
+    { target: neetTarget, name: 'Zoology', code: 'NEET_ZOO', displayOrder: 5 },
+    // JEE Subjects (Physics, Chemistry, Mathematics)
     { target: jeeTarget, name: 'Physics (JEE)', code: 'JEE_PHY', displayOrder: 1 },
     { target: jeeTarget, name: 'Chemistry (JEE)', code: 'JEE_CHEM', displayOrder: 2 },
     { target: jeeTarget, name: 'Mathematics', code: 'JEE_MATH', displayOrder: 3 },
+    // CAT Subjects (Physics, Chemistry, Mathematics, Biology)
+    ...(catTarget
+      ? [
+          { target: catTarget, name: 'Physics (CAT)', code: 'CAT_PHY', displayOrder: 1 },
+          { target: catTarget, name: 'Chemistry (CAT)', code: 'CAT_CHEM', displayOrder: 2 },
+          { target: catTarget, name: 'Mathematics (CAT)', code: 'CAT_MATH', displayOrder: 3 },
+          { target: catTarget, name: 'Biology (CAT)', code: 'CAT_BIO', displayOrder: 4 },
+        ]
+      : []),
   ];
 
   for (const sData of subjectsData) {

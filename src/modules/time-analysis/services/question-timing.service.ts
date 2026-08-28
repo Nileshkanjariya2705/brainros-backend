@@ -49,9 +49,11 @@ export class QuestionTimingService {
     const attempt = await this.verifyAttempt(attemptId, studentId);
     this.verifyInProgress(attempt);
 
+    const examQuestionId = dto.examQuestionId || '';
+
     // 1. Verify question belongs to this exam
     const examQuestion = await this.prisma.examQuestion.findFirst({
-      where: { id: dto.examQuestionId, examId: attempt.examId },
+      where: { id: examQuestionId, examId: attempt.examId },
     });
     if (!examQuestion) {
       throw new NotFoundException('Question does not belong to this exam attempt');
@@ -70,7 +72,7 @@ export class QuestionTimingService {
       if (!isNewEvent) {
         // Return existing active state idempotently
         const current = await this.timingStore.getActiveTiming(attemptId);
-        if (current && current.examQuestionId === dto.examQuestionId) {
+        if (current && current.examQuestionId === examQuestionId) {
           return this.formatTimingResponse(attempt, current.examQuestionId, current.visitNumber, current.serverStartedAt);
         }
       }
@@ -80,7 +82,7 @@ export class QuestionTimingService {
     const currentActive = await this.timingStore.getActiveTiming(attemptId);
 
     // If currently active on the SAME question
-    if (currentActive && currentActive.examQuestionId === dto.examQuestionId) {
+    if (currentActive && currentActive.examQuestionId === examQuestionId) {
       return this.formatTimingResponse(
         attempt,
         currentActive.examQuestionId,
@@ -90,7 +92,7 @@ export class QuestionTimingService {
     }
 
     // If active on a DIFFERENT question -> Auto-close the previous question interval
-    if (currentActive && currentActive.examQuestionId !== dto.examQuestionId) {
+    if (currentActive && currentActive.examQuestionId !== examQuestionId) {
       await this.closeIntervalInternal(
         attempt,
         currentActive,
@@ -101,7 +103,7 @@ export class QuestionTimingService {
 
     // 5. Determine Visit Number for this question
     const maxVisit = await this.prisma.questionTimeLog.aggregate({
-      where: { attemptId, examQuestionId: dto.examQuestionId },
+      where: { attemptId, examQuestionId },
       _max: { visitNumber: true },
     });
     const visitNumber = (maxVisit._max.visitNumber || 0) + 1;
@@ -109,7 +111,7 @@ export class QuestionTimingService {
     // 6. Set New Active Timing State in Redis
     const activeState: ActiveTimingState = {
       attemptId,
-      examQuestionId: dto.examQuestionId,
+      examQuestionId,
       visitNumber,
       serverStartedAt: serverNow.toISOString(),
       serverRevision: (currentActive?.serverRevision || 0) + 1,
@@ -121,7 +123,7 @@ export class QuestionTimingService {
 
     await this.timingStore.setActiveTiming(attemptId, activeState);
 
-    return this.formatTimingResponse(attempt, dto.examQuestionId, visitNumber, serverNow.toISOString());
+    return this.formatTimingResponse(attempt, examQuestionId, visitNumber, serverNow.toISOString());
   }
 
   /**
@@ -134,13 +136,14 @@ export class QuestionTimingService {
   ): Promise<ClosedTimingResponse> {
     const serverNow = new Date();
     const attempt = await this.verifyAttempt(attemptId, studentId);
+    const examQuestionId = dto.examQuestionId || '';
 
     const currentActive = await this.timingStore.getActiveTiming(attemptId);
-    if (!currentActive || currentActive.examQuestionId !== dto.examQuestionId) {
+    if (!currentActive || currentActive.examQuestionId !== examQuestionId) {
       // Nothing active or mismatched question -> check DB for recent unclosed interval
       return {
         attemptId,
-        examQuestionId: dto.examQuestionId,
+        examQuestionId,
         visitNumber: 1,
         timeSpentSeconds: 0,
         serverEndTime: serverNow.toISOString(),
@@ -274,13 +277,16 @@ export class QuestionTimingService {
     });
   }
 
-  private async verifyAttempt(attemptId: string, studentId: string) {
+  private async verifyAttempt(attemptId: string, studentIdOrUserId: string) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
-      include: { status: true },
+      include: { status: true, student: { select: { id: true, userId: true } } },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.studentId !== studentId) {
+    if (
+      attempt.studentId !== studentIdOrUserId &&
+      attempt.student?.userId !== studentIdOrUserId
+    ) {
       throw new ForbiddenException('You do not own this attempt');
     }
     return attempt;

@@ -24,7 +24,7 @@ export interface AuthoritativeTimingResponse {
 
 export interface ClosedTimingResponse {
   attemptId: string;
-  examQuestionId: string;
+  examQuestionId?: string | null;
   visitNumber: number;
   timeSpentSeconds: number;
   serverEndTime: string;

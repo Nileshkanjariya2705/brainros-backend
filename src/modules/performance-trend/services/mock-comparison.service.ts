@@ -55,7 +55,15 @@ export class MockComparisonService {
     const attA = attempts.find((a) => a.id === attemptAId)!;
     const attB = attempts.find((a) => a.id === attemptBId)!;
 
-    if (attA.studentId !== studentId || attB.studentId !== studentId) {
+    const student = await this.prisma.student?.findFirst?.({
+      where: { OR: [{ id: studentId }, { userId: studentId }] },
+    });
+    const resolvedStudentId = student ? student.id : studentId;
+
+    const matchesA = attA.studentId === studentId || attA.studentId === resolvedStudentId;
+    const matchesB = attB.studentId === studentId || attB.studentId === resolvedStudentId;
+
+    if (!matchesA || !matchesB) {
       throw new ForbiddenException('You can only compare your own attempts');
     }
 

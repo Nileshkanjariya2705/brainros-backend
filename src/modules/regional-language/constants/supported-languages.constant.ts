@@ -1,5 +1,28 @@
+export type SupportedLanguageCode =
+  | 'en'
+  | 'kn'
+  | 'hi'
+  | 'ta'
+  | 'te'
+  | 'mr'
+  | 'ml'
+  | 'bn'
+  | 'gu';
+
+export const MANDATORY_LANGUAGE_CODES: SupportedLanguageCode[] = [
+  'en',
+  'kn',
+  'hi',
+  'ta',
+  'te',
+  'mr',
+  'ml',
+  'bn',
+  'gu',
+];
+
 export interface SupportedLanguageMeta {
-  code: string;
+  code: SupportedLanguageCode;
   name: string;
   nativeName: string;
   description?: string;
@@ -15,17 +38,17 @@ export const SUPPORTED_NINE_REGIONAL_LANGUAGES: SupportedLanguageMeta[] = [
     displayOrder: 1,
   },
   {
+    code: 'kn',
+    name: 'Kannada',
+    nativeName: 'ಕನ್ನಡ',
+    description: 'Regional language of Karnataka',
+    displayOrder: 2,
+  },
+  {
     code: 'hi',
     name: 'Hindi',
     nativeName: 'हिन्दी',
     description: 'National language (Devanagari)',
-    displayOrder: 2,
-  },
-  {
-    code: 'gu',
-    name: 'Gujarati',
-    nativeName: 'ગુજરાતી',
-    description: 'Regional language of Gujarat',
     displayOrder: 3,
   },
   {
@@ -50,24 +73,24 @@ export const SUPPORTED_NINE_REGIONAL_LANGUAGES: SupportedLanguageMeta[] = [
     displayOrder: 6,
   },
   {
-    code: 'bn',
-    name: 'Bengali',
-    nativeName: 'বাংলা',
-    description: 'Regional language of West Bengal',
-    displayOrder: 7,
-  },
-  {
-    code: 'kn',
-    name: 'Kannada',
-    nativeName: 'ಕನ್ನಡ',
-    description: 'Regional language of Karnataka',
-    displayOrder: 8,
-  },
-  {
     code: 'ml',
     name: 'Malayalam',
     nativeName: 'മലയാളം',
     description: 'Regional language of Kerala',
+    displayOrder: 7,
+  },
+  {
+    code: 'bn',
+    name: 'Bengali',
+    nativeName: 'বাংলা',
+    description: 'Regional language of West Bengal',
+    displayOrder: 8,
+  },
+  {
+    code: 'gu',
+    name: 'Gujarati',
+    nativeName: 'ગુજરાતી',
+    description: 'Regional language of Gujarat',
     displayOrder: 9,
   },
 ];

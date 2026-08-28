@@ -7,10 +7,12 @@ import { ExamAccessService } from '../exam-scheduling/services/exam-access.servi
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
 
 // ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
+// ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
 const prismaMock = {
   exam: { findUnique: jest.fn() },
   attempt: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     findMany: jest.fn(),
@@ -21,9 +23,11 @@ const prismaMock = {
   },
   questionTimeLog: { create: jest.fn() },
   attemptStatus: { findUnique: jest.fn() },
-  preferredLanguage: { findUnique: jest.fn() },
+  preferredLanguage: { findUnique: jest.fn(), findFirst: jest.fn() },
   examLanguage: { count: jest.fn(), findFirst: jest.fn() },
 };
+
+import { ResultService } from '../result/result.service';
 
 // ─── Mock Services ────────────────────────────────────────────────────────────
 const examServiceMock = {
@@ -38,6 +42,12 @@ const questionTimingServiceMock = {
   finalizeActiveTiming: jest.fn(),
 };
 
+const resultServiceMock = {
+  calculateResult: jest.fn(),
+  getResult: jest.fn(),
+  getFullAnalysis: jest.fn(),
+};
+
 // ─── Test Suite ───────────────────────────────────────────────────────────────
 describe('ExamAttemptService', () => {
   let service: ExamAttemptService;
@@ -50,6 +60,7 @@ describe('ExamAttemptService', () => {
         { provide: ExamService, useValue: examServiceMock },
         { provide: ExamAccessService, useValue: examAccessServiceMock },
         { provide: QuestionTimingService, useValue: questionTimingServiceMock },
+        { provide: ResultService, useValue: resultServiceMock },
       ],
     }).compile();
 
@@ -77,10 +88,10 @@ describe('ExamAttemptService', () => {
     it('creates a new attempt when all checks pass', async () => {
       examAccessServiceMock.validateStudentAccess.mockResolvedValue(accessResult);
       prismaMock.exam.findUnique.mockResolvedValue(exam);
-      prismaMock.attempt.findUnique.mockResolvedValue(null); // no existing
+      prismaMock.attempt.findFirst.mockResolvedValue(null); // no active in-progress
       prismaMock.attemptStatus.findUnique.mockResolvedValue(inProgressStatus);
       prismaMock.attempt.create.mockResolvedValue({ id: 'attempt-uuid' });
-      prismaMock.attempt.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      prismaMock.attempt.findUnique.mockResolvedValue({
         id: 'attempt-uuid',
         exam: {},
         status: inProgressStatus,
@@ -112,17 +123,22 @@ describe('ExamAttemptService', () => {
       expect(prismaMock.attempt.create).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException when attempt already exists and is SUBMITTED', async () => {
+    it('creates a brand new attempt even if user previously took the exam (multiple attempts allowed)', async () => {
       examAccessServiceMock.validateStudentAccess.mockResolvedValue(accessResult);
       prismaMock.exam.findUnique.mockResolvedValue(exam);
+      prismaMock.attempt.findFirst.mockResolvedValue(null); // no active in-progress attempt
+      prismaMock.attemptStatus.findUnique.mockResolvedValue(inProgressStatus);
+      prismaMock.attempt.create.mockResolvedValue({ id: 'new-attempt-uuid' });
       prismaMock.attempt.findUnique.mockResolvedValue({
-        id: 'old-attempt',
-        status: { name: 'SUBMITTED' },
-        scheduleId: null,
-        examVersionId: null,
+        id: 'new-attempt-uuid',
+        exam: {},
+        status: inProgressStatus,
+        language: {},
+        _count: { answers: 0 },
       });
 
-      await expect(service.startAttempt(dto, studentId)).rejects.toThrow(BadRequestException);
+      await service.startAttempt(dto, studentId);
+      expect(prismaMock.attempt.create).toHaveBeenCalled();
     });
 
     it('recovers an INTERRUPTED attempt and updates scheduleId', async () => {
@@ -134,9 +150,8 @@ describe('ExamAttemptService', () => {
         scheduleId: null,
         examVersionId: null,
       };
-      prismaMock.attempt.findUnique
-        .mockResolvedValueOnce(interruptedAttempt)
-        .mockResolvedValueOnce({ id: 'old-attempt', exam: {}, status: inProgressStatus, language: {}, _count: { answers: 0 } });
+      prismaMock.attempt.findFirst.mockResolvedValue(interruptedAttempt);
+      prismaMock.attempt.findUnique.mockResolvedValue({ id: 'old-attempt', exam: {}, status: inProgressStatus, language: {}, _count: { answers: 0 } });
       prismaMock.attemptStatus.findUnique.mockResolvedValue(inProgressStatus);
       prismaMock.attempt.update.mockResolvedValue({});
 
@@ -163,10 +178,10 @@ describe('ExamAttemptService', () => {
         timeRemainingSeconds: 3600,
       });
       prismaMock.exam.findUnique.mockResolvedValue({ ...exam, durationMinutes: 180 });
-      prismaMock.attempt.findUnique.mockResolvedValueOnce(null);
+      prismaMock.attempt.findFirst.mockResolvedValue(null);
       prismaMock.attemptStatus.findUnique.mockResolvedValue(inProgressStatus);
       prismaMock.attempt.create.mockResolvedValue({ id: 'attempt-uuid' });
-      prismaMock.attempt.findUnique.mockResolvedValueOnce({
+      prismaMock.attempt.findUnique.mockResolvedValue({
         id: 'attempt-uuid', exam: {}, status: inProgressStatus, language: {}, _count: { answers: 0 },
       });
 
@@ -278,7 +293,7 @@ describe('ExamAttemptService', () => {
 
     it('switches language atomically with no state loss', async () => {
       prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-      prismaMock.preferredLanguage.findUnique.mockResolvedValue({
+      prismaMock.preferredLanguage.findFirst.mockResolvedValue({
         id: languageId, code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true,
       });
       prismaMock.examLanguage.count.mockResolvedValue(0); // no restrictions
@@ -295,7 +310,7 @@ describe('ExamAttemptService', () => {
 
     it('throws BadRequestException for inactive language', async () => {
       prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-      prismaMock.preferredLanguage.findUnique.mockResolvedValue({
+      prismaMock.preferredLanguage.findFirst.mockResolvedValue({
         id: languageId, isActive: false,
       });
 

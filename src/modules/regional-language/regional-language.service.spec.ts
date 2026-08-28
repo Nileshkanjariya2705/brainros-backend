@@ -6,6 +6,7 @@ import { ExamAttemptService } from '../exam-attempt/exam-attempt.service';
 import { ExamService } from '../exam/exam.service';
 import { ExamAccessService } from '../exam-scheduling/services/exam-access.service';
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
+import { ResultService } from '../result/result.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SUPPORTED_NINE_REGIONAL_LANGUAGES } from './constants/supported-languages.constant';
 
@@ -90,6 +91,7 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         { provide: ExamService, useValue: mockExamService },
         { provide: ExamAccessService, useValue: { validateStudentAccess: jest.fn() } },
         { provide: QuestionTimingService, useValue: { logQuestionTransition: jest.fn() } },
+        { provide: ResultService, useValue: { calculateResult: jest.fn(), getResult: jest.fn() } },
       ],
     }).compile();
 
@@ -107,7 +109,7 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
     it('should have all 9 standardized regional languages defined', () => {
       expect(SUPPORTED_NINE_REGIONAL_LANGUAGES).toHaveLength(9);
       const codes = SUPPORTED_NINE_REGIONAL_LANGUAGES.map((l) => l.code);
-      expect(codes).toEqual(['en', 'hi', 'gu', 'ta', 'te', 'mr', 'bn', 'kn', 'ml']);
+      expect(codes).toEqual(['en', 'kn', 'hi', 'ta', 'te', 'mr', 'ml', 'bn', 'gu']);
     });
 
     it('should seed 9 regional languages on boot if not existing', async () => {

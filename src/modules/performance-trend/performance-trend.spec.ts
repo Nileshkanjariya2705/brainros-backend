@@ -10,6 +10,9 @@ const prismaMock = {
   attempt: {
     findMany: jest.fn(),
   },
+  student: {
+    findFirst: jest.fn().mockResolvedValue({ id: 'student-1' }),
+  },
 };
 
 const redisMock = {

@@ -11,9 +11,9 @@ import {
 import { Type } from 'class-transformer';
 
 export class StartQuestionTimingDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID('4')
-  examQuestionId: string;
+  examQuestionId?: string;
 
   @IsOptional()
   @IsString()
@@ -34,9 +34,9 @@ export class StartQuestionTimingDto {
 }
 
 export class EndQuestionTimingDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID('4')
-  examQuestionId: string;
+  examQuestionId?: string;
 
   @IsOptional()
   @IsString()

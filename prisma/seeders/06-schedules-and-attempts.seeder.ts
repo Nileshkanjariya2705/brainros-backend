@@ -79,8 +79,8 @@ export async function seedSchedulesAndAttempts(ctx: SeedContext): Promise<Seeder
 
     const proficiency = Math.max(0.3, 0.95 - (sIdx / studentsList.length) * 0.5);
 
-    let attempt = await prisma.attempt.findUnique({
-      where: { studentId_examId: { studentId: student.id, examId: examMock01.id } },
+    let attempt = await prisma.attempt.findFirst({
+      where: { studentId: student.id, examId: examMock01.id },
     });
 
     if (!attempt) {

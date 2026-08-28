@@ -887,7 +887,7 @@ model Attempt {
   examVersion     ExamVersion?    @relation(fields: [examVersionId], references: [id])
   schedule        ExamSchedule?   @relation(fields: [scheduleId], references: [id])
 
-  @@unique([studentId, examId])
+  @@index([studentId, examId])
   @@index([studentId])
   @@index([examId])
   @@index([statusId])

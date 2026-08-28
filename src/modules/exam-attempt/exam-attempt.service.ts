@@ -15,6 +15,7 @@ import {
   BulkSaveAnswersDto,
   SaveTimeLogDto,
 } from './dto/attempt.dto';
+import { ResultService } from '../result/result.service';
 
 @Injectable()
 export class ExamAttemptService {
@@ -23,6 +24,7 @@ export class ExamAttemptService {
     private readonly examService: ExamService,
     private readonly examAccessService: ExamAccessService,
     private readonly questionTimingService: QuestionTimingService,
+    private readonly resultService: ResultService,
   ) {}
 
   /**
@@ -49,28 +51,30 @@ export class ExamAttemptService {
     });
     if (!exam) throw new NotFoundException('Exam not found');
 
-    // ── 3. Check for existing attempt ───────────────────────────────────
-    const existing = await this.prisma.attempt.findUnique({
-      where: { studentId_examId: { studentId, examId: dto.examId } },
+    // ── 3. Check for active (in-progress/interrupted) attempt to resume ───
+    const activeAttempt = await this.prisma.attempt.findFirst({
+      where: {
+        studentId,
+        examId: dto.examId,
+        status: { name: { in: ['INTERRUPTED', 'IN_PROGRESS'] } },
+      },
       include: { status: true },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (existing) {
+    if (activeAttempt) {
       // Allow seamless recovery for interrupted/in-progress attempts
-      if (['INTERRUPTED', 'IN_PROGRESS'].includes(existing.status.name)) {
-        const inProgressStatus = await this.getStatus('IN_PROGRESS');
-        await this.prisma.attempt.update({
-          where: { id: existing.id },
-          data: {
-            statusId: inProgressStatus.id,
-            // Refresh schedule / version binding on recovery if exam was re-scheduled
-            scheduleId: access.scheduleId ?? existing.scheduleId,
-            examVersionId: access.examVersionId ?? existing.examVersionId,
-          },
-        });
-        return this.loadAttempt(existing.id);
-      }
-      throw new BadRequestException('You have already attempted this exam');
+      const inProgressStatus = await this.getStatus('IN_PROGRESS');
+      await this.prisma.attempt.update({
+        where: { id: activeAttempt.id },
+        data: {
+          statusId: inProgressStatus.id,
+          // Refresh schedule / version binding on recovery if exam was re-scheduled
+          scheduleId: access.scheduleId ?? activeAttempt.scheduleId,
+          examVersionId: access.examVersionId ?? activeAttempt.examVersionId,
+        },
+      });
+      return this.loadAttempt(activeAttempt.id);
     }
 
     // ── 4. Create new attempt ───────────────────────────────────────────
@@ -215,6 +219,13 @@ export class ExamAttemptService {
       },
     });
 
+    // Auto calculate result immediately on submission
+    try {
+      await this.resultService.calculateResult(attemptId);
+    } catch (err) {
+      // Non-blocking fallback
+    }
+
     return this.loadAttempt(attemptId);
   }
 
@@ -244,6 +255,13 @@ export class ExamAttemptService {
         submittedAt: effectiveEndTime,
       },
     });
+
+    // Auto calculate result immediately on auto-submit
+    try {
+      await this.resultService.calculateResult(attemptId);
+    } catch (err) {
+      // Non-blocking fallback
+    }
 
     return this.loadAttempt(attemptId);
   }
@@ -282,15 +300,25 @@ export class ExamAttemptService {
    * Seamless in-flight language switch during an active exam attempt
    * (Zero reset of timer, answers, or attempt identity).
    */
-  async switchAttemptLanguage(attemptId: string, languageId: string, studentId: string) {
+  async switchAttemptLanguage(attemptId: string, languageIdOrCode: string, studentId: string) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
     this.verifyAttemptInProgress(attempt);
     this.checkTimeExpiry(attempt);
 
-    // 1. Verify language exists & is active
-    const language = await this.prisma.preferredLanguage.findUnique({
-      where: { id: languageId },
+    // 1. Verify language exists & is active (supports ID or code like 'hi', 'en', 'gu')
+    let language = await this.prisma.preferredLanguage.findUnique({
+      where: { id: languageIdOrCode },
     });
+    if (!language) {
+      language = await this.prisma.preferredLanguage.findFirst({
+        where: {
+          OR: [
+            { code: languageIdOrCode.toLowerCase() },
+            { code: languageIdOrCode.toUpperCase() },
+          ],
+        },
+      });
+    }
     if (!language || !language.isActive) {
       throw new BadRequestException('The selected language is not active or available.');
     }
@@ -302,7 +330,7 @@ export class ExamAttemptService {
 
     if (examLanguageCount > 0) {
       const isAllowed = await this.prisma.examLanguage.findFirst({
-        where: { examId: attempt.examId, languageId },
+        where: { examId: attempt.examId, languageId: language.id },
       });
       if (!isAllowed) {
         throw new BadRequestException(`Language '${language.name}' is not enabled for this exam.`);
@@ -312,7 +340,7 @@ export class ExamAttemptService {
     // 3. Atomically update selected language on Attempt record
     await this.prisma.attempt.update({
       where: { id: attemptId },
-      data: { languageId },
+      data: { languageId: language.id },
     });
 
     return {
@@ -387,13 +415,16 @@ export class ExamAttemptService {
   // PRIVATE HELPERS
   // ═══════════════════════════════════════════════════════════════
 
-  private async verifyAttemptOwnership(attemptId: string, studentId: string) {
+  private async verifyAttemptOwnership(attemptId: string, studentIdOrUserId: string) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
-      include: { status: true },
+      include: { status: true, student: { select: { id: true, userId: true } } },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.studentId !== studentId) {
+    if (
+      attempt.studentId !== studentIdOrUserId &&
+      attempt.student?.userId !== studentIdOrUserId
+    ) {
       throw new ForbiddenException('You do not own this attempt');
     }
     return attempt;

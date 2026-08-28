@@ -184,32 +184,39 @@ export class ResultService {
     const averageTimePerQuestion = totalQuestions > 0 ? Math.round((timeUsedSeconds / totalQuestions) * 10) / 10 : 0;
 
     // ─── Persist results in transaction ────────────────────────
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.result.create({
-        data: {
-          attemptId,
-          totalQuestions,
-          correctAnswers: totalCorrect,
-          wrongAnswers: totalWrong,
-          unattempted: totalUnattempted,
-          totalScore: Math.max(totalScore, 0),
-          maxScore,
-          percentage: Math.round(percentage * 100) / 100,
-          accuracy: Math.round(accuracy * 100) / 100,
-          timeUsedSeconds,
-          averageTimePerQuestion,
-        },
-      });
-
-      // Subject results with status & time metrics
-      for (const [subjectId, data] of subjectMap) {
-        const subjAttempted = data.correct + data.wrong;
-        const subjAccuracy = subjAttempted > 0 ? Math.round((data.correct / subjAttempted) * 10000) / 100 : 0;
-        const subjPercentage = data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
-        const subjStatus = this.analysisEngine.evaluateStatus(subjAccuracy, subjAttempted, thresholds);
-
-        await tx.subjectResult.create({
+    await this.prisma.$transaction(
+      async (tx) => {
+        const result = await tx.result.create({
           data: {
+            attemptId,
+            totalQuestions,
+            correctAnswers: totalCorrect,
+            wrongAnswers: totalWrong,
+            unattempted: totalUnattempted,
+            totalScore: Math.max(totalScore, 0),
+            maxScore,
+            percentage: Math.round(percentage * 100) / 100,
+            accuracy: Math.round(accuracy * 100) / 100,
+            timeUsedSeconds,
+            averageTimePerQuestion,
+          },
+        });
+
+        // Batch subject results
+        const subjectResultsData: any[] = [];
+        for (const [subjectId, data] of subjectMap) {
+          const subjAttempted = data.correct + data.wrong;
+          const subjAccuracy =
+            subjAttempted > 0 ? Math.round((data.correct / subjAttempted) * 10000) / 100 : 0;
+          const subjPercentage =
+            data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
+          const subjStatus = this.analysisEngine.evaluateStatus(
+            subjAccuracy,
+            subjAttempted,
+            thresholds,
+          );
+
+          subjectResultsData.push({
             resultId: result.id,
             subjectId,
             totalQuestions: data.totalQuestions,
@@ -221,21 +228,33 @@ export class ResultService {
             accuracy: subjAccuracy,
             percentage: subjPercentage,
             timeSpentSeconds: data.timeSpent,
-            averageTimePerQuestion: data.totalQuestions > 0 ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10 : 0,
+            averageTimePerQuestion:
+              data.totalQuestions > 0
+                ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10
+                : 0,
             performanceStatus: subjStatus,
-          },
-        });
-      }
+          });
+        }
 
-      // Chapter results with configurable threshold status & time metrics
-      for (const [chapterId, data] of chapterMap) {
-        const chapAttempted = data.correct + data.wrong;
-        const chapAccuracy = chapAttempted > 0 ? Math.round((data.correct / chapAttempted) * 10000) / 100 : 0;
-        const chapPercentage = data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
-        const performanceStatus = this.analysisEngine.evaluateStatus(chapAccuracy, chapAttempted, thresholds);
+        if (subjectResultsData.length > 0) {
+          await tx.subjectResult.createMany({ data: subjectResultsData });
+        }
 
-        await tx.chapterResult.create({
-          data: {
+        // Batch chapter results
+        const chapterResultsData: any[] = [];
+        for (const [chapterId, data] of chapterMap) {
+          const chapAttempted = data.correct + data.wrong;
+          const chapAccuracy =
+            chapAttempted > 0 ? Math.round((data.correct / chapAttempted) * 10000) / 100 : 0;
+          const chapPercentage =
+            data.maxScore > 0 ? Math.round((data.score / data.maxScore) * 10000) / 100 : 0;
+          const performanceStatus = this.analysisEngine.evaluateStatus(
+            chapAccuracy,
+            chapAttempted,
+            thresholds,
+          );
+
+          chapterResultsData.push({
             resultId: result.id,
             chapterId,
             totalQuestions: data.totalQuestions,
@@ -247,21 +266,32 @@ export class ResultService {
             accuracy: chapAccuracy,
             percentage: chapPercentage,
             timeSpentSeconds: data.timeSpent,
-            averageTimePerQuestion: data.totalQuestions > 0 ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10 : 0,
+            averageTimePerQuestion:
+              data.totalQuestions > 0
+                ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10
+                : 0,
             performanceStatus,
-          },
-        });
-      }
+          });
+        }
 
-      return this.getResult(attemptId);
-    });
+        if (chapterResultsData.length > 0) {
+          await tx.chapterResult.createMany({ data: chapterResultsData });
+        }
+      },
+      {
+        maxWait: 15000,
+        timeout: 30000,
+      },
+    );
+
+    return this.getResult(attemptId);
   }
 
   /**
-   * Get basic result for an attempt
+   * Get basic result for an attempt (auto-calculates if submitted)
    */
   async getResult(attemptId: string) {
-    const result = await this.prisma.result.findUnique({
+    let result = await this.prisma.result.findUnique({
       where: { attemptId },
       include: {
         attempt: {
@@ -285,14 +315,63 @@ export class ResultService {
         },
       },
     });
+
+    if (!result) {
+      const attempt = await this.prisma.attempt.findUnique({
+        where: { id: attemptId },
+        include: { status: true },
+      });
+      if (attempt && ['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)) {
+        await this.calculateResult(attemptId);
+        result = await this.prisma.result.findUnique({
+          where: { attemptId },
+          include: {
+            attempt: {
+              select: {
+                id: true,
+                examId: true,
+                startedAt: true,
+                submittedAt: true,
+                exam: {
+                  select: {
+                    id: true,
+                    title: true,
+                    totalQuestions: true,
+                    totalMarks: true,
+                    durationMinutes: true,
+                    performanceThresholds: true,
+                    examTarget: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    }
+
     if (!result) throw new NotFoundException('Result not found. Exam may not be submitted yet.');
     return result;
   }
 
   /**
-   * Get Full Comprehensive Brainros Analysis Report
+   * Get Full Comprehensive Brainros Analysis Report (auto-calculates if submitted)
    */
   async getFullAnalysis(attemptId: string) {
+    const existingResult = await this.prisma.result.findUnique({
+      where: { attemptId },
+    });
+
+    if (!existingResult) {
+      const attempt = await this.prisma.attempt.findUnique({
+        where: { id: attemptId },
+        include: { status: true },
+      });
+      if (attempt && ['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)) {
+        await this.calculateResult(attemptId);
+      }
+    }
+
     return this.analysisEngine.generateFullAnalysis(attemptId);
   }
 

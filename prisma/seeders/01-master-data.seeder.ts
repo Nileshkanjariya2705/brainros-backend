@@ -80,15 +80,17 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
     }
   }
 
-  // 3. Preferred Languages
+  // 3. Preferred Languages (9 Mandatory Regional Languages)
   const languagesList = [
     { code: 'en', name: 'ENGLISH', nativeName: 'English', displayOrder: 1 },
-    { code: 'hi', name: 'HINDI', nativeName: 'हिन्दी', displayOrder: 2 },
-    { code: 'kn', name: 'KANNADA', nativeName: 'ಕನ್ನಡ', displayOrder: 3 },
-    { code: 'gu', name: 'GUJARATI', nativeName: 'ગુજરાતી', displayOrder: 4 },
-    { code: 'mr', name: 'MARATHI', nativeName: 'मराठी', displayOrder: 5 },
-    { code: 'ta', name: 'TAMIL', nativeName: 'தமிழ்', displayOrder: 6 },
-    { code: 'te', name: 'TELUGU', nativeName: 'తెలుగు', displayOrder: 7 },
+    { code: 'kn', name: 'KANNADA', nativeName: 'ಕನ್ನಡ', displayOrder: 2 },
+    { code: 'hi', name: 'HINDI', nativeName: 'हिन्दी', displayOrder: 3 },
+    { code: 'ta', name: 'TAMIL', nativeName: 'தமிழ்', displayOrder: 4 },
+    { code: 'te', name: 'TELUGU', nativeName: 'తెలుగు', displayOrder: 5 },
+    { code: 'mr', name: 'MARATHI', nativeName: 'मराठी', displayOrder: 6 },
+    { code: 'ml', name: 'MALAYALAM', nativeName: 'മലയാളം', displayOrder: 7 },
+    { code: 'bn', name: 'BENGALI', nativeName: 'বাংলা', displayOrder: 8 },
+    { code: 'gu', name: 'GUJARATI', nativeName: 'ગુજરાતી', displayOrder: 9 },
   ];
 
   for (const l of languagesList) {
@@ -127,13 +129,11 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
     }
   }
 
-  // 5. Exam Targets
+  // 5. Exam Targets (3 Focus Exams: NEET, JEE, CAT)
   const targetsList = [
     { name: 'NEET', description: 'National Eligibility cum Entrance Test (UG Medical)' },
-    { name: 'JEE_MAIN', description: 'Joint Entrance Examination - Main' },
-    { name: 'JEE_ADVANCED', description: 'Joint Entrance Examination - Advanced' },
-    { name: 'CET', description: 'State Common Entrance Test' },
-    { name: 'BITSAT', description: 'Birla Institute of Technology and Science Admission Test' },
+    { name: 'JEE', description: 'Joint Entrance Examination (Engineering)' },
+    { name: 'CAT', description: 'Common Admission & Entrance Test' },
   ];
 
   for (const t of targetsList) {
