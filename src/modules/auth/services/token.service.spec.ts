@@ -16,12 +16,20 @@ describe('TokenService (Access Token, Refresh Token Rotation & Reuse Detection)'
   beforeEach(async () => {
     jwtServiceMock = {
       sign: jest.fn().mockReturnValue('signed-jwt-access-token'),
-      verify: jest.fn().mockReturnValue({ sub: 'user-1', sessionId: 'sess-1', type: 'access' }),
+      verify: jest.fn().mockReturnValue({
+        sub: 'user-1',
+        sessionId: 'sess-1',
+        type: 'access',
+      }),
     };
 
     prismaMock = {
       refreshToken: {
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'rt-new', ...data })),
+        create: jest
+          .fn()
+          .mockImplementation(({ data }) =>
+            Promise.resolve({ id: 'rt-new', ...data }),
+          ),
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({ id: 'rt-1' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -64,7 +72,10 @@ describe('TokenService (Access Token, Refresh Token Rotation & Reuse Detection)'
 
   describe('1. Token Generation', () => {
     it('should generate short-lived JWT access token and store hashed refresh token', async () => {
-      const result = await tokenService.generateTokens('user-123', 'session-456');
+      const result = await tokenService.generateTokens(
+        'user-123',
+        'session-456',
+      );
 
       expect(result.accessToken).toBe('signed-jwt-access-token');
       expect(result.refreshToken).toBeDefined();
@@ -120,7 +131,10 @@ describe('TokenService (Access Token, Refresh Token Rotation & Reuse Detection)'
           data: { replacedByTokenId: 'rt-new' },
         }),
       );
-      expect(securityEventServiceMock.log).toHaveBeenCalledWith('TOKEN_REFRESHED', expect.any(Object));
+      expect(securityEventServiceMock.log).toHaveBeenCalledWith(
+        'TOKEN_REFRESHED',
+        expect.any(Object),
+      );
     });
   });
 
@@ -140,9 +154,9 @@ describe('TokenService (Access Token, Refresh Token Rotation & Reuse Detection)'
         session: { id: 'session-456' },
       });
 
-      await expect(tokenService.refreshAccessTokens(rawReusedToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        tokenService.refreshAccessTokens(rawReusedToken),
+      ).rejects.toThrow(UnauthorizedException);
 
       // Verify security logging of REFRESH_REUSE_DETECTED
       expect(securityEventServiceMock.log).toHaveBeenCalledWith(
@@ -168,7 +182,11 @@ describe('TokenService (Access Token, Refresh Token Rotation & Reuse Detection)'
         revokedAt: null,
         expiresAt: new Date(Date.now() + 86400000),
         user: { isActive: true, status: 'ACTIVE' },
-        session: { id: 'session-456', revokedAt: null, expiresAt: new Date(Date.now() + 86400000) },
+        session: {
+          id: 'session-456',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 86400000),
+        },
       });
 
       // Simulate race condition where atomic updateMany returned count: 0 because another worker won

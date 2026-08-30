@@ -157,6 +157,11 @@ model User {
   parentLinks        ParentStudentLink[]    @relation("ParentLinks")
   institutionAdmins  InstitutionAdmin[]
   notificationPreferences NotificationPreference[]
+  notifications      Notification[]          @relation("UserNotifications")
+  orders             Order[]
+  salesOrders        Order[]                 @relation("SalesAgentOrders")
+  salesLeads         SalesLead[]             @relation("SalesAgentLeads")
+  createdQuestionImports QuestionImport[]    @relation("QuestionImportCreatedBy")
 
   @@index([status])
   @@index([email])
@@ -231,6 +236,7 @@ model ExamTarget {
   subjects    Subject[]
   exams       Exam[]
   institutionBatches InstitutionBatch[]
+  orders      Order[]
 
   @@map("exam_targets")
 }
@@ -262,6 +268,8 @@ model Student {
   candidateRanks      CandidateRank[]
   parentLinks         ParentStudentLink[]
   batchMemberships    BatchStudent[]
+  orders              Order[]
+  salesLeads          SalesLead[]
 
   @@index([status])
   @@index([stateId])
@@ -764,6 +772,7 @@ model Exam {
   rankSnapshots              RankSnapshot[]
   rankingConfigs             RankingConfig[]
   calendars                  ExamCalendar[]
+  orders                     Order[]
 
   @@index([examTargetId])
   @@index([statusId])
@@ -1099,6 +1108,7 @@ model ExamBlueprint {
   totalQuestions    Int             @map("total_questions")
   version           Int             @default(1)
   isActive          Boolean         @default(true) @map("is_active")
+  isSystem          Boolean         @default(false) @map("is_system")
   createdById       String          @map("created_by_id") @db.Uuid
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
@@ -1950,6 +1960,7 @@ enum NotificationChannel {
   SMS
   WHATSAPP
   PUSH
+  IN_APP
 }
 
 enum NotificationType {
@@ -1957,10 +1968,13 @@ enum NotificationType {
   REGISTRATION_CONFIRMATION
   EXAM_APPROVED
   EXAM_SCHEDULED
+  EXAM_RESCHEDULED
+  EXAM_CANCELLED
   EXAM_REMINDER
   EXAM_ACTIVATED
   EXAM_STARTING_SOON
   EXAM_ENDED
+  EXAM_RESULT_PUBLISHED
   RESULT_AVAILABLE
   REPORT_READY
   PAYMENT_CONFIRMATION
@@ -2026,13 +2040,19 @@ model NotificationPreference {
 
 model Notification {
   id                 String               @id @default(uuid()) @db.Uuid
+  userId             String?              @map("user_id") @db.Uuid
   recipientUserId    String?              @map("recipient_user_id") @db.Uuid
-  recipientAddress   String               @map("recipient_address")
-  channel            NotificationChannel
+  recipientAddress   String?              @map("recipient_address")
+  channel            NotificationChannel  @default(IN_APP)
   type               NotificationType
+  title              String?
+  message            String?
+  data               Json?
+  isRead             Boolean              @default(false) @map("is_read")
+  readAt             DateTime?            @map("read_at")
   templateId         String?              @map("template_id") @db.Uuid
   templateVersion    Int                  @default(1) @map("template_version")
-  payload            Json
+  payload            Json?
   priority           NotificationPriority @default(NORMAL)
   status             NotificationStatus   @default(PENDING)
   scheduledAt        DateTime?            @map("scheduled_at")
@@ -2047,9 +2067,13 @@ model Notification {
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
 
+  user               User?                @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   template           NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   logs               NotificationLog[]
 
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
   @@index([recipientUserId])
   @@index([type])
   @@index([status])
@@ -2169,5 +2193,204 @@ model FeatureActivation {
   @@index([featureCode, isActive])
   @@map("feature_activations")
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ORDERS, PAYMENTS & SALES PERFORMANCE
+// ═══════════════════════════════════════════════════════════════════
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PaymentGateway {
+  RAZORPAY
+  STRIPE
+  OFFLINE
+  UPI
+}
+
+model Order {
+  id              String        @id @default(uuid()) @db.Uuid
+  orderNumber     String        @unique @map("order_number")
+  userId          String        @map("user_id") @db.Uuid
+  studentId       String?       @map("student_id") @db.Uuid
+  salesAgentId    String?       @map("sales_agent_id") @db.Uuid
+  examTargetId    String?       @map("exam_target_id") @db.Uuid
+  examId          String?       @map("exam_id") @db.Uuid
+  amount          Float
+  currency        String        @default("INR")
+  status          OrderStatus   @default(PENDING)
+  itemType        String        @default("EXAM_SERIES") @map("item_type") // EXAM_SERIES, CRASH_COURSE, INSTITUTION_LICENSE
+  itemName        String        @map("item_name")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student         Student?      @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  salesAgent      User?         @relation("SalesAgentOrders", fields: [salesAgentId], references: [id], onDelete: SetNull)
+  examTarget      ExamTarget?   @relation(fields: [examTargetId], references: [id])
+  exam            Exam?         @relation(fields: [examId], references: [id])
+  payments        Payment[]
+
+  @@index([userId])
+  @@index([studentId])
+  @@index([salesAgentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model Payment {
+  id               String         @id @default(uuid()) @db.Uuid
+  orderId          String         @map("order_id") @db.Uuid
+  paymentNumber    String         @unique @map("payment_number")
+  amount           Float
+  currency         String         @default("INR")
+  gateway          PaymentGateway @default(RAZORPAY)
+  gatewayPaymentId String?        @map("gateway_payment_id")
+  gatewayOrderId   String?        @map("gateway_order_id")
+  status           PaymentStatus  @default(INITIATED)
+  paidAt           DateTime?      @map("paid_at")
+  refundedAmount   Float          @default(0) @map("refunded_amount")
+  refundedAt       DateTime?      @map("refunded_at")
+  errorMessage     String?        @map("error_message")
+  metadata         Json?
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([paidAt])
+  @@map("payments")
+}
+
+model SalesLead {
+  id              String         @id @default(uuid()) @db.Uuid
+  salesAgentId    String         @map("sales_agent_id") @db.Uuid
+  studentId       String?        @map("student_id") @db.Uuid
+  leadName        String         @map("lead_name")
+  leadPhone       String         @map("lead_phone")
+  leadEmail       String?        @map("lead_email")
+  state           String?
+  district        String?
+  targetExam      String?        @map("target_exam")
+  status          String         @default("NEW") // NEW, CONTACTED, QUALIFIED, CONVERTED, LOST
+  convertedAt     DateTime?      @map("converted_at")
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  salesAgent      User           @relation("SalesAgentLeads", fields: [salesAgentId], references: [id], onDelete: Cascade)
+  student         Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  @@index([salesAgentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sales_leads")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// QUESTION BANK BULK IMPORT
+// ═══════════════════════════════════════════════════════════════════
+
+enum QuestionImportStatus {
+  UPLOADED
+  PROCESSING
+  VALIDATED
+  READY_TO_IMPORT
+  IMPORTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum QuestionImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  DUPLICATE
+  UPDATE_AVAILABLE
+}
+
+enum QuestionImportRowAction {
+  CREATE
+  UPDATE
+  NONE
+}
+
+model QuestionImport {
+  id                String                 @id @default(uuid()) @db.Uuid
+  fileName          String                 @map("file_name")
+  fileType          String                 @map("file_type")
+  storageKey        String?                @map("storage_key")
+  fileSize          Int?                   @map("file_size")
+  checksum          String?
+  status            QuestionImportStatus   @default(UPLOADED)
+  totalRows         Int                    @default(0) @map("total_rows")
+  validRows         Int                    @default(0) @map("valid_row_count")
+  invalidRows       Int                    @default(0) @map("invalid_row_count")
+  duplicateRows     Int                    @default(0) @map("duplicate_row_count")
+  updateRows        Int                    @default(0) @map("update_row_count")
+  createRows        Int                    @default(0) @map("create_row_count")
+  processedRows     Int                    @default(0) @map("processed_row_count")
+  createdCount      Int                    @default(0) @map("created_count")
+  updatedCount      Int                    @default(0) @map("updated_count")
+  failedCount       Int                    @default(0) @map("failed_count")
+  errorSummary      String?                @map("error_summary") @db.Text
+  createdById       String                 @map("created_by_id") @db.Uuid
+  startedAt         DateTime?              @map("started_at")
+  completedAt       DateTime?              @map("completed_at")
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  createdBy         User                   @relation("QuestionImportCreatedBy", fields: [createdById], references: [id])
+  rows              QuestionImportRow[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("question_imports")
+}
+
+model QuestionImportRow {
+  id                String                  @id @default(uuid()) @db.Uuid
+  importId          String                  @map("import_id") @db.Uuid
+  rowNumber         Int                     @map("row_number")
+  status            QuestionImportRowStatus @default(PENDING)
+  action            QuestionImportRowAction @default(CREATE)
+  targetQuestionId  String?                 @map("target_question_id") @db.Uuid
+  rawData           Json                    @map("raw_data")
+  normalizedData    Json?                   @map("normalized_data")
+  dtoData           Json?                   @map("dto_data")
+  errors            Json?                   @map("errors") // string[]
+  warnings          Json?                   @map("warnings") // string[]
+  importStatus      String?                 @default("PENDING") @map("import_status") // PENDING, SUCCESS, FAILED, SKIPPED
+  importError       String?                 @map("import_error") @db.Text
+  resultQuestionId  String?                 @map("result_question_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  import            QuestionImport          @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, rowNumber])
+  @@index([importId])
+  @@index([status])
+  @@index([action])
+  @@map("question_import_rows")
+}
+
 
 

@@ -9,7 +9,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BulkUploadParserService } from './bulk-upload-parser.service';
 import { BulkUploadValidatorService } from './bulk-upload-validator.service';
 import { BulkUploadActivationService } from './bulk-upload-activation.service';
-import { BulkUploadPreview, BulkUploadErrorItem } from '../interfaces/institution.interface';
+import {
+  BulkUploadPreview,
+  BulkUploadErrorItem,
+} from '../interfaces/institution.interface';
 
 @Injectable()
 export class BulkUploadService {
@@ -38,7 +41,9 @@ export class BulkUploadService {
       where: { id: institutionId },
     });
     if (!institution || institution.status !== 'ACTIVE') {
-      throw new BadRequestException('Bulk uploads are only permitted for ACTIVE institutions.');
+      throw new BadRequestException(
+        'Bulk uploads are only permitted for ACTIVE institutions.',
+      );
     }
 
     // Verify batch belongs to institution if provided
@@ -47,7 +52,9 @@ export class BulkUploadService {
         where: { id: batchId },
       });
       if (!batch || batch.institutionId !== institutionId) {
-        throw new BadRequestException('Specified batch does not belong to your institution.');
+        throw new BadRequestException(
+          'Specified batch does not belong to your institution.',
+        );
       }
     }
 
@@ -71,7 +78,11 @@ export class BulkUploadService {
         data: { status: 'PARSING' },
       });
 
-      await this.parser.parseAndStage(bulkUpload.id, file.buffer, file.originalname);
+      await this.parser.parseAndStage(
+        bulkUpload.id,
+        file.buffer,
+        file.originalname,
+      );
 
       // Perform synchronous or inline initial validation
       await this.validator.validateUpload(bulkUpload.id, batchId || undefined);
@@ -180,9 +191,13 @@ export class BulkUploadService {
     // Re-validate against fresh database state before submission
     await this.validator.validateUpload(uploadId, upload.batchId || undefined);
 
-    const refreshed = await this.prisma.bulkUpload.findUnique({ where: { id: uploadId } });
+    const refreshed = await this.prisma.bulkUpload.findUnique({
+      where: { id: uploadId },
+    });
     if (!refreshed || refreshed.validRowCount === 0) {
-      throw new BadRequestException('Re-validation failed. No valid rows remaining.');
+      throw new BadRequestException(
+        'Re-validation failed. No valid rows remaining.',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -236,7 +251,9 @@ export class BulkUploadService {
     }
 
     if (upload.status !== 'SUBMITTED') {
-      throw new BadRequestException(`Cannot review upload with status '${upload.status}'.`);
+      throw new BadRequestException(
+        `Cannot review upload with status '${upload.status}'.`,
+      );
     }
 
     const pendingRequest = upload.approvalRequests[0];
@@ -292,7 +309,9 @@ export class BulkUploadService {
     const activationResult = await this.activator.activateUpload(uploadId);
 
     return {
-      upload: await this.prisma.bulkUpload.findUnique({ where: { id: uploadId } }),
+      upload: await this.prisma.bulkUpload.findUnique({
+        where: { id: uploadId },
+      }),
       activation: activationResult,
     };
   }

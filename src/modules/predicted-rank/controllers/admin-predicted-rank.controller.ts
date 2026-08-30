@@ -88,6 +88,8 @@ export class AdminPredictedRankController {
   @Get('evaluation/summary')
   @Roles('ADMIN', 'SUPER_ADMIN')
   getModelSummary(@Query('modelVersion') modelVersion?: string) {
-    return this.evaluationService.getModelAccuracySummary(modelVersion || 'v1.0.0');
+    return this.evaluationService.getModelAccuracySummary(
+      modelVersion || 'v1.0.0',
+    );
   }
 }

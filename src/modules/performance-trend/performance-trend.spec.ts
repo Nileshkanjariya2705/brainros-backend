@@ -39,8 +39,12 @@ describe('Mock Comparison & Performance Trend Engine', () => {
       ],
     }).compile();
 
-    aggregationService = module.get<TrendAggregationService>(TrendAggregationService);
-    comparisonService = module.get<MockComparisonService>(MockComparisonService);
+    aggregationService = module.get<TrendAggregationService>(
+      TrendAggregationService,
+    );
+    comparisonService = module.get<MockComparisonService>(
+      MockComparisonService,
+    );
     trendService = module.get<StudentTrendService>(StudentTrendService);
     jest.clearAllMocks();
   });
@@ -52,7 +56,11 @@ describe('Mock Comparison & Performance Trend Engine', () => {
         examId: 'ex-1',
         createdAt: new Date('2026-08-01T10:00:00Z'),
         serverEndTime: new Date('2026-08-01T13:00:00Z'),
-        exam: { title: 'NEET Mock 1', totalMarks: 720, examTarget: { name: 'NEET' } },
+        exam: {
+          title: 'NEET Mock 1',
+          totalMarks: 720,
+          examTarget: { name: 'NEET' },
+        },
         result: {
           totalScore: 480,
           maxScore: 720,
@@ -60,19 +68,43 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           accuracy: 72.5,
           timeUsedSeconds: 10250,
           subjectResults: [
-            { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 100, maxScore: 180, accuracy: 60.0 },
-            { subjectId: 'sub-2', subject: { name: 'Chemistry' }, score: 120, maxScore: 180, accuracy: 70.0 },
+            {
+              subjectId: 'sub-1',
+              subject: { name: 'Physics' },
+              score: 100,
+              maxScore: 180,
+              accuracy: 60.0,
+            },
+            {
+              subjectId: 'sub-2',
+              subject: { name: 'Chemistry' },
+              score: 120,
+              maxScore: 180,
+              accuracy: 70.0,
+            },
           ],
         },
-        candidateRanks: [{ rank: 1240, totalCandidates: 12000, percentile: 89.67 }],
-        timeAnalyses: [{ totalTimeUsedSeconds: 10250, timeUtilizationPercentage: 94.9, averageTimePerQuestionSeconds: 56.9 }],
+        candidateRanks: [
+          { rank: 1240, totalCandidates: 12000, percentile: 89.67 },
+        ],
+        timeAnalyses: [
+          {
+            totalTimeUsedSeconds: 10250,
+            timeUtilizationPercentage: 94.9,
+            averageTimePerQuestionSeconds: 56.9,
+          },
+        ],
       },
       {
         id: 'att-2',
         examId: 'ex-2',
         createdAt: new Date('2026-08-05T10:00:00Z'),
         serverEndTime: new Date('2026-08-05T13:00:00Z'),
-        exam: { title: 'NEET Mock 2', totalMarks: 720, examTarget: { name: 'NEET' } },
+        exam: {
+          title: 'NEET Mock 2',
+          totalMarks: 720,
+          examTarget: { name: 'NEET' },
+        },
         result: {
           totalScore: 505,
           maxScore: 720,
@@ -80,19 +112,43 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           accuracy: 75.8,
           timeUsedSeconds: 10100,
           subjectResults: [
-            { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 115, maxScore: 180, accuracy: 68.0 },
-            { subjectId: 'sub-2', subject: { name: 'Chemistry' }, score: 125, maxScore: 180, accuracy: 72.0 },
+            {
+              subjectId: 'sub-1',
+              subject: { name: 'Physics' },
+              score: 115,
+              maxScore: 180,
+              accuracy: 68.0,
+            },
+            {
+              subjectId: 'sub-2',
+              subject: { name: 'Chemistry' },
+              score: 125,
+              maxScore: 180,
+              accuracy: 72.0,
+            },
           ],
         },
-        candidateRanks: [{ rank: 980, totalCandidates: 12500, percentile: 92.16 }],
-        timeAnalyses: [{ totalTimeUsedSeconds: 10100, timeUtilizationPercentage: 93.5, averageTimePerQuestionSeconds: 56.1 }],
+        candidateRanks: [
+          { rank: 980, totalCandidates: 12500, percentile: 92.16 },
+        ],
+        timeAnalyses: [
+          {
+            totalTimeUsedSeconds: 10100,
+            timeUtilizationPercentage: 93.5,
+            averageTimePerQuestionSeconds: 56.1,
+          },
+        ],
       },
       {
         id: 'att-3',
         examId: 'ex-3',
         createdAt: new Date('2026-08-10T10:00:00Z'),
         serverEndTime: new Date('2026-08-10T13:00:00Z'),
-        exam: { title: 'NEET Mock 3', totalMarks: 720, examTarget: { name: 'NEET' } },
+        exam: {
+          title: 'NEET Mock 3',
+          totalMarks: 720,
+          examTarget: { name: 'NEET' },
+        },
         result: {
           totalScore: 530,
           maxScore: 720,
@@ -100,19 +156,43 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           accuracy: 79.1,
           timeUsedSeconds: 9800,
           subjectResults: [
-            { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 130, maxScore: 180, accuracy: 74.0 },
-            { subjectId: 'sub-2', subject: { name: 'Chemistry' }, score: 135, maxScore: 180, accuracy: 76.0 },
+            {
+              subjectId: 'sub-1',
+              subject: { name: 'Physics' },
+              score: 130,
+              maxScore: 180,
+              accuracy: 74.0,
+            },
+            {
+              subjectId: 'sub-2',
+              subject: { name: 'Chemistry' },
+              score: 135,
+              maxScore: 180,
+              accuracy: 76.0,
+            },
           ],
         },
-        candidateRanks: [{ rank: 650, totalCandidates: 13000, percentile: 95.0 }],
-        timeAnalyses: [{ totalTimeUsedSeconds: 9800, timeUtilizationPercentage: 90.7, averageTimePerQuestionSeconds: 54.4 }],
+        candidateRanks: [
+          { rank: 650, totalCandidates: 13000, percentile: 95.0 },
+        ],
+        timeAnalyses: [
+          {
+            totalTimeUsedSeconds: 9800,
+            timeUtilizationPercentage: 90.7,
+            averageTimePerQuestionSeconds: 54.4,
+          },
+        ],
       },
       {
         id: 'att-4',
         examId: 'ex-4',
         createdAt: new Date('2026-08-15T10:00:00Z'),
         serverEndTime: new Date('2026-08-15T13:00:00Z'),
-        exam: { title: 'NEET Mock 4', totalMarks: 720, examTarget: { name: 'NEET' } },
+        exam: {
+          title: 'NEET Mock 4',
+          totalMarks: 720,
+          examTarget: { name: 'NEET' },
+        },
         result: {
           totalScore: 552,
           maxScore: 720,
@@ -120,12 +200,32 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           accuracy: 81.3,
           timeUsedSeconds: 9600,
           subjectResults: [
-            { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 140, maxScore: 180, accuracy: 78.4 },
-            { subjectId: 'sub-2', subject: { name: 'Chemistry' }, score: 140, maxScore: 180, accuracy: 79.0 },
+            {
+              subjectId: 'sub-1',
+              subject: { name: 'Physics' },
+              score: 140,
+              maxScore: 180,
+              accuracy: 78.4,
+            },
+            {
+              subjectId: 'sub-2',
+              subject: { name: 'Chemistry' },
+              score: 140,
+              maxScore: 180,
+              accuracy: 79.0,
+            },
           ],
         },
-        candidateRanks: [{ rank: 420, totalCandidates: 13500, percentile: 96.89 }],
-        timeAnalyses: [{ totalTimeUsedSeconds: 9600, timeUtilizationPercentage: 88.8, averageTimePerQuestionSeconds: 53.3 }],
+        candidateRanks: [
+          { rank: 420, totalCandidates: 13500, percentile: 96.89 },
+        ],
+        timeAnalyses: [
+          {
+            totalTimeUsedSeconds: 9600,
+            timeUtilizationPercentage: 88.8,
+            averageTimePerQuestionSeconds: 53.3,
+          },
+        ],
       },
     ];
 
@@ -161,7 +261,9 @@ describe('Mock Comparison & Performance Trend Engine', () => {
       const trends = aggregationService.aggregateTrends([]);
       expect(trends.summary.totalMocks).toBe(0);
       expect(trends.mocks).toEqual([]);
-      expect(trends.summary.trendDirections.scoreTrend).toBe('INSUFFICIENT_DATA');
+      expect(trends.summary.trendDirections.scoreTrend).toBe(
+        'INSUFFICIENT_DATA',
+      );
     });
 
     it('handles partial metric availability without failing', () => {
@@ -171,9 +273,14 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           examId: 'ex-1',
           createdAt: new Date(),
           exam: { title: 'Mock Partial', totalMarks: 720 },
-          result: { totalScore: 500, maxScore: 720, percentage: 69.4, accuracy: 75.0 },
+          result: {
+            totalScore: 500,
+            maxScore: 720,
+            percentage: 69.4,
+            accuracy: 75.0,
+          },
           candidateRanks: [], // rank pending
-          timeAnalyses: [],   // time analysis not available
+          timeAnalyses: [], // time analysis not available
         },
       ];
 
@@ -193,15 +300,28 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           studentId: 'st-1',
           createdAt: new Date(),
           examId: 'ex-1',
-          exam: { title: 'Mock 1', totalMarks: 720, examTarget: { name: 'NEET' } },
+          exam: {
+            title: 'Mock 1',
+            totalMarks: 720,
+            examTarget: { name: 'NEET' },
+          },
           result: {
             totalScore: 480,
             maxScore: 720,
             percentage: 66.67,
             accuracy: 72.5,
-            subjectResults: [{ subjectId: 'sub-1', subject: { name: 'Physics' }, score: 100, accuracy: 60.0 }],
+            subjectResults: [
+              {
+                subjectId: 'sub-1',
+                subject: { name: 'Physics' },
+                score: 100,
+                accuracy: 60.0,
+              },
+            ],
           },
-          candidateRanks: [{ rank: 1240, percentile: 89.67, totalCandidates: 12000 }],
+          candidateRanks: [
+            { rank: 1240, percentile: 89.67, totalCandidates: 12000 },
+          ],
           timeAnalyses: [{ totalTimeUsedSeconds: 10250 }],
         },
         {
@@ -209,22 +329,39 @@ describe('Mock Comparison & Performance Trend Engine', () => {
           studentId: 'st-1',
           createdAt: new Date(),
           examId: 'ex-2',
-          exam: { title: 'Mock 2', totalMarks: 720, examTarget: { name: 'NEET' } },
+          exam: {
+            title: 'Mock 2',
+            totalMarks: 720,
+            examTarget: { name: 'NEET' },
+          },
           result: {
             totalScore: 552,
             maxScore: 720,
             percentage: 76.67,
             accuracy: 81.3,
-            subjectResults: [{ subjectId: 'sub-1', subject: { name: 'Physics' }, score: 140, accuracy: 78.4 }],
+            subjectResults: [
+              {
+                subjectId: 'sub-1',
+                subject: { name: 'Physics' },
+                score: 140,
+                accuracy: 78.4,
+              },
+            ],
           },
-          candidateRanks: [{ rank: 420, percentile: 96.89, totalCandidates: 13500 }],
+          candidateRanks: [
+            { rank: 420, percentile: 96.89, totalCandidates: 13500 },
+          ],
           timeAnalyses: [{ totalTimeUsedSeconds: 9600 }],
         },
       ];
 
       prismaMock.attempt.findMany.mockResolvedValue(mockAttempts);
 
-      const comparison = await comparisonService.compareMocks('att-1', 'att-2', 'st-1');
+      const comparison = await comparisonService.compareMocks(
+        'att-1',
+        'att-2',
+        'st-1',
+      );
 
       expect(comparison.scoreDelta).toBe(72);
       expect(comparison.accuracyDelta).toBe(8.8);

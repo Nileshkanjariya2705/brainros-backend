@@ -37,7 +37,10 @@ export class TimeAnalysisService {
     analysisVersion: number = 1,
   ): Promise<DetailedTimeAnalysis> {
     // Check Redis cache first
-    const cached = await this.timingStore.getCachedAnalysis(attemptId, analysisVersion);
+    const cached = await this.timingStore.getCachedAnalysis(
+      attemptId,
+      analysisVersion,
+    );
     if (cached) {
       return cached as DetailedTimeAnalysis;
     }
@@ -48,12 +51,19 @@ export class TimeAnalysisService {
     });
     if (existing) {
       const parsed = existing.data as unknown as DetailedTimeAnalysis;
-      await this.timingStore.setCachedAnalysis(attemptId, analysisVersion, parsed);
+      await this.timingStore.setCachedAnalysis(
+        attemptId,
+        analysisVersion,
+        parsed,
+      );
       return parsed;
     }
 
     // Ensure any open active interval is finalized before generating analysis
-    await this.questionTimingService.finalizeActiveTiming(attemptId, 'RECOVERY');
+    await this.questionTimingService.finalizeActiveTiming(
+      attemptId,
+      'RECOVERY',
+    );
 
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
@@ -105,7 +115,9 @@ export class TimeAnalysisService {
       timeLogsByQuestion.set(log.examQuestionId, list);
     }
 
-    const answerMap = new Map(attempt.answers.map((a) => [a.examQuestionId, a]));
+    const answerMap = new Map(
+      attempt.answers.map((a) => [a.examQuestionId, a]),
+    );
 
     const questionSummaries: QuestionTimingSummary[] = [];
     const questionTimeValues: number[] = [];
@@ -154,7 +166,11 @@ export class TimeAnalysisService {
       totalCalculatedTimeUsedSeconds += totalTime;
       questionTimeValues.push(totalTime);
 
-      const isAttempted = !!ans && (!!ans.selectedOptionId || ans.numericalAnswer !== null || !!ans.selectedOptions);
+      const isAttempted =
+        !!ans &&
+        (!!ans.selectedOptionId ||
+          ans.numericalAnswer !== null ||
+          !!ans.selectedOptions);
       if (isAttempted) attemptedQuestionsCount++;
 
       // Determine Answer Status
@@ -181,7 +197,8 @@ export class TimeAnalysisService {
         chapterName: q.chapter?.name || undefined,
         questionTypeCode: q.questionType?.code || undefined,
         difficultyCode: q.difficultyLevel || 'MEDIUM',
-        visitCount: logs.length > 0 ? Math.max(...logs.map((l) => l.visitNumber)) : 0,
+        visitCount:
+          logs.length > 0 ? Math.max(...logs.map((l) => l.visitNumber)) : 0,
         totalTimeSpentSeconds: totalTime,
         initialVisitTimeSeconds: initialTime,
         reviewTimeSeconds: reviewTime,
@@ -194,47 +211,75 @@ export class TimeAnalysisService {
     }
 
     // ── 2. Time Totals & Averages ──────────────────────────────────
-    const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : 0;
-    const submittedAt = attempt.submittedAt ? new Date(attempt.submittedAt).getTime() : Date.now();
-    const wallClockTimeSeconds = Math.max(0, Math.floor((submittedAt - startedAt) / 1000));
+    const startedAt = attempt.startedAt
+      ? new Date(attempt.startedAt).getTime()
+      : 0;
+    const submittedAt = attempt.submittedAt
+      ? new Date(attempt.submittedAt).getTime()
+      : Date.now();
+    const wallClockTimeSeconds = Math.max(
+      0,
+      Math.floor((submittedAt - startedAt) / 1000),
+    );
     const totalTimeUsedSeconds = Math.min(
       totalTimeAvailableSeconds,
       Math.max(totalCalculatedTimeUsedSeconds, wallClockTimeSeconds),
     );
 
-    const timeRemainingSeconds = Math.max(0, totalTimeAvailableSeconds - totalTimeUsedSeconds);
-    const timeUtilizationPercentage = totalTimeAvailableSeconds > 0
-      ? Math.round((totalTimeUsedSeconds / totalTimeAvailableSeconds) * 10000) / 100
-      : 0;
+    const timeRemainingSeconds = Math.max(
+      0,
+      totalTimeAvailableSeconds - totalTimeUsedSeconds,
+    );
+    const timeUtilizationPercentage =
+      totalTimeAvailableSeconds > 0
+        ? Math.round(
+            (totalTimeUsedSeconds / totalTimeAvailableSeconds) * 10000,
+          ) / 100
+        : 0;
 
-    const averageTimePerQuestionSeconds = totalQuestions > 0
-      ? Math.round((totalTimeUsedSeconds / totalQuestions) * 10) / 10
-      : 0;
+    const averageTimePerQuestionSeconds =
+      totalQuestions > 0
+        ? Math.round((totalTimeUsedSeconds / totalQuestions) * 10) / 10
+        : 0;
 
-    const averageTimePerAttemptedQuestionSeconds = attemptedQuestionsCount > 0
-      ? Math.round((totalTimeUsedSeconds / attemptedQuestionsCount) * 10) / 10
-      : averageTimePerQuestionSeconds;
+    const averageTimePerAttemptedQuestionSeconds =
+      attemptedQuestionsCount > 0
+        ? Math.round((totalTimeUsedSeconds / attemptedQuestionsCount) * 10) / 10
+        : averageTimePerQuestionSeconds;
 
     // Median Time
     const sortedTimes = [...questionTimeValues].sort((a, b) => a - b);
     const mid = Math.floor(sortedTimes.length / 2);
-    const medianTimePerQuestionSeconds = sortedTimes.length === 0
-      ? 0
-      : sortedTimes.length % 2 !== 0
-        ? sortedTimes[mid]
-        : Math.round(((sortedTimes[mid - 1] + sortedTimes[mid]) / 2) * 10) / 10;
+    const medianTimePerQuestionSeconds =
+      sortedTimes.length === 0
+        ? 0
+        : sortedTimes.length % 2 !== 0
+          ? sortedTimes[mid]
+          : Math.round(((sortedTimes[mid - 1] + sortedTimes[mid]) / 2) * 10) /
+            10;
 
     // ── 3. Fastest & Slowest Questions ─────────────────────────────
-    const nonZeroQuestions = questionSummaries.filter((q) => q.totalTimeSpentSeconds > 0);
-    const fastestQuestion = nonZeroQuestions.length > 0
-      ? [...nonZeroQuestions].sort((a, b) => a.totalTimeSpentSeconds - b.totalTimeSpentSeconds)[0]
-      : null;
-    const slowestQuestion = questionSummaries.length > 0
-      ? [...questionSummaries].sort((a, b) => b.totalTimeSpentSeconds - a.totalTimeSpentSeconds)[0]
-      : null;
+    const nonZeroQuestions = questionSummaries.filter(
+      (q) => q.totalTimeSpentSeconds > 0,
+    );
+    const fastestQuestion =
+      nonZeroQuestions.length > 0
+        ? [...nonZeroQuestions].sort(
+            (a, b) => a.totalTimeSpentSeconds - b.totalTimeSpentSeconds,
+          )[0]
+        : null;
+    const slowestQuestion =
+      questionSummaries.length > 0
+        ? [...questionSummaries].sort(
+            (a, b) => b.totalTimeSpentSeconds - a.totalTimeSpentSeconds,
+          )[0]
+        : null;
 
     // ── 4. Subject Time Breakdown ──────────────────────────────────
-    const subjectMap = new Map<string, { id: string; name: string; count: number; time: number }>();
+    const subjectMap = new Map<
+      string,
+      { id: string; name: string; count: number; time: number }
+    >();
     for (const qs of questionSummaries) {
       const entry = subjectMap.get(qs.subjectName) || {
         id: qs.subjectId,
@@ -247,23 +292,43 @@ export class TimeAnalysisService {
       subjectMap.set(qs.subjectName, entry);
     }
 
-    const subjects: SubjectTimeSummary[] = Array.from(subjectMap.values()).map((s) => {
-      const timePercentage = totalTimeUsedSeconds > 0 ? Math.round((s.time / totalTimeUsedSeconds) * 10000) / 100 : 0;
-      const questionPercentage = totalQuestions > 0 ? Math.round((s.count / totalQuestions) * 10000) / 100 : 0;
-      return {
-        subjectId: s.id,
-        subjectName: s.name,
-        questionCount: s.count,
-        timeSpentSeconds: s.time,
-        averageTimePerQuestionSeconds: s.count > 0 ? Math.round((s.time / s.count) * 10) / 10 : 0,
-        timePercentage,
-        questionPercentage,
-        allocationDifference: Math.round((timePercentage - questionPercentage) * 100) / 100,
-      };
-    });
+    const subjects: SubjectTimeSummary[] = Array.from(subjectMap.values()).map(
+      (s) => {
+        const timePercentage =
+          totalTimeUsedSeconds > 0
+            ? Math.round((s.time / totalTimeUsedSeconds) * 10000) / 100
+            : 0;
+        const questionPercentage =
+          totalQuestions > 0
+            ? Math.round((s.count / totalQuestions) * 10000) / 100
+            : 0;
+        return {
+          subjectId: s.id,
+          subjectName: s.name,
+          questionCount: s.count,
+          timeSpentSeconds: s.time,
+          averageTimePerQuestionSeconds:
+            s.count > 0 ? Math.round((s.time / s.count) * 10) / 10 : 0,
+          timePercentage,
+          questionPercentage,
+          allocationDifference:
+            Math.round((timePercentage - questionPercentage) * 100) / 100,
+        };
+      },
+    );
 
     // ── 5. Chapter Time Breakdown ──────────────────────────────────
-    const chapterMap = new Map<string, { id: string; name: string; subjectId: string; subjectName: string; count: number; time: number }>();
+    const chapterMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        subjectId: string;
+        subjectName: string;
+        count: number;
+        time: number;
+      }
+    >();
     for (const qs of questionSummaries) {
       if (!qs.chapterId) continue;
       const entry = chapterMap.get(qs.chapterId) || {
@@ -279,21 +344,30 @@ export class TimeAnalysisService {
       chapterMap.set(qs.chapterId, entry);
     }
 
-    const chapters: ChapterTimeSummary[] = Array.from(chapterMap.values()).map((c) => ({
-      chapterId: c.id,
-      chapterName: c.name,
-      subjectId: c.subjectId,
-      subjectName: c.subjectName,
-      questionCount: c.count,
-      timeSpentSeconds: c.time,
-      averageTimePerQuestionSeconds: c.count > 0 ? Math.round((c.time / c.count) * 10) / 10 : 0,
-      timePercentage: totalTimeUsedSeconds > 0 ? Math.round((c.time / totalTimeUsedSeconds) * 10000) / 100 : 0,
-    }));
+    const chapters: ChapterTimeSummary[] = Array.from(chapterMap.values()).map(
+      (c) => ({
+        chapterId: c.id,
+        chapterName: c.name,
+        subjectId: c.subjectId,
+        subjectName: c.subjectName,
+        questionCount: c.count,
+        timeSpentSeconds: c.time,
+        averageTimePerQuestionSeconds:
+          c.count > 0 ? Math.round((c.time / c.count) * 10) / 10 : 0,
+        timePercentage:
+          totalTimeUsedSeconds > 0
+            ? Math.round((c.time / totalTimeUsedSeconds) * 10000) / 100
+            : 0,
+      }),
+    );
 
     // ── 6. Correctness Time Summary ────────────────────────────────
-    let correctTime = 0, correctCount = 0;
-    let wrongTime = 0, wrongCount = 0;
-    let unattemptedTime = 0, unattemptedCount = 0;
+    let correctTime = 0,
+      correctCount = 0;
+    let wrongTime = 0,
+      wrongCount = 0;
+    let unattemptedTime = 0,
+      unattemptedCount = 0;
 
     for (const qs of questionSummaries) {
       if (qs.answerStatus === 'CORRECT') {
@@ -313,22 +387,36 @@ export class TimeAnalysisService {
         outcome: 'CORRECT',
         count: correctCount,
         totalTimeSeconds: correctTime,
-        averageTimeSeconds: correctCount > 0 ? Math.round(correctTime / correctCount) : 0,
-        percentageOfTime: totalTimeUsedSeconds > 0 ? Math.round((correctTime / totalTimeUsedSeconds) * 100) : 0,
+        averageTimeSeconds:
+          correctCount > 0 ? Math.round(correctTime / correctCount) : 0,
+        percentageOfTime:
+          totalTimeUsedSeconds > 0
+            ? Math.round((correctTime / totalTimeUsedSeconds) * 100)
+            : 0,
       },
       {
         outcome: 'WRONG',
         count: wrongCount,
         totalTimeSeconds: wrongTime,
-        averageTimeSeconds: wrongCount > 0 ? Math.round(wrongTime / wrongCount) : 0,
-        percentageOfTime: totalTimeUsedSeconds > 0 ? Math.round((wrongTime / totalTimeUsedSeconds) * 100) : 0,
+        averageTimeSeconds:
+          wrongCount > 0 ? Math.round(wrongTime / wrongCount) : 0,
+        percentageOfTime:
+          totalTimeUsedSeconds > 0
+            ? Math.round((wrongTime / totalTimeUsedSeconds) * 100)
+            : 0,
       },
       {
         outcome: 'UNATTEMPTED',
         count: unattemptedCount,
         totalTimeSeconds: unattemptedTime,
-        averageTimeSeconds: unattemptedCount > 0 ? Math.round(unattemptedTime / unattemptedCount) : 0,
-        percentageOfTime: totalTimeUsedSeconds > 0 ? Math.round((unattemptedTime / totalTimeUsedSeconds) * 100) : 0,
+        averageTimeSeconds:
+          unattemptedCount > 0
+            ? Math.round(unattemptedTime / unattemptedCount)
+            : 0,
+        percentageOfTime:
+          totalTimeUsedSeconds > 0
+            ? Math.round((unattemptedTime / totalTimeUsedSeconds) * 100)
+            : 0,
       },
     ];
 
@@ -350,7 +438,9 @@ export class TimeAnalysisService {
       entry.time += qs.totalTimeSpentSeconds;
       typeMap.set(code, entry);
     }
-    const questionTypes: QuestionTypeTimeSummary[] = Array.from(typeMap.entries()).map(([code, d]) => ({
+    const questionTypes: QuestionTypeTimeSummary[] = Array.from(
+      typeMap.entries(),
+    ).map(([code, d]) => ({
       questionType: code,
       count: d.count,
       totalTimeSeconds: d.time,
@@ -380,7 +470,10 @@ export class TimeAnalysisService {
 
       if (qs.totalTimeSpentSeconds < 15 && qs.answerStatus !== 'UNATTEMPTED') {
         rushed++;
-      } else if (qs.totalTimeSpentSeconds > averageTimePerQuestionSeconds * 2.5 && qs.totalTimeSpentSeconds > 60) {
+      } else if (
+        qs.totalTimeSpentSeconds > averageTimePerQuestionSeconds * 2.5 &&
+        qs.totalTimeSpentSeconds > 60
+      ) {
         overthought++;
       } else {
         optimal++;
@@ -405,7 +498,10 @@ export class TimeAnalysisService {
       fastestQuestion,
       slowestQuestion,
       visitAnalysis: {
-        averageVisitsPerQuestion: totalQuestions > 0 ? Math.round((totalVisits / totalQuestions) * 10) / 10 : 0,
+        averageVisitsPerQuestion:
+          totalQuestions > 0
+            ? Math.round((totalVisits / totalQuestions) * 10) / 10
+            : 0,
         questionsVisitedOnce: singleVisitCount,
         questionsVisitedMultipleTimes: multiVisitCount,
         mostVisitedQuestionId: mostVisitedQId,
@@ -458,7 +554,11 @@ export class TimeAnalysisService {
       },
     });
 
-    await this.timingStore.setCachedAnalysis(attemptId, analysisVersion, report);
+    await this.timingStore.setCachedAnalysis(
+      attemptId,
+      analysisVersion,
+      report,
+    );
 
     return report;
   }
@@ -466,7 +566,10 @@ export class TimeAnalysisService {
   /**
    * Recalculate Time Analysis from raw logs
    */
-  async recalculateTimeAnalysis(attemptId: string, version: number = 1): Promise<DetailedTimeAnalysis> {
+  async recalculateTimeAnalysis(
+    attemptId: string,
+    version: number = 1,
+  ): Promise<DetailedTimeAnalysis> {
     await this.timingStore.invalidateAnalysisCache(attemptId, version);
     return this.generateTimeAnalysis(attemptId, version);
   }
@@ -484,7 +587,8 @@ export class TimeAnalysisService {
       timeRemainingSeconds: full.timeRemainingSeconds,
       timeUtilizationPercentage: full.timeUtilizationPercentage,
       averageTimePerQuestionSeconds: full.averageTimePerQuestionSeconds,
-      averageTimePerAttemptedQuestionSeconds: full.averageTimePerAttemptedQuestionSeconds,
+      averageTimePerAttemptedQuestionSeconds:
+        full.averageTimePerAttemptedQuestionSeconds,
       medianTimePerQuestionSeconds: full.medianTimePerQuestionSeconds,
       timeWastedSeconds: full.timeWastedSeconds,
       fastestQuestion: full.fastestQuestion,
@@ -496,8 +600,11 @@ export class TimeAnalysisService {
 
   async getQuestionTiming(attemptId: string, questionId: string) {
     const full = await this.generateTimeAnalysis(attemptId);
-    const q = full.questions.find((x) => x.examQuestionId === questionId || x.questionId === questionId);
-    if (!q) throw new NotFoundException('Question timing not found for this attempt');
+    const q = full.questions.find(
+      (x) => x.examQuestionId === questionId || x.questionId === questionId,
+    );
+    if (!q)
+      throw new NotFoundException('Question timing not found for this attempt');
     return q;
   }
 
@@ -528,7 +635,9 @@ export class TimeAnalysisService {
         const selected = answer.selectedOptions as string[] | null;
         if (!selected || selected.length === 0) return false;
         const correctIds = new Set<string>(
-          question.options?.filter((o: any) => o.isCorrect).map((o: any) => o.id) || [],
+          question.options
+            ?.filter((o: any) => o.isCorrect)
+            .map((o: any) => o.id) || [],
         );
         const selectedSet = new Set<string>(selected);
         if (correctIds.size !== selectedSet.size) return false;
@@ -538,14 +647,25 @@ export class TimeAnalysisService {
         return true;
       }
       case 'NUM': {
-        if (answer.numericalAnswer === null || answer.numericalAnswer === undefined) return false;
+        if (
+          answer.numericalAnswer === null ||
+          answer.numericalAnswer === undefined
+        )
+          return false;
         const correctVal = question.correctAnswer;
         if (correctVal === null || correctVal === undefined) return false;
         if (typeof correctVal === 'number') {
           return Math.abs(answer.numericalAnswer - correctVal) < 0.001;
         }
-        if (typeof correctVal === 'object' && correctVal.min !== undefined && correctVal.max !== undefined) {
-          return answer.numericalAnswer >= correctVal.min && answer.numericalAnswer <= correctVal.max;
+        if (
+          typeof correctVal === 'object' &&
+          correctVal.min !== undefined &&
+          correctVal.max !== undefined
+        ) {
+          return (
+            answer.numericalAnswer >= correctVal.min &&
+            answer.numericalAnswer <= correctVal.max
+          );
         }
         return false;
       }

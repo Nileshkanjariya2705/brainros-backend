@@ -31,7 +31,9 @@ export class ProviderRegistry implements OnModuleInit {
   getProvider(channel: NotificationChannel): INotificationProvider {
     const provider = this.providers.get(channel);
     if (!provider) {
-      throw new NotFoundException(`No notification provider registered for channel '${channel}'`);
+      throw new NotFoundException(
+        `No notification provider registered for channel '${channel}'`,
+      );
     }
     return provider;
   }

@@ -1,7 +1,9 @@
 import { IsNotEmpty, IsString, Length } from 'class-validator';
 
 export class RequestPasswordlessLoginOtpDto {
-  @IsNotEmpty({ message: 'Identifier (Email, Student ID, or Mobile number) is required' })
+  @IsNotEmpty({
+    message: 'Identifier (Email, Student ID, or Mobile number) is required',
+  })
   @IsString()
   identifier: string;
 }

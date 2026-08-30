@@ -8,7 +8,6 @@ import { ExamGenerationService } from './services/exam-generation.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('Exam Generator & Snapshot Engine', () => {
-
   let randomizationService: ExamRandomizationService;
   let validationService: BlueprintValidationService;
   let poolService: QuestionPoolService;
@@ -29,7 +28,12 @@ describe('Exam Generator & Snapshot Engine', () => {
     },
     examVersion: {
       aggregate: jest.fn().mockResolvedValue({ _max: { versionNumber: 0 } }),
-      create: jest.fn().mockResolvedValue({ id: 'version-1', examId: 'exam-1', versionNumber: 1, status: 'GENERATED' }),
+      create: jest.fn().mockResolvedValue({
+        id: 'version-1',
+        examId: 'exam-1',
+        versionNumber: 1,
+        status: 'GENERATED',
+      }),
       findUnique: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
@@ -48,7 +52,6 @@ describe('Exam Generator & Snapshot Engine', () => {
       create: jest.fn().mockResolvedValue({ id: 'evoptr-1' }),
     },
     $transaction: jest.fn((callback) => callback(mockPrismaService)),
-
   };
 
   beforeEach(async () => {
@@ -63,11 +66,17 @@ describe('Exam Generator & Snapshot Engine', () => {
       ],
     }).compile();
 
-    randomizationService = module.get<ExamRandomizationService>(ExamRandomizationService);
-    validationService = module.get<BlueprintValidationService>(BlueprintValidationService);
+    randomizationService = module.get<ExamRandomizationService>(
+      ExamRandomizationService,
+    );
+    validationService = module.get<BlueprintValidationService>(
+      BlueprintValidationService,
+    );
     poolService = module.get<QuestionPoolService>(QuestionPoolService);
     snapshotService = module.get<ExamSnapshotService>(ExamSnapshotService);
-    generationService = module.get<ExamGenerationService>(ExamGenerationService);
+    generationService = module.get<ExamGenerationService>(
+      ExamGenerationService,
+    );
 
     jest.clearAllMocks();
   });
@@ -80,7 +89,7 @@ describe('Exam Generator & Snapshot Engine', () => {
         { subjectId: 'subj-bio', selectionCount: 90 },
       ];
 
-      const resolved = validationService.resolveBlueprintRuleCounts(180, rules as any);
+      const resolved = validationService.resolveBlueprintRuleCounts(180, rules);
       expect(resolved).toHaveLength(3);
       expect(resolved.reduce((sum, r) => sum + r.requiredCount, 0)).toBe(180);
       expect(resolved[0].requiredCount).toBe(45);
@@ -95,12 +104,21 @@ describe('Exam Generator & Snapshot Engine', () => {
         { difficultyLevel: 'HARD', selectionPercentage: 20 },
       ];
 
-      const resolved = validationService.resolveBlueprintRuleCounts(180, rules as any);
+      const resolved = validationService.resolveBlueprintRuleCounts(
+        180,
+        rules as any,
+      );
       expect(resolved).toHaveLength(3);
       expect(resolved.reduce((sum, r) => sum + r.requiredCount, 0)).toBe(180);
-      expect(resolved.find((r) => r.difficultyLevel === 'EASY')?.requiredCount).toBe(54);
-      expect(resolved.find((r) => r.difficultyLevel === 'MEDIUM')?.requiredCount).toBe(90);
-      expect(resolved.find((r) => r.difficultyLevel === 'HARD')?.requiredCount).toBe(36);
+      expect(
+        resolved.find((r) => r.difficultyLevel === 'EASY')?.requiredCount,
+      ).toBe(54);
+      expect(
+        resolved.find((r) => r.difficultyLevel === 'MEDIUM')?.requiredCount,
+      ).toBe(90);
+      expect(
+        resolved.find((r) => r.difficultyLevel === 'HARD')?.requiredCount,
+      ).toBe(36);
     });
 
     it('should reject blueprint if sum of fixed counts exceeds totalQuestions', () => {
@@ -109,9 +127,9 @@ describe('Exam Generator & Snapshot Engine', () => {
         { subjectId: 'subj-2', selectionCount: 50 },
       ];
 
-      expect(() => validationService.resolveBlueprintRuleCounts(100, rules as any)).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        validationService.resolveBlueprintRuleCounts(100, rules as any),
+      ).toThrow(BadRequestException);
     });
 
     it('should reject overlapping duplicate rules with identical criteria', () => {
@@ -120,15 +138,26 @@ describe('Exam Generator & Snapshot Engine', () => {
         { subjectId: 'subj-1', difficultyLevel: 'EASY', selectionCount: 30 },
       ];
 
-      expect(() => validationService.resolveBlueprintRuleCounts(50, rules as any)).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        validationService.resolveBlueprintRuleCounts(50, rules as any),
+      ).toThrow(BadRequestException);
     });
   });
 
   describe('2. Deterministic Seed-Based Randomization & Answer Integrity', () => {
     it('should produce identical shuffle ordering when given the exact same seed', () => {
-      const items = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'];
+      const items = [
+        'Q1',
+        'Q2',
+        'Q3',
+        'Q4',
+        'Q5',
+        'Q6',
+        'Q7',
+        'Q8',
+        'Q9',
+        'Q10',
+      ];
       const seed = 'test_audit_seed_12345';
 
       const shuffle1 = randomizationService.shuffleArray(items, seed);
@@ -145,7 +174,10 @@ describe('Exam Generator & Snapshot Engine', () => {
         { id: 'opt-4', isCorrect: false, label: 'Option D' },
       ];
 
-      const shuffledOpts = randomizationService.shuffleOptions(options, 'seed_opts_999');
+      const shuffledOpts = randomizationService.shuffleOptions(
+        options,
+        'seed_opts_999',
+      );
 
       expect(shuffledOpts).toHaveLength(4);
       const correctOpt = shuffledOpts.find((o) => o.isCorrect);
@@ -196,8 +228,18 @@ describe('Exam Generator & Snapshot Engine', () => {
           },
         ],
         options: [
-          { id: 'opt-501', optionKey: 'A', optionText: 'Plant food synthesis', isCorrect: true },
-          { id: 'opt-502', optionKey: 'B', optionText: 'Animal digestion', isCorrect: false },
+          {
+            id: 'opt-501',
+            optionKey: 'A',
+            optionText: 'Plant food synthesis',
+            isCorrect: true,
+          },
+          {
+            id: 'opt-502',
+            optionKey: 'B',
+            optionText: 'Animal digestion',
+            isCorrect: false,
+          },
         ],
         answer: {
           answerType: 'SINGLE_CORRECT',
@@ -212,7 +254,9 @@ describe('Exam Generator & Snapshot Engine', () => {
         durationMinutes: 60,
         defaultMarksPerQuestion: 4,
         defaultNegativeMarks: 1,
-        languages: [{ language: { id: 'lang-en', code: 'en', name: 'English' } }],
+        languages: [
+          { language: { id: 'lang-en', code: 'en', name: 'English' } },
+        ],
       };
 
       const mockCreatedVersion = {
@@ -222,7 +266,9 @@ describe('Exam Generator & Snapshot Engine', () => {
         status: 'GENERATED',
       };
 
-      mockPrismaService.examVersion.create.mockResolvedValue(mockCreatedVersion);
+      mockPrismaService.examVersion.create.mockResolvedValue(
+        mockCreatedVersion,
+      );
 
       // Step 2: Create snapshot
       await snapshotService.persistImmutableExamVersionSnapshot({
@@ -245,10 +291,13 @@ describe('Exam Generator & Snapshot Engine', () => {
       );
 
       // Step 3: Admin later modifies live Question in Question Bank to "What is photosynthesis in green plants?"
-      originalLiveQuestion.translations[0].questionText = 'What is photosynthesis in green plants?';
+      originalLiveQuestion.translations[0].questionText =
+        'What is photosynthesis in green plants?';
 
       // Step 4: When student takes the exam, fetch from ExamVersionQuestion snapshot table
-      mockPrismaService.examVersion.findUnique.mockResolvedValue(mockCreatedVersion);
+      mockPrismaService.examVersion.findUnique.mockResolvedValue(
+        mockCreatedVersion,
+      );
       mockPrismaService.examVersionQuestion.findMany.mockResolvedValue([
         {
           id: 'evq-1',
@@ -270,7 +319,8 @@ describe('Exam Generator & Snapshot Engine', () => {
         },
       ]);
 
-      const examQuestions = await generationService.getExamVersionQuestions('version-1');
+      const examQuestions =
+        await generationService.getExamVersionQuestions('version-1');
       expect(examQuestions[0].questionText).toBe('What is photosynthesis?');
       expect(examQuestions[0].options[0].sourceOptionId).toBe('opt-501');
       expect(examQuestions[0].options[0].isCorrect).toBe(true);
@@ -284,8 +334,16 @@ describe('Exam Generator & Snapshot Engine', () => {
         () => new Promise((resolve) => setTimeout(resolve, 50)),
       );
 
-      const p1 = generationService.generateExamVersion('bp-dup-test', {}, 'user-1');
-      const p2 = generationService.generateExamVersion('bp-dup-test', {}, 'user-2');
+      const p1 = generationService.generateExamVersion(
+        'bp-dup-test',
+        {},
+        'user-1',
+      );
+      const p2 = generationService.generateExamVersion(
+        'bp-dup-test',
+        {},
+        'user-2',
+      );
 
       await expect(Promise.all([p1, p2])).rejects.toThrow(ConflictException);
     });

@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsUUID, IsOptional, IsBoolean, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsUUID,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class SwitchExamLanguageDto {

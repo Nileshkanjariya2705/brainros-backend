@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsEnum, IsEmail, IsUUID, IsDateString, IsInt, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsEmail,
+  IsUUID,
+  IsDateString,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ═══════════════════════════════════════════════════════════════════

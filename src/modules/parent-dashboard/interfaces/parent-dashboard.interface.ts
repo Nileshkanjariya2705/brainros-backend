@@ -113,6 +113,27 @@ export interface ParentRecentTestItem {
   percentile: number | null;
 }
 
+export interface RecommendedRevisionItem {
+  subjectName: string;
+  topicName: string;
+  reason: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  recommendedActions: string[];
+  estimatedHours: number;
+}
+
+export interface ParentTrendPoint {
+  attemptId: string;
+  examName: string;
+  date: string;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  accuracy: number;
+  rank: number | null;
+  percentile: number | null;
+}
+
 export interface ParentDashboardResponse {
   student: ParentStudentInfo;
   summary: ParentDashboardSummary;
@@ -121,5 +142,7 @@ export interface ParentDashboardResponse {
   timeManagement: ParentTimeManagementReport;
   rank: ParentRankSummary;
   recommendations: ParentRecommendationItem[];
+  recommendedRevisions: RecommendedRevisionItem[];
+  trendHistory: ParentTrendPoint[];
   recentTests: ParentRecentTestItem[];
 }

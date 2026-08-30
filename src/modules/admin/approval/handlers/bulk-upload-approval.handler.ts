@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { IApprovalHandler } from '../interfaces/approval-handler.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { BulkUploadActivationService } from '../../../institution/services/bulk-upload-activation.service';
@@ -23,7 +27,9 @@ export class BulkUploadApprovalHandler implements IApprovalHandler {
     }
 
     if (upload.status === 'ACTIVATED' || upload.status === 'APPROVED') {
-      throw new BadRequestException(`Bulk upload '${entityId}' is already in status '${upload.status}'.`);
+      throw new BadRequestException(
+        `Bulk upload '${entityId}' is already in status '${upload.status}'.`,
+      );
     }
 
     return upload;
@@ -34,17 +40,25 @@ export class BulkUploadApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     comment?: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const upload = await db.bulkUpload.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!upload) {
-      throw new NotFoundException(`Bulk upload '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Bulk upload '${request.resourceId}' not found.`,
+      );
     }
 
-    const beforeState = { status: upload.status, validRowCount: upload.validRowCount };
+    const beforeState = {
+      status: upload.status,
+      validRowCount: upload.validRowCount,
+    };
 
     const updated = await db.bulkUpload.update({
       where: { id: upload.id },
@@ -71,14 +85,19 @@ export class BulkUploadApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     reason: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const upload = await db.bulkUpload.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!upload) {
-      throw new NotFoundException(`Bulk upload '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Bulk upload '${request.resourceId}' not found.`,
+      );
     }
 
     const beforeState = { status: upload.status };
@@ -99,13 +118,19 @@ export class BulkUploadApprovalHandler implements IApprovalHandler {
     request: any,
     actorId: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const upload = await db.bulkUpload.findUnique({
       where: { id: request.resourceId },
     });
 
-    if (!upload) throw new NotFoundException(`Bulk upload '${request.resourceId}' not found.`);
+    if (!upload)
+      throw new NotFoundException(
+        `Bulk upload '${request.resourceId}' not found.`,
+      );
 
     const beforeState = { status: upload.status };
     const updated = await db.bulkUpload.update({

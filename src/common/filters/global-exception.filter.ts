@@ -25,7 +25,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const path = request.url;
     const timestamp = new Date().toISOString();
-    const requestId = request.headers['x-request-id'] || request.id || undefined;
+    const requestId =
+      request.headers['x-request-id'] || request.id || undefined;
 
     // 1. Handle NestJS HttpException (BadRequest, NotFound, etc.)
     if (exception instanceof HttpException) {
@@ -99,7 +100,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       case 'P2025': {
         return {
           statusCode: HttpStatus.NOT_FOUND,
-          message: (err.meta?.cause as string) || 'Requested record was not found.',
+          message:
+            (err.meta?.cause as string) || 'Requested record was not found.',
           error: 'Not Found',
           details: null,
         };
@@ -119,9 +121,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
    */
   private logRequestFailure(request: any, status: number, exception: any) {
     const { method, url } = request;
-    const userContext = request.user ? `User ID: ${request.user.userId}` : 'Unauthenticated';
-    const exceptionMessage = exception instanceof Error ? exception.message : String(exception);
-    
+    const userContext = request.user
+      ? `User ID: ${request.user.userId}`
+      : 'Unauthenticated';
+    const exceptionMessage =
+      exception instanceof Error ? exception.message : String(exception);
+
     const logMsg = `[${method}] ${url} - Status: ${status} - ${userContext} - Exception: ${exceptionMessage}`;
 
     if (status >= 500) {

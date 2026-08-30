@@ -63,10 +63,18 @@ describe('Predicted Rank Engine', () => {
       ],
     }).compile();
 
-    interpolationModel = module.get<HistoricalInterpolationModel>(HistoricalInterpolationModel);
-    datasetService = module.get<HistoricalDatasetService>(HistoricalDatasetService);
-    generatorService = module.get<PredictionGeneratorService>(PredictionGeneratorService);
-    evaluationService = module.get<PredictionEvaluationService>(PredictionEvaluationService);
+    interpolationModel = module.get<HistoricalInterpolationModel>(
+      HistoricalInterpolationModel,
+    );
+    datasetService = module.get<HistoricalDatasetService>(
+      HistoricalDatasetService,
+    );
+    generatorService = module.get<PredictionGeneratorService>(
+      PredictionGeneratorService,
+    );
+    evaluationService = module.get<PredictionEvaluationService>(
+      PredictionEvaluationService,
+    );
     jest.clearAllMocks();
   });
 
@@ -80,10 +88,38 @@ describe('Predicted Rank Engine', () => {
         totalCandidates: 10000,
         weight: 1.0,
         scoreRanges: [
-          { minScore: 600, maxScore: 609, representativeScore: 605, minRank: 351, maxRank: 500, candidateCount: 150 },
-          { minScore: 610, maxScore: 619, representativeScore: 615, minRank: 221, maxRank: 350, candidateCount: 130 },
-          { minScore: 620, maxScore: 629, representativeScore: 625, minRank: 121, maxRank: 220, candidateCount: 100 },
-          { minScore: 630, maxScore: 720, representativeScore: 675, minRank: 1, maxRank: 120, candidateCount: 120 },
+          {
+            minScore: 600,
+            maxScore: 609,
+            representativeScore: 605,
+            minRank: 351,
+            maxRank: 500,
+            candidateCount: 150,
+          },
+          {
+            minScore: 610,
+            maxScore: 619,
+            representativeScore: 615,
+            minRank: 221,
+            maxRank: 350,
+            candidateCount: 130,
+          },
+          {
+            minScore: 620,
+            maxScore: 629,
+            representativeScore: 625,
+            minRank: 121,
+            maxRank: 220,
+            candidateCount: 100,
+          },
+          {
+            minScore: 630,
+            maxScore: 720,
+            representativeScore: 675,
+            minRank: 1,
+            maxRank: 120,
+            candidateCount: 120,
+          },
         ],
       },
     ];
@@ -103,8 +139,12 @@ describe('Predicted Rank Engine', () => {
       expect(output.status).toBe('COMPLETED');
       expect(output.predictedRank).toBeGreaterThanOrEqual(220);
       expect(output.predictedRank).toBeLessThanOrEqual(350);
-      expect(output.predictedRankMin).toBeLessThanOrEqual(output.predictedRank!);
-      expect(output.predictedRankMax).toBeGreaterThanOrEqual(output.predictedRank!);
+      expect(output.predictedRankMin).toBeLessThanOrEqual(
+        output.predictedRank!,
+      );
+      expect(output.predictedRankMax).toBeGreaterThanOrEqual(
+        output.predictedRank!,
+      );
       expect(output.confidence).toBeDefined();
     });
 
@@ -150,7 +190,14 @@ describe('Predicted Rank Engine', () => {
           totalCandidates: 5000,
           weight: 0.6,
           scoreRanges: [
-            { minScore: 200, maxScore: 300, representativeScore: 250, minRank: 1, maxRank: 100, candidateCount: 100 },
+            {
+              minScore: 200,
+              maxScore: 300,
+              representativeScore: 250,
+              minRank: 1,
+              maxRank: 100,
+              candidateCount: 100,
+            },
           ],
         },
         {
@@ -161,7 +208,14 @@ describe('Predicted Rank Engine', () => {
           totalCandidates: 5000,
           weight: 0.4,
           scoreRanges: [
-            { minScore: 200, maxScore: 300, representativeScore: 250, minRank: 1, maxRank: 120, candidateCount: 120 },
+            {
+              minScore: 200,
+              maxScore: 300,
+              representativeScore: 250,
+              minRank: 1,
+              maxRank: 120,
+              candidateCount: 120,
+            },
           ],
         },
       ];
@@ -190,14 +244,38 @@ describe('Predicted Rank Engine', () => {
         totalMarks: 720,
         totalCandidates: 10000,
         scoreRanges: [
-          { minScore: 500, maxScore: 599, representativeScore: 550, minRank: 500, maxRank: 1000, candidateCount: 500 },
-          { minScore: 600, maxScore: 699, representativeScore: 650, minRank: 100, maxRank: 499, candidateCount: 400 },
-          { minScore: 700, maxScore: 720, representativeScore: 710, minRank: 1, maxRank: 99, candidateCount: 99 },
+          {
+            minScore: 500,
+            maxScore: 599,
+            representativeScore: 550,
+            minRank: 500,
+            maxRank: 1000,
+            candidateCount: 500,
+          },
+          {
+            minScore: 600,
+            maxScore: 699,
+            representativeScore: 650,
+            minRank: 100,
+            maxRank: 499,
+            candidateCount: 400,
+          },
+          {
+            minScore: 700,
+            maxScore: 720,
+            representativeScore: 710,
+            minRank: 1,
+            maxRank: 99,
+            candidateCount: 99,
+          },
         ],
       };
 
       prismaMock.historicalExam.findUnique.mockResolvedValue(mockExam);
-      prismaMock.historicalExam.update.mockResolvedValue({ ...mockExam, dataQualityStatus: 'VALID' });
+      prismaMock.historicalExam.update.mockResolvedValue({
+        ...mockExam,
+        dataQualityStatus: 'VALID',
+      });
 
       const report = await datasetService.validateDataset('hexam-1');
       expect(report.status).toBe('VALID');
@@ -212,13 +290,30 @@ describe('Predicted Rank Engine', () => {
         totalCandidates: 10000,
         scoreRanges: [
           // Lower score 500 has BETTER rank (1-100) than higher score 700 (500-1000) -> inverted!
-          { minScore: 500, maxScore: 599, representativeScore: 550, minRank: 1, maxRank: 100, candidateCount: 100 },
-          { minScore: 700, maxScore: 720, representativeScore: 710, minRank: 500, maxRank: 1000, candidateCount: 500 },
+          {
+            minScore: 500,
+            maxScore: 599,
+            representativeScore: 550,
+            minRank: 1,
+            maxRank: 100,
+            candidateCount: 100,
+          },
+          {
+            minScore: 700,
+            maxScore: 720,
+            representativeScore: 710,
+            minRank: 500,
+            maxRank: 1000,
+            candidateCount: 500,
+          },
         ],
       };
 
       prismaMock.historicalExam.findUnique.mockResolvedValue(mockInvertedExam);
-      prismaMock.historicalExam.update.mockResolvedValue({ ...mockInvertedExam, dataQualityStatus: 'INVALID' });
+      prismaMock.historicalExam.update.mockResolvedValue({
+        ...mockInvertedExam,
+        dataQualityStatus: 'INVALID',
+      });
 
       const report = await datasetService.validateDataset('hexam-2');
       expect(report.isMonotonic).toBe(false);

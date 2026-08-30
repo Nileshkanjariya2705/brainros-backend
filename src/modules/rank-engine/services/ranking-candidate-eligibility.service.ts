@@ -11,7 +11,10 @@ export class RankingCandidateEligibilityService {
   /**
    * Fetch and normalize all eligible candidate attempts for ranking
    */
-  async getEligibleCandidates(examId: string, examVersionId?: string): Promise<CandidateRankInput[]> {
+  async getEligibleCandidates(
+    examId: string,
+    examVersionId?: string,
+  ): Promise<CandidateRankInput[]> {
     const whereClause: any = {
       examId,
       result: { isNot: null },
@@ -61,12 +64,16 @@ export class RankingCandidateEligibilityService {
         timeUsedSeconds: res.timeUsedSeconds || 0,
         state: student.state ? student.state.trim() : null,
         district: student.district ? student.district.trim() : null,
-        schoolCollege: student.schoolCollege ? student.schoolCollege.trim() : null,
+        schoolCollege: student.schoolCollege
+          ? student.schoolCollege.trim()
+          : null,
         category: 'GENERAL', // extensible default
       });
     }
 
-    this.logger.log(`Found ${candidates.length} eligible candidates for exam '${examId}' ranking`);
+    this.logger.log(
+      `Found ${candidates.length} eligible candidates for exam '${examId}' ranking`,
+    );
     return candidates;
   }
 }

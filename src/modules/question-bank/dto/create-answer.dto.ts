@@ -1,4 +1,10 @@
-import { IsOptional, IsEnum, IsArray, IsNumber, IsString } from 'class-validator';
+import {
+  IsOptional,
+  IsEnum,
+  IsArray,
+  IsNumber,
+  IsString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { QuestionTypeEnum } from '../enums/question-type.enum';
 
@@ -33,5 +39,8 @@ export class CreateQuestionAnswerDto {
   numericalRangeEnd?: number;
 
   @IsOptional()
-  matchPairs?: Array<{ leftOptionKey: string; rightOptionKey: string }> | Record<string, string> | any;
+  matchPairs?:
+    | Array<{ leftOptionKey: string; rightOptionKey: string }>
+    | Record<string, string>
+    | any;
 }

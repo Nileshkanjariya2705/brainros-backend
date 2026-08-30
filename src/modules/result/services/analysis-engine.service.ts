@@ -11,6 +11,8 @@ import {
   TimeAnalyticsReport,
   AttemptStrategyReport,
   ActionableRecommendation,
+  QuestionTimeExtreme,
+  SubjectBenchmarkComparison,
 } from '../interfaces/analysis.interface';
 
 @Injectable()
@@ -22,7 +24,11 @@ export class AnalysisEngineService {
   /**
    * Helper to determine status based on configurable thresholds
    */
-  evaluateStatus(accuracy: number, totalAttempted: number, thresholds: PerformanceThresholds): PerformanceStatus {
+  evaluateStatus(
+    accuracy: number,
+    totalAttempted: number,
+    thresholds: PerformanceThresholds,
+  ): PerformanceStatus {
     if (totalAttempted === 0) return 'NOT_ATTEMPTED';
     if (accuracy >= thresholds.excellent) return 'EXCELLENT';
     if (accuracy >= thresholds.strong) return 'STRONG';
@@ -63,7 +69,9 @@ export class AnalysisEngineService {
         result: {
           include: {
             subjectResults: { include: { subject: true } },
-            chapterResults: { include: { chapter: { include: { subject: true } } } },
+            chapterResults: {
+              include: { chapter: { include: { subject: true } } },
+            },
           },
         },
         answers: {
@@ -92,7 +100,9 @@ export class AnalysisEngineService {
     }
 
     if (!attempt.result) {
-      throw new NotFoundException(`Result has not been calculated yet for attempt '${attemptId}'`);
+      throw new NotFoundException(
+        `Result has not been calculated yet for attempt '${attemptId}'`,
+      );
     }
 
     const exam = attempt.exam;
@@ -100,8 +110,12 @@ export class AnalysisEngineService {
 
     // ── 1. Resolve Configurable Performance Thresholds ──────────────────────
     let thresholds = DEFAULT_PERFORMANCE_THRESHOLDS;
-    if (exam.performanceThresholds && typeof exam.performanceThresholds === 'object') {
-      const custom = exam.performanceThresholds as Partial<PerformanceThresholds>;
+    if (
+      exam.performanceThresholds &&
+      typeof exam.performanceThresholds === 'object'
+    ) {
+      const custom =
+        exam.performanceThresholds as Partial<PerformanceThresholds>;
       thresholds = {
         excellent: custom.excellent ?? DEFAULT_PERFORMANCE_THRESHOLDS.excellent,
         strong: custom.strong ?? DEFAULT_PERFORMANCE_THRESHOLDS.strong,
@@ -111,12 +125,20 @@ export class AnalysisEngineService {
     }
 
     // ── 2. Time Used & Per-Question Analytics ──────────────────────────────
-    const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : 0;
-    const submittedAt = attempt.submittedAt ? new Date(attempt.submittedAt).getTime() : Date.now();
-    const totalTimeUsedSeconds = Math.max(0, Math.floor((submittedAt - startedAt) / 1000));
-    const avgTimePerQuestion = result.totalQuestions > 0
-      ? Math.round((totalTimeUsedSeconds / result.totalQuestions) * 10) / 10
+    const startedAt = attempt.startedAt
+      ? new Date(attempt.startedAt).getTime()
       : 0;
+    const submittedAt = attempt.submittedAt
+      ? new Date(attempt.submittedAt).getTime()
+      : Date.now();
+    const totalTimeUsedSeconds = Math.max(
+      0,
+      Math.floor((submittedAt - startedAt) / 1000),
+    );
+    const avgTimePerQuestion =
+      result.totalQuestions > 0
+        ? Math.round((totalTimeUsedSeconds / result.totalQuestions) * 10) / 10
+        : 0;
 
     // Build map of timeLogs: examQuestionId -> totalSeconds
     const questionTimeMap = new Map<string, number>();
@@ -158,26 +180,78 @@ export class AnalysisEngineService {
     let markedAndCorrectCount = 0;
     let markedAndWrongCount = 0;
 
-    const answerMap = new Map(attempt.answers.map((a) => [a.examQuestionId, a]));
+    const answerMap = new Map(
+      attempt.answers.map((a) => [a.examQuestionId, a]),
+    );
 
     const subjectTimeMap = new Map<string, number>();
     const chapterTimeMap = new Map<string, number>();
+    const subjectQuestionCountMap = new Map<string, number>();
+
+    // Fastest & slowest question tracking
+    let fastestQ: QuestionTimeExtreme | null = null;
+    let slowestQ: QuestionTimeExtreme | null = null;
+    let displayOrderCounter = 0;
 
     for (const eq of examQuestions) {
       const ans = answerMap.get(eq.id);
       const q = eq.question;
-      const subjectName = eq.section?.name || q.chapter?.subject?.name || 'General';
+      const subjectName =
+        eq.section?.name || q.chapter?.subject?.name || 'General';
       const chapterId = q.chapterId;
-      const timeSpent = questionTimeMap.get(eq.id) || (ans ? avgTimePerQuestion : 0);
+      const timeSpent =
+        questionTimeMap.get(eq.id) || (ans ? avgTimePerQuestion : 0);
+      displayOrderCounter++;
 
       // Accumulate subject and chapter times
-      subjectTimeMap.set(subjectName, (subjectTimeMap.get(subjectName) || 0) + timeSpent);
+      subjectTimeMap.set(
+        subjectName,
+        (subjectTimeMap.get(subjectName) || 0) + timeSpent,
+      );
+      subjectQuestionCountMap.set(
+        subjectName,
+        (subjectQuestionCountMap.get(subjectName) || 0) + 1,
+      );
       if (chapterId) {
-        chapterTimeMap.set(chapterId, (chapterTimeMap.get(chapterId) || 0) + timeSpent);
+        chapterTimeMap.set(
+          chapterId,
+          (chapterTimeMap.get(chapterId) || 0) + timeSpent,
+        );
+      }
+
+      // Track fastest & slowest attempted questions
+      const isAttemptedForTime =
+        !!ans &&
+        (!!ans.selectedOptionId ||
+          ans.numericalAnswer !== null ||
+          !!ans.selectedOptions);
+      if (isAttemptedForTime && timeSpent > 0) {
+        const sectionName =
+          eq.section?.name || subjectName;
+        const isCorrectForExtreme = this.isAnswerCorrect(q, ans);
+        const extremeEntry: QuestionTimeExtreme = {
+          questionId: q.id,
+          examQuestionId: eq.id,
+          displayOrder: eq.displayOrder ?? displayOrderCounter,
+          timeSeconds: timeSpent,
+          sectionName,
+          isCorrect: isCorrectForExtreme,
+        };
+
+        if (!fastestQ || timeSpent < fastestQ.timeSeconds) {
+          fastestQ = extremeEntry;
+        }
+        if (!slowestQ || timeSpent > slowestQ.timeSeconds) {
+          slowestQ = extremeEntry;
+        }
       }
 
       // Check pacing
-      if (timeSpent < 15 && ans && (ans.selectedOptionId || ans.numericalAnswer !== null)) {
+      if (
+        timeSpent < 15 &&
+        ans &&
+        (ans.selectedOptionId || ans.numericalAnswer !== null)
+      ) {
         rushedCount++;
       } else if (timeSpent > avgTimePerQuestion * 2.5 && timeSpent > 60) {
         overthoughtCount++;
@@ -189,7 +263,11 @@ export class AnalysisEngineService {
         markedForReviewCount++;
       }
 
-      const isAttempted = !!ans && (!!ans.selectedOptionId || ans.numericalAnswer !== null || !!ans.selectedOptions);
+      const isAttempted =
+        !!ans &&
+        (!!ans.selectedOptionId ||
+          ans.numericalAnswer !== null ||
+          !!ans.selectedOptions);
 
       if (!isAttempted) {
         unattemptedCountForTime++;
@@ -213,7 +291,7 @@ export class AnalysisEngineService {
       } else {
         wrongCountForTime++;
         wrongTimeSum += timeSpent;
-        totalNegativeMarksLost += (eq.negativeMarks ?? exam.defaultNegativeMarks);
+        totalNegativeMarksLost += eq.negativeMarks ?? exam.defaultNegativeMarks;
         if (ans?.isMarkedForReview) {
           markedAndWrongCount++;
         }
@@ -221,8 +299,16 @@ export class AnalysisEngineService {
     }
 
     // ── 3. Overall Metrics ─────────────────────────────────────────────────
-    const speedAccuracyQuadrant = this.determineQuadrant(result.accuracy, avgTimePerQuestion, exam.durationMinutes * 60 / exam.totalQuestions);
-    const overallStatus = this.evaluateStatus(result.accuracy, result.correctAnswers + result.wrongAnswers, thresholds);
+    const speedAccuracyQuadrant = this.determineQuadrant(
+      result.accuracy,
+      avgTimePerQuestion,
+      (exam.durationMinutes * 60) / exam.totalQuestions,
+    );
+    const overallStatus = this.evaluateStatus(
+      result.accuracy,
+      result.correctAnswers + result.wrongAnswers,
+      thresholds,
+    );
     const potentialMarks = result.totalScore + totalNegativeMarksLost;
 
     const overall: OverallPerformanceMetrics = {
@@ -244,30 +330,42 @@ export class AnalysisEngineService {
     };
 
     // ── 4. Subject Analytics ───────────────────────────────────────────────
-    const subjectItems: SubjectAnalyticsItem[] = result.subjectResults.map((sr) => {
-      const timeSpent = subjectTimeMap.get(sr.subject.name) || 0;
-      const srAvgTime = sr.totalQuestions > 0 ? Math.round((timeSpent / sr.totalQuestions) * 10) / 10 : 0;
-      const srPercentage = sr.maxScore > 0 ? Math.round((sr.score / sr.maxScore) * 10000) / 100 : 0;
-      const srStatus = this.evaluateStatus(sr.accuracy, sr.correctAnswers + sr.wrongAnswers, thresholds);
+    const subjectItems: SubjectAnalyticsItem[] = result.subjectResults.map(
+      (sr) => {
+        const timeSpent = subjectTimeMap.get(sr.subject.name) || 0;
+        const srAvgTime =
+          sr.totalQuestions > 0
+            ? Math.round((timeSpent / sr.totalQuestions) * 10) / 10
+            : 0;
+        const srPercentage =
+          sr.maxScore > 0
+            ? Math.round((sr.score / sr.maxScore) * 10000) / 100
+            : 0;
+        const srStatus = this.evaluateStatus(
+          sr.accuracy,
+          sr.correctAnswers + sr.wrongAnswers,
+          thresholds,
+        );
 
-      return {
-        subjectId: sr.subjectId,
-        subjectName: sr.subject.name,
-        totalQuestions: sr.totalQuestions,
-        correct: sr.correctAnswers,
-        wrong: sr.wrongAnswers,
-        unattempted: sr.unattempted,
-        score: sr.score,
-        maxScore: sr.maxScore,
-        accuracy: sr.accuracy,
-        percentage: srPercentage,
-        timeSpentSeconds: timeSpent,
-        avgTimePerQuestionSeconds: srAvgTime,
-        status: srStatus,
-        isStrongest: false,
-        isWeakest: false,
-      };
-    });
+        return {
+          subjectId: sr.subjectId,
+          subjectName: sr.subject.name,
+          totalQuestions: sr.totalQuestions,
+          correct: sr.correctAnswers,
+          wrong: sr.wrongAnswers,
+          unattempted: sr.unattempted,
+          score: sr.score,
+          maxScore: sr.maxScore,
+          accuracy: sr.accuracy,
+          percentage: srPercentage,
+          timeSpentSeconds: timeSpent,
+          avgTimePerQuestionSeconds: srAvgTime,
+          status: srStatus,
+          isStrongest: false,
+          isWeakest: false,
+        };
+      },
+    );
 
     // Identify strongest & weakest subject
     if (subjectItems.length > 0) {
@@ -297,84 +395,200 @@ export class AnalysisEngineService {
     const weakestSubject = subjectItems.find((s) => s.isWeakest) || null;
 
     // ── 5. Chapter Analytics (with Configurable Thresholds) ────────────────
-    const chapterItems: ChapterAnalyticsItem[] = result.chapterResults.map((cr) => {
-      const timeSpent = chapterTimeMap.get(cr.chapterId) || 0;
-      const crAvgTime = cr.totalQuestions > 0 ? Math.round((timeSpent / cr.totalQuestions) * 10) / 10 : 0;
-      const crPercentage = cr.maxScore && cr.maxScore > 0
-        ? Math.round((cr.score / cr.maxScore) * 10000) / 100
-        : cr.accuracy;
+    const chapterItems: ChapterAnalyticsItem[] = result.chapterResults.map(
+      (cr) => {
+        const timeSpent = chapterTimeMap.get(cr.chapterId) || 0;
+        const crAvgTime =
+          cr.totalQuestions > 0
+            ? Math.round((timeSpent / cr.totalQuestions) * 10) / 10
+            : 0;
+        const crPercentage =
+          cr.maxScore && cr.maxScore > 0
+            ? Math.round((cr.score / cr.maxScore) * 10000) / 100
+            : cr.accuracy;
 
-      // Evaluated with configurable thresholds per exam
-      const crStatus = this.evaluateStatus(cr.accuracy, cr.correctAnswers + cr.wrongAnswers, thresholds);
+        // Evaluated with configurable thresholds per exam
+        const crStatus = this.evaluateStatus(
+          cr.accuracy,
+          cr.correctAnswers + cr.wrongAnswers,
+          thresholds,
+        );
 
-      return {
-        chapterId: cr.chapterId,
-        chapterName: cr.chapter.name,
-        subjectId: cr.chapter.subjectId,
-        subjectName: cr.chapter.subject.name,
-        totalQuestions: cr.totalQuestions,
-        correct: cr.correctAnswers,
-        wrong: cr.wrongAnswers,
-        unattempted: cr.unattempted,
-        score: cr.score,
-        maxScore: cr.maxScore ?? (cr.totalQuestions * exam.defaultMarksPerQuestion),
-        accuracy: cr.accuracy,
-        percentage: crPercentage,
-        timeSpentSeconds: timeSpent,
-        avgTimePerQuestionSeconds: crAvgTime,
-        status: crStatus,
-      };
-    });
+        return {
+          chapterId: cr.chapterId,
+          chapterName: cr.chapter.name,
+          subjectId: cr.chapter.subjectId,
+          subjectName: cr.chapter.subject.name,
+          totalQuestions: cr.totalQuestions,
+          correct: cr.correctAnswers,
+          wrong: cr.wrongAnswers,
+          unattempted: cr.unattempted,
+          score: cr.score,
+          maxScore:
+            cr.maxScore ?? cr.totalQuestions * exam.defaultMarksPerQuestion,
+          accuracy: cr.accuracy,
+          percentage: crPercentage,
+          timeSpentSeconds: timeSpent,
+          avgTimePerQuestionSeconds: crAvgTime,
+          status: crStatus,
+        };
+      },
+    );
 
-    const masteredChapters = chapterItems.filter((c) => c.status === 'EXCELLENT' || c.status === 'STRONG');
-    const revisionNeededChapters = chapterItems.filter((c) => c.status === 'GOOD' || c.status === 'WEAK');
-    const criticalFocusChapters = chapterItems.filter((c) => c.status === 'CRITICAL');
+    const masteredChapters = chapterItems.filter(
+      (c) => c.status === 'EXCELLENT' || c.status === 'STRONG',
+    );
+    const revisionNeededChapters = chapterItems.filter(
+      (c) => c.status === 'GOOD' || c.status === 'WEAK',
+    );
+    const criticalFocusChapters = chapterItems.filter(
+      (c) => c.status === 'CRITICAL',
+    );
 
     // ── 6. Time Analytics Report ───────────────────────────────────────────
+    const timeWastedSeconds = wrongTimeSum + unattemptedTimeSum;
+
+    // Subject benchmark comparisons
+    const numSubjects = subjectTimeMap.size || 1;
+    const totalExamSeconds = exam.durationMinutes * 60;
+    const subjectBenchmarkComparisons: SubjectBenchmarkComparison[] = [];
+
+    for (const [sName, actualSec] of subjectTimeMap.entries()) {
+      const subjectQCount = subjectQuestionCountMap.get(sName) || 1;
+      const recommendedSec = Math.round(
+        (subjectQCount / result.totalQuestions) * totalExamSeconds,
+      );
+      const deltaPct =
+        recommendedSec > 0
+          ? Math.round(((actualSec - recommendedSec) / recommendedSec) * 100)
+          : 0;
+
+      let observation = `Time allocation for ${sName} is within expected range.`;
+      if (deltaPct > 20) {
+        observation = `Spent ${deltaPct}% more time on ${sName} than recommended. Consider faster elimination strategies.`;
+      } else if (deltaPct < -20) {
+        observation = `Spent ${Math.abs(deltaPct)}% less time on ${sName} than recommended. Ensure you are not rushing through this subject.`;
+      }
+
+      subjectBenchmarkComparisons.push({
+        subjectName: sName,
+        actualSeconds: actualSec,
+        recommendedSeconds: recommendedSec,
+        deltaPercent: deltaPct,
+        observation,
+      });
+    }
+
     const timeAnalysis: TimeAnalyticsReport = {
       totalExamDurationMinutes: exam.durationMinutes,
       totalTimeUsedSeconds,
-      timeRemainingSeconds: Math.max(0, exam.durationMinutes * 60 - totalTimeUsedSeconds),
+      timeRemainingSeconds: Math.max(
+        0,
+        exam.durationMinutes * 60 - totalTimeUsedSeconds,
+      ),
       averageTimePerQuestionSeconds: avgTimePerQuestion,
       timeOnCorrectQuestionsSeconds: correctTimeSum,
-      avgTimeOnCorrectSeconds: correctCountForTime > 0 ? Math.round(correctTimeSum / correctCountForTime) : 0,
+      avgTimeOnCorrectSeconds:
+        correctCountForTime > 0
+          ? Math.round(correctTimeSum / correctCountForTime)
+          : 0,
       timeOnWrongQuestionsSeconds: wrongTimeSum,
-      avgTimeOnWrongSeconds: wrongCountForTime > 0 ? Math.round(wrongTimeSum / wrongCountForTime) : 0,
+      avgTimeOnWrongSeconds:
+        wrongCountForTime > 0
+          ? Math.round(wrongTimeSum / wrongCountForTime)
+          : 0,
       timeOnUnattemptedQuestionsSeconds: unattemptedTimeSum,
-      avgTimeOnUnattemptedSeconds: unattemptedCountForTime > 0 ? Math.round(unattemptedTimeSum / unattemptedCountForTime) : 0,
+      avgTimeOnUnattemptedSeconds:
+        unattemptedCountForTime > 0
+          ? Math.round(unattemptedTimeSum / unattemptedCountForTime)
+          : 0,
+      timeWastedSeconds,
+      fastestQuestion: fastestQ,
+      slowestQuestion: slowestQ,
       pacingMetrics: {
         rushedCount,
         optimalPaceCount,
         overthoughtCount,
       },
-      subjectTimeDistribution: Array.from(subjectTimeMap.entries()).map(([name, seconds]) => ({
-        subjectName: name,
-        timeSpentSeconds: seconds,
-        percentageOfTotalTime: totalTimeUsedSeconds > 0 ? Math.round((seconds / totalTimeUsedSeconds) * 100) : 0,
-      })),
+      subjectTimeDistribution: Array.from(subjectTimeMap.entries()).map(
+        ([name, seconds]) => ({
+          subjectName: name,
+          timeSpentSeconds: seconds,
+          percentageOfTotalTime:
+            totalTimeUsedSeconds > 0
+              ? Math.round((seconds / totalTimeUsedSeconds) * 100)
+              : 0,
+        }),
+      ),
+      subjectBenchmarkComparisons,
     };
 
     // ── 7. Attempt Strategy Report ─────────────────────────────────────────
-    const attemptRatio = result.totalQuestions > 0
-      ? Math.round(((result.correctAnswers + result.wrongAnswers) / result.totalQuestions) * 100)
-      : 0;
+    const attemptRatio =
+      result.totalQuestions > 0
+        ? Math.round(
+            ((result.correctAnswers + result.wrongAnswers) /
+              result.totalQuestions) *
+              100,
+          )
+        : 0;
 
     const strategicTakeaways: string[] = [];
     if (totalNegativeMarksLost >= 8) {
-      strategicTakeaways.push(`High negative marking penalty: You lost ${totalNegativeMarksLost} marks due to wrong attempts.`);
+      strategicTakeaways.push(
+        `High negative marking penalty: You lost ${totalNegativeMarksLost} marks due to wrong attempts.`,
+      );
     }
     if (rushedCount >= 5) {
-      strategicTakeaways.push(`${rushedCount} questions were answered in under 15 seconds. Ensure you read all options carefully.`);
+      strategicTakeaways.push(
+        `${rushedCount} questions were answered in under 15 seconds. Ensure you read all options carefully.`,
+      );
     }
     if (overthoughtCount >= 4) {
-      strategicTakeaways.push(`${overthoughtCount} questions took over 2.5x the average time. Practice strategic skipping.`);
+      strategicTakeaways.push(
+        `${overthoughtCount} questions took over 2.5x the average time. Practice strategic skipping.`,
+      );
     }
-    if (markedAndCorrectCount > markedAndWrongCount && markedForReviewCount > 0) {
-      strategicTakeaways.push(`Reviewing marked questions proved beneficial: ${markedAndCorrectCount} of ${markedAndAnsweredCount} marked questions were correct.`);
+    if (
+      markedAndCorrectCount > markedAndWrongCount &&
+      markedForReviewCount > 0
+    ) {
+      strategicTakeaways.push(
+        `Reviewing marked questions proved beneficial: ${markedAndCorrectCount} of ${markedAndAnsweredCount} marked questions were correct.`,
+      );
     }
     if (strategicTakeaways.length === 0) {
-      strategicTakeaways.push('Balanced attempt pattern observed with steady pacing and good accuracy.');
+      strategicTakeaways.push(
+        'Balanced attempt pattern observed with steady pacing and good accuracy.',
+      );
     }
+
+    // Over-attempting & under-attempting detection
+    const accuracy = result.accuracy;
+    const wrongRatio =
+      result.correctAnswers + result.wrongAnswers > 0
+        ? (result.wrongAnswers / (result.correctAnswers + result.wrongAnswers)) *
+          100
+        : 0;
+    const unattemptedRatio =
+      result.totalQuestions > 0
+        ? (result.unattempted / result.totalQuestions) * 100
+        : 0;
+
+    let overAttemptingWarning: string | null = null;
+    if (wrongRatio > 40 && result.wrongAnswers >= 10) {
+      overAttemptingWarning = `Over-attempting detected: ${result.wrongAnswers} wrong answers (${Math.round(wrongRatio)}% error rate). You attempted high-risk questions without sufficient confidence, losing ${Math.round(totalNegativeMarksLost)} marks to negative marking.`;
+    }
+
+    let underAttemptingWarning: string | null = null;
+    if (unattemptedRatio > 30 && result.unattempted >= 15) {
+      underAttemptingWarning = `Under-attempting detected: ${result.unattempted} questions (${Math.round(unattemptedRatio)}%) were left unanswered. Some of these may have been easy/medium difficulty questions worth attempting.`;
+    }
+
+    const potentialScoreGainMessage =
+      totalNegativeMarksLost >= 4
+        ? `Score could improve by ~${Math.round(totalNegativeMarksLost)} marks by eliminating low-confidence wrong guesses. Your potential score without negative marking: ${Math.round(result.totalScore + totalNegativeMarksLost)}/${result.maxScore}.`
+        : `Good negative marking discipline. Only ${Math.round(totalNegativeMarksLost)} marks lost to wrong attempts.`;
 
     const attemptStrategy: AttemptStrategyReport = {
       negativeMarkingPenalty: totalNegativeMarksLost,
@@ -389,18 +603,22 @@ export class AnalysisEngineService {
       attemptRatio,
       accuracyVsSpeedProfile: speedAccuracyQuadrant.replace(/_/g, ' '),
       strategicTakeaways,
+      overAttemptingWarning,
+      underAttemptingWarning,
+      potentialScoreGainMessage,
     };
 
     // ── 8. Actionable Personalized Recommendations ────────────────────────
-    const recommendations: ActionableRecommendation[] = this.generateRecommendations({
-      criticalFocusChapters,
-      revisionNeededChapters,
-      weakestSubject,
-      totalNegativeMarksLost,
-      timeAnalysis,
-      examTargetName: exam.examTarget.name,
-      defaultMarks: exam.defaultMarksPerQuestion,
-    });
+    const recommendations: ActionableRecommendation[] =
+      this.generateRecommendations({
+        criticalFocusChapters,
+        revisionNeededChapters,
+        weakestSubject,
+        totalNegativeMarksLost,
+        timeAnalysis,
+        examTargetName: exam.examTarget.name,
+        defaultMarks: exam.defaultMarksPerQuestion,
+      });
 
     return {
       attemptId,
@@ -444,7 +662,9 @@ export class AnalysisEngineService {
         const selected = answer.selectedOptions as string[] | null;
         if (!selected || selected.length === 0) return false;
         const correctIds = new Set<string>(
-          question.options?.filter((o: any) => o.isCorrect).map((o: any) => o.id) || [],
+          question.options
+            ?.filter((o: any) => o.isCorrect)
+            .map((o: any) => o.id) || [],
         );
         const selectedSet = new Set<string>(selected);
         if (correctIds.size !== selectedSet.size) return false;
@@ -454,14 +674,25 @@ export class AnalysisEngineService {
         return true;
       }
       case 'NUM': {
-        if (answer.numericalAnswer === null || answer.numericalAnswer === undefined) return false;
+        if (
+          answer.numericalAnswer === null ||
+          answer.numericalAnswer === undefined
+        )
+          return false;
         const correctVal = question.correctAnswer;
         if (correctVal === null || correctVal === undefined) return false;
         if (typeof correctVal === 'number') {
           return Math.abs(answer.numericalAnswer - correctVal) < 0.001;
         }
-        if (typeof correctVal === 'object' && correctVal.min !== undefined && correctVal.max !== undefined) {
-          return answer.numericalAnswer >= correctVal.min && answer.numericalAnswer <= correctVal.max;
+        if (
+          typeof correctVal === 'object' &&
+          correctVal.min !== undefined &&
+          correctVal.max !== undefined
+        ) {
+          return (
+            answer.numericalAnswer >= correctVal.min &&
+            answer.numericalAnswer <= correctVal.max
+          );
         }
         return false;
       }
@@ -471,7 +702,15 @@ export class AnalysisEngineService {
   }
 
   // ── Helper: Determine speed-accuracy quadrant ───────────────────────────
-  private determineQuadrant(accuracy: number, avgTime: number, benchmarkTime: number): 'FAST_AND_ACCURATE' | 'SLOW_AND_ACCURATE' | 'RUSHED_AND_INACCURATE' | 'SLOW_AND_STRUGGLING' {
+  private determineQuadrant(
+    accuracy: number,
+    avgTime: number,
+    benchmarkTime: number,
+  ):
+    | 'FAST_AND_ACCURATE'
+    | 'SLOW_AND_ACCURATE'
+    | 'RUSHED_AND_INACCURATE'
+    | 'SLOW_AND_STRUGGLING' {
     const isAccurate = accuracy >= 70;
     const isFast = avgTime <= benchmarkTime;
 
@@ -496,7 +735,8 @@ export class AnalysisEngineService {
 
     // 1. Critical chapters (High impact)
     for (const chap of params.criticalFocusChapters.slice(0, 3)) {
-      const potentialGain = (chap.wrong + chap.unattempted) * params.defaultMarks;
+      const potentialGain =
+        (chap.wrong + chap.unattempted) * params.defaultMarks;
       recs.push({
         id: `rec-${idCounter++}`,
         category: 'CHAPTER_REVISION',
@@ -522,7 +762,11 @@ export class AnalysisEngineService {
     }
 
     // 3. Time management / pacing advice
-    if (params.timeAnalysis.avgTimeOnWrongSeconds > params.timeAnalysis.avgTimeOnCorrectSeconds * 1.5 && params.timeAnalysis.avgTimeOnWrongSeconds > 60) {
+    if (
+      params.timeAnalysis.avgTimeOnWrongSeconds >
+        params.timeAnalysis.avgTimeOnCorrectSeconds * 1.5 &&
+      params.timeAnalysis.avgTimeOnWrongSeconds > 60
+    ) {
       recs.push({
         id: `rec-${idCounter++}`,
         category: 'TIME_MANAGEMENT',

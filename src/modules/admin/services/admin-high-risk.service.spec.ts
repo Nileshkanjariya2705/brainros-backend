@@ -24,11 +24,15 @@ describe('AdminHighRiskService (Protected Operations & Auditing)', () => {
       examLifecycleHistory: {
         create: jest.fn(),
       },
-      $transaction: jest.fn((cb) => (typeof cb === 'function' ? cb(prisma) : Promise.all(cb))),
+      $transaction: jest.fn((cb) =>
+        typeof cb === 'function' ? cb(prisma) : Promise.all(cb),
+      ),
     };
 
     lifecycleService = {
-      activateExam: jest.fn().mockResolvedValue({ id: 'exam-1', status: 'ACTIVE' }),
+      activateExam: jest
+        .fn()
+        .mockResolvedValue({ id: 'exam-1', status: 'ACTIVE' }),
     };
 
     auditService = {
@@ -69,7 +73,11 @@ describe('AdminHighRiskService (Protected Operations & Auditing)', () => {
         status: { name: 'APPROVED' },
       });
 
-      const res = await service.activateExam('exam-1', 'super-admin-1', 'idemp-key-1');
+      const res = await service.activateExam(
+        'exam-1',
+        'super-admin-1',
+        'idemp-key-1',
+      );
       expect(res.status).toBe('ACTIVE');
       expect(lifecycleService.activateExam).toHaveBeenCalledWith(
         'exam-1',
@@ -112,7 +120,10 @@ describe('AdminHighRiskService (Protected Operations & Auditing)', () => {
         title: 'Active Exam',
         status: { name: 'ACTIVE' },
       });
-      prisma.examStatus.findUnique.mockResolvedValue({ id: 'status-ended', name: 'ENDED' });
+      prisma.examStatus.findUnique.mockResolvedValue({
+        id: 'status-ended',
+        name: 'ENDED',
+      });
       prisma.exam.update.mockResolvedValue({ id: 'exam-1', status: 'ENDED' });
 
       const res = await service.deactivateExam(
@@ -135,10 +146,21 @@ describe('AdminHighRiskService (Protected Operations & Auditing)', () => {
   describe('bulkActivateExams', () => {
     it('should process each exam independently and return aggregate results', async () => {
       prisma.exam.findUnique
-        .mockResolvedValueOnce({ id: 'exam-1', status: { name: 'APPROVED' }, title: 'E1' })
-        .mockResolvedValueOnce({ id: 'exam-2', status: { name: 'DRAFT' }, title: 'E2' });
+        .mockResolvedValueOnce({
+          id: 'exam-1',
+          status: { name: 'APPROVED' },
+          title: 'E1',
+        })
+        .mockResolvedValueOnce({
+          id: 'exam-2',
+          status: { name: 'DRAFT' },
+          title: 'E2',
+        });
 
-      const res = await service.bulkActivateExams(['exam-1', 'exam-2'], 'super-admin-1');
+      const res = await service.bulkActivateExams(
+        ['exam-1', 'exam-2'],
+        'super-admin-1',
+      );
 
       expect(res.total).toBe(2);
       expect(res.activatedCount).toBe(1);

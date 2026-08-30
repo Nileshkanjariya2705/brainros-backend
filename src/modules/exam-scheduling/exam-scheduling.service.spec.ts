@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExamLifecycleService } from './services/exam-lifecycle.service';
 import { ExamScheduleService } from './services/exam-schedule.service';
 import { ExamAccessService } from './services/exam-access.service';
@@ -13,7 +17,11 @@ describe('Exam Scheduling & Activation Engine', () => {
   const mockPrismaService = {
     examStatus: {
       findUnique: jest.fn(),
-      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: `status-${data.name}`, name: data.name })),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) =>
+          Promise.resolve({ id: `status-${data.name}`, name: data.name }),
+        ),
     },
     exam: {
       findUnique: jest.fn(),
@@ -55,28 +63,60 @@ describe('Exam Scheduling & Activation Engine', () => {
 
   describe('1. Exam Lifecycle State Machine Transitions', () => {
     it('should allow valid transition sequence: DRAFT -> SUBMITTED -> APPROVED -> SCHEDULED -> ACTIVE -> ENDED -> EVALUATING -> COMPLETED', () => {
-      expect(() => lifecycleService.validateTransition('DRAFT', 'SUBMITTED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('SUBMITTED', 'APPROVED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('APPROVED', 'SCHEDULED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('SCHEDULED', 'ACTIVE')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('ACTIVE', 'ENDED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('ENDED', 'EVALUATING')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('EVALUATING', 'COMPLETED')).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('DRAFT', 'SUBMITTED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('SUBMITTED', 'APPROVED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('APPROVED', 'SCHEDULED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('SCHEDULED', 'ACTIVE'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('ACTIVE', 'ENDED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('ENDED', 'EVALUATING'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('EVALUATING', 'COMPLETED'),
+      ).not.toThrow();
     });
 
     it('should reject invalid arbitrary status jumps (e.g. DRAFT -> ACTIVE, APPROVED -> ACTIVE, COMPLETED -> CANCELLED)', () => {
-      expect(() => lifecycleService.validateTransition('DRAFT', 'ACTIVE')).toThrow(BadRequestException);
-      expect(() => lifecycleService.validateTransition('APPROVED', 'ACTIVE')).toThrow(BadRequestException);
-      expect(() => lifecycleService.validateTransition('COMPLETED', 'CANCELLED')).toThrow(BadRequestException);
-      expect(() => lifecycleService.validateTransition('ENDED', 'ACTIVE')).toThrow(BadRequestException);
+      expect(() =>
+        lifecycleService.validateTransition('DRAFT', 'ACTIVE'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        lifecycleService.validateTransition('APPROVED', 'ACTIVE'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        lifecycleService.validateTransition('COMPLETED', 'CANCELLED'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        lifecycleService.validateTransition('ENDED', 'ACTIVE'),
+      ).toThrow(BadRequestException);
     });
 
     it('should allow cancellation from pre-live states (DRAFT, SUBMITTED, APPROVED, SCHEDULED, ACTIVE)', () => {
-      expect(() => lifecycleService.validateTransition('DRAFT', 'CANCELLED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('SUBMITTED', 'CANCELLED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('APPROVED', 'CANCELLED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('SCHEDULED', 'CANCELLED')).not.toThrow();
-      expect(() => lifecycleService.validateTransition('ACTIVE', 'CANCELLED')).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('DRAFT', 'CANCELLED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('SUBMITTED', 'CANCELLED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('APPROVED', 'CANCELLED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('SCHEDULED', 'CANCELLED'),
+      ).not.toThrow();
+      expect(() =>
+        lifecycleService.validateTransition('ACTIVE', 'CANCELLED'),
+      ).not.toThrow();
     });
   });
 
@@ -113,7 +153,9 @@ describe('Exam Scheduling & Activation Engine', () => {
 
       expect(result).toBeDefined();
       expect(mockPrismaService.examSchedule.create).toHaveBeenCalled();
-      expect(mockPrismaService.examLifecycleHistory.create).toHaveBeenCalledWith(
+      expect(
+        mockPrismaService.examLifecycleHistory.create,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             action: 'SCHEDULE',
@@ -180,7 +222,10 @@ describe('Exam Scheduling & Activation Engine', () => {
       };
 
       mockPrismaService.examSchedule.findUnique.mockResolvedValue(mockSchedule);
-      mockPrismaService.examSchedule.update.mockResolvedValue({ ...mockSchedule, status: 'ACTIVE' });
+      mockPrismaService.examSchedule.update.mockResolvedValue({
+        ...mockSchedule,
+        status: 'ACTIVE',
+      });
 
       const res = await scheduleService.activateExam('sch-1', 'super-admin-1');
 
@@ -199,7 +244,9 @@ describe('Exam Scheduling & Activation Engine', () => {
         status: 'ACTIVE',
       };
 
-      mockPrismaService.examSchedule.findUnique.mockResolvedValue(mockActiveSchedule);
+      mockPrismaService.examSchedule.findUnique.mockResolvedValue(
+        mockActiveSchedule,
+      );
 
       const res = await scheduleService.activateExam('sch-1', 'super-admin-1');
       expect(res.message).toContain('already activated');
@@ -214,9 +261,9 @@ describe('Exam Scheduling & Activation Engine', () => {
         schedules: [],
       });
 
-      await expect(accessService.validateStudentAccess('exam-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.validateStudentAccess('exam-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('Scenario 3: SCHEDULED inside time window -> Student Access DENIED (Super Admin has not activated yet)', async () => {
@@ -233,9 +280,9 @@ describe('Exam Scheduling & Activation Engine', () => {
         ],
       });
 
-      await expect(accessService.validateStudentAccess('exam-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.validateStudentAccess('exam-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('Scenario 4: ACTIVE but before startTime -> Student Access DENIED (EXAM_NOT_YET_STARTED)', async () => {
@@ -256,9 +303,9 @@ describe('Exam Scheduling & Activation Engine', () => {
         ],
       });
 
-      await expect(accessService.validateStudentAccess('exam-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.validateStudentAccess('exam-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('Scenario 5: ACTIVE and within live window (startTime <= now < endTime) -> Student Access ALLOWED', async () => {
@@ -285,7 +332,10 @@ describe('Exam Scheduling & Activation Engine', () => {
         examTargetId: 'target-neet',
       });
 
-      const access = await accessService.validateStudentAccess('exam-1', 'student-1');
+      const access = await accessService.validateStudentAccess(
+        'exam-1',
+        'student-1',
+      );
       expect(access.isAllowed).toBe(true);
       expect(access.examVersionId).toBe('ver-1');
       expect(access.timeRemainingSeconds).toBeGreaterThan(0);
@@ -309,9 +359,9 @@ describe('Exam Scheduling & Activation Engine', () => {
         ],
       });
 
-      await expect(accessService.validateStudentAccess('exam-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.validateStudentAccess('exam-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

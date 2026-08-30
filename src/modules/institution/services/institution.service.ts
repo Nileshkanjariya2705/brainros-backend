@@ -41,7 +41,9 @@ export class InstitutionService {
       where: { code: dto.code },
     });
     if (existing) {
-      throw new BadRequestException(`Institution code '${dto.code}' already exists.`);
+      throw new BadRequestException(
+        `Institution code '${dto.code}' already exists.`,
+      );
     }
 
     const institution = await this.prisma.institution.create({
@@ -59,7 +61,9 @@ export class InstitutionService {
       },
     });
 
-    this.logger.log(`Institution '${institution.name}' created with id '${institution.id}'`);
+    this.logger.log(
+      `Institution '${institution.name}' created with id '${institution.id}'`,
+    );
     return institution;
   }
 
@@ -110,7 +114,9 @@ export class InstitutionService {
         admins: {
           include: { user: { select: { id: true, email: true, phone: true } } },
         },
-        _count: { select: { batches: true, bulkUploads: true, reportJobs: true } },
+        _count: {
+          select: { batches: true, bulkUploads: true, reportJobs: true },
+        },
       },
     });
 
@@ -142,7 +148,9 @@ export class InstitutionService {
    * Lifecycle status transition (Super Admin only).
    */
   async updateStatus(id: string, dto: UpdateInstitutionStatusDto) {
-    const institution = await this.prisma.institution.findUnique({ where: { id } });
+    const institution = await this.prisma.institution.findUnique({
+      where: { id },
+    });
     if (!institution) {
       throw new NotFoundException(`Institution '${id}' not found.`);
     }
@@ -172,7 +180,9 @@ export class InstitutionService {
     }
 
     // Check user exists
-    const user = await this.prisma.user.findUnique({ where: { id: dto.userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+    });
     if (!user) {
       throw new NotFoundException(`User '${dto.userId}' not found.`);
     }

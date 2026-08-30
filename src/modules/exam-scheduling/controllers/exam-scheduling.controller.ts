@@ -34,7 +34,11 @@ export class ExamSchedulingController {
     @CurrentUser('id') userId: string,
     @Body() dto: ActionReasonDto,
   ) {
-    const data = await this.lifecycleService.submitExam(examId, userId, dto?.comment);
+    const data = await this.lifecycleService.submitExam(
+      examId,
+      userId,
+      dto?.comment,
+    );
     return {
       statusCode: 200,
       message: 'Exam submitted for Super Admin approval successfully',
@@ -49,7 +53,11 @@ export class ExamSchedulingController {
     @CurrentUser('id') userId: string,
     @Body() dto: ActionReasonDto,
   ) {
-    const data = await this.lifecycleService.approveExam(examId, userId, dto?.comment);
+    const data = await this.lifecycleService.approveExam(
+      examId,
+      userId,
+      dto?.comment,
+    );
     return {
       statusCode: 200,
       message: 'Exam approved by Super Admin. Ready for scheduling.',
@@ -67,7 +75,8 @@ export class ExamSchedulingController {
     const data = await this.scheduleService.scheduleExam(examId, dto, userId);
     return {
       statusCode: 201,
-      message: 'Exam scheduled successfully. Requires Super Admin activation before live start.',
+      message:
+        'Exam scheduled successfully. Requires Super Admin activation before live start.',
       data,
     };
   }
@@ -79,7 +88,11 @@ export class ExamSchedulingController {
     @CurrentUser('id') userId: string,
     @Body() dto: RescheduleExamDto,
   ) {
-    const data = await this.scheduleService.rescheduleExam(scheduleId, dto, userId);
+    const data = await this.scheduleService.rescheduleExam(
+      scheduleId,
+      dto,
+      userId,
+    );
     return {
       statusCode: 200,
       message: 'Exam schedule updated successfully',
@@ -108,7 +121,11 @@ export class ExamSchedulingController {
     @CurrentUser('id') userId: string,
     @Body() dto: CancelExamDto,
   ) {
-    const data = await this.lifecycleService.cancelExam(examId, userId, dto?.reason);
+    const data = await this.lifecycleService.cancelExam(
+      examId,
+      userId,
+      dto?.reason,
+    );
     return {
       statusCode: 200,
       message: 'Exam cancelled successfully',
@@ -118,7 +135,9 @@ export class ExamSchedulingController {
 
   @Get('exams/:examId/lifecycle')
   @Roles('ADMIN', 'SUPER_ADMIN', 'STUDENT')
-  async getExamLifecycleHistory(@Param('examId', ParseUUIDPipe) examId: string) {
+  async getExamLifecycleHistory(
+    @Param('examId', ParseUUIDPipe) examId: string,
+  ) {
     const data = await this.lifecycleService.getExamLifecycleHistory(examId);
     return {
       statusCode: 200,

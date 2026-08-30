@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { IApprovalHandler } from '../interfaces/approval-handler.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { QuestionStatus } from '@prisma/client';
@@ -20,7 +24,9 @@ export class QuestionApprovalHandler implements IApprovalHandler {
     }
 
     if (question.status === QuestionStatus.APPROVED) {
-      throw new BadRequestException(`Question '${entityId}' is already approved.`);
+      throw new BadRequestException(
+        `Question '${entityId}' is already approved.`,
+      );
     }
 
     return question;
@@ -31,14 +37,19 @@ export class QuestionApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     comment?: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const question = await db.question.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!question) {
-      throw new NotFoundException(`Question '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Question '${request.resourceId}' not found.`,
+      );
     }
 
     const beforeState = { status: question.status, version: question.version };
@@ -66,7 +77,11 @@ export class QuestionApprovalHandler implements IApprovalHandler {
       },
     });
 
-    const afterState = { status: updated.status, approvedById: reviewerId, approvedAt: updated.approvedAt };
+    const afterState = {
+      status: updated.status,
+      approvedById: reviewerId,
+      approvedAt: updated.approvedAt,
+    };
     return { beforeState, afterState };
   }
 
@@ -75,14 +90,19 @@ export class QuestionApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     reason: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const question = await db.question.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!question) {
-      throw new NotFoundException(`Question '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Question '${request.resourceId}' not found.`,
+      );
     }
 
     const beforeState = { status: question.status, version: question.version };
@@ -108,7 +128,11 @@ export class QuestionApprovalHandler implements IApprovalHandler {
       },
     });
 
-    const afterState = { status: updated.status, rejectedById: reviewerId, rejectionReason: reason };
+    const afterState = {
+      status: updated.status,
+      rejectedById: reviewerId,
+      rejectionReason: reason,
+    };
     return { beforeState, afterState };
   }
 
@@ -116,13 +140,19 @@ export class QuestionApprovalHandler implements IApprovalHandler {
     request: any,
     actorId: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const question = await db.question.findUnique({
       where: { id: request.resourceId },
     });
 
-    if (!question) throw new NotFoundException(`Question '${request.resourceId}' not found.`);
+    if (!question)
+      throw new NotFoundException(
+        `Question '${request.resourceId}' not found.`,
+      );
 
     const beforeState = { status: question.status };
     const updated = await db.question.update({

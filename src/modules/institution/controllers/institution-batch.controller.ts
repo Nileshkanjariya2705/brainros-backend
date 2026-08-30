@@ -29,20 +29,18 @@ export class InstitutionBatchController {
   ) {}
 
   @Get()
-  async getBatches(
-    @CurrentUser() user: any,
-    @Query('status') status?: string,
-  ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+  async getBatches(@CurrentUser() user: any, @Query('status') status?: string) {
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.batchService.findByInstitution(institution.id, status);
   }
 
   @Post()
-  async createBatch(
-    @CurrentUser() user: any,
-    @Body() dto: CreateBatchDto,
-  ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+  async createBatch(@CurrentUser() user: any, @Body() dto: CreateBatchDto) {
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.batchService.create(institution.id, dto, user.userId);
   }
 

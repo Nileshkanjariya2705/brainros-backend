@@ -17,7 +17,10 @@ export interface IApprovalHandler {
     reviewerId: string,
     comment?: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }>;
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }>;
 
   /**
    * Apply domain-specific state transition on rejection
@@ -27,7 +30,10 @@ export interface IApprovalHandler {
     reviewerId: string,
     reason: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }>;
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }>;
 
   /**
    * Apply domain-specific state transition on cancellation
@@ -36,5 +42,8 @@ export interface IApprovalHandler {
     request: any,
     actorId: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }>;
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }>;
 }

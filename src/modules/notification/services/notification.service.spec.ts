@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotificationChannel, NotificationPriority, NotificationType } from '@prisma/client';
+import {
+  NotificationChannel,
+  NotificationPriority,
+  NotificationType,
+} from '@prisma/client';
 import { NotificationService } from './notification.service';
 import { NotificationTemplateService } from './notification-template.service';
 import { NotificationPreferenceService } from './notification-preference.service';
@@ -36,7 +40,9 @@ describe('NotificationService (Asynchronous Delivery & Failure Isolation)', () =
         body: 'Hello {{name}}!',
         subject: 'Welcome',
       }),
-      renderTemplate: jest.fn((body, vars) => (vars?.name ? `Hello ${vars.name}!` : body)),
+      renderTemplate: jest.fn((body, vars) =>
+        vars?.name ? `Hello ${vars.name}!` : body,
+      ),
     };
 
     preferenceService = {
@@ -46,7 +52,9 @@ describe('NotificationService (Asynchronous Delivery & Failure Isolation)', () =
     prisma = {
       notification: {
         findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockImplementation((args) => ({ id: 'notif-1', ...args.data })),
+        create: jest
+          .fn()
+          .mockImplementation((args) => ({ id: 'notif-1', ...args.data })),
         update: jest.fn().mockResolvedValue({ id: 'notif-1' }),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),

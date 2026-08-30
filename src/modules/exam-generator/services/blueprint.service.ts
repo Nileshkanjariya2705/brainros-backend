@@ -18,7 +18,11 @@ export class BlueprintService {
   /**
    * Create a blueprint with optional initial rules
    */
-  async createBlueprint(examId: string, dto: CreateBlueprintDto, createdById: string) {
+  async createBlueprint(
+    examId: string,
+    dto: CreateBlueprintDto,
+    createdById: string,
+  ) {
     const exam = await this.prisma.exam.findUnique({
       where: { id: examId },
     });
@@ -126,26 +130,42 @@ export class BlueprintService {
       where: { id },
       data: {
         name: dto.name !== undefined ? dto.name.trim() : undefined,
-        totalQuestions: dto.totalQuestions !== undefined ? dto.totalQuestions : undefined,
+        totalQuestions:
+          dto.totalQuestions !== undefined ? dto.totalQuestions : undefined,
       },
       include: { rules: true },
     });
   }
 
   /**
-   * Delete blueprint (only if no versions were generated from it)
+   * Delete blueprint template
    */
   async deleteBlueprint(id: string) {
-    const blueprint = await this.getBlueprintById(id);
+    await this.getBlueprintById(id);
 
-    if (blueprint._count.generatedVersions > 0) {
-      throw new BadRequestException(
-        'Cannot delete blueprint that has generated exam versions. Deactivate it instead.',
-      );
-    }
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Delete generated versions questions & versions associated with this blueprint
+      const versions = await tx.examVersion.findMany({
+        where: { blueprintId: id },
+        select: { id: true },
+      });
+      const versionIds = versions.map((v) => v.id);
+      if (versionIds.length > 0) {
+        await tx.examVersionQuestion.deleteMany({
+          where: { examVersionId: { in: versionIds } },
+        });
+        await tx.examVersion.deleteMany({
+          where: { blueprintId: id },
+        });
+      }
 
-    await this.prisma.examBlueprint.delete({ where: { id } });
-    return { message: 'Blueprint deleted successfully' };
+      // 2. Delete rules
+      await tx.blueprintRule.deleteMany({ where: { blueprintId: id } });
+
+      // 3. Delete blueprint
+      await tx.examBlueprint.delete({ where: { id } });
+      return { message: 'Blueprint template deleted successfully' };
+    });
   }
 
   /**
@@ -183,7 +203,9 @@ export class BlueprintService {
       where: { id: ruleId },
     });
     if (!rule) {
-      throw new NotFoundException(`Blueprint rule with ID '${ruleId}' not found`);
+      throw new NotFoundException(
+        `Blueprint rule with ID '${ruleId}' not found`,
+      );
     }
 
     return this.prisma.blueprintRule.update({
@@ -193,11 +215,15 @@ export class BlueprintService {
         chapterId: dto.chapterId !== undefined ? dto.chapterId : undefined,
         topicId: dto.topicId !== undefined ? dto.topicId : undefined,
         subTopicId: dto.subTopicId !== undefined ? dto.subTopicId : undefined,
-        difficultyLevel: dto.difficultyLevel !== undefined ? dto.difficultyLevel : undefined,
+        difficultyLevel:
+          dto.difficultyLevel !== undefined ? dto.difficultyLevel : undefined,
         type: dto.type !== undefined ? dto.type : undefined,
-        selectionCount: dto.selectionCount !== undefined ? dto.selectionCount : undefined,
+        selectionCount:
+          dto.selectionCount !== undefined ? dto.selectionCount : undefined,
         selectionPercentage:
-          dto.selectionPercentage !== undefined ? dto.selectionPercentage : undefined,
+          dto.selectionPercentage !== undefined
+            ? dto.selectionPercentage
+            : undefined,
         priority: dto.priority !== undefined ? dto.priority : undefined,
       },
     });
@@ -211,7 +237,9 @@ export class BlueprintService {
       where: { id: ruleId },
     });
     if (!rule) {
-      throw new NotFoundException(`Blueprint rule with ID '${ruleId}' not found`);
+      throw new NotFoundException(
+        `Blueprint rule with ID '${ruleId}' not found`,
+      );
     }
 
     await this.prisma.blueprintRule.delete({ where: { id: ruleId } });

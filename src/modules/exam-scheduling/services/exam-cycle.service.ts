@@ -5,10 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  CreateExamCycleDto,
-  UpdateExamCycleDto,
-} from '../dto/calendar.dto';
+import { CreateExamCycleDto, UpdateExamCycleDto } from '../dto/calendar.dto';
 
 @Injectable()
 export class ExamCycleService {
@@ -21,7 +18,9 @@ export class ExamCycleService {
     const end = new Date(dto.endDate);
 
     if (start >= end) {
-      throw new BadRequestException('Cycle startDate must be strictly before endDate.');
+      throw new BadRequestException(
+        'Cycle startDate must be strictly before endDate.',
+      );
     }
 
     return this.prisma.examCycle.create({
@@ -51,7 +50,14 @@ export class ExamCycleService {
       include: {
         events: {
           include: {
-            exam: { select: { id: true, title: true, durationMinutes: true, totalQuestions: true } },
+            exam: {
+              select: {
+                id: true,
+                title: true,
+                durationMinutes: true,
+                totalQuestions: true,
+              },
+            },
           },
           orderBy: { plannedStartTime: 'asc' },
         },

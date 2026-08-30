@@ -1,4 +1,12 @@
-import { IsOptional, IsString, IsUUID, IsNumber, IsEnum, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsNumber,
+  IsEnum,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { QuestionStatus } from '../enums/question-status.enum';
 import { QuestionDifficultyEnum } from '../enums/question-difficulty.enum';
@@ -6,11 +14,11 @@ import { QuestionTypeEnum } from '../enums/question-type.enum';
 
 export class QuestionFilterDto {
   @IsOptional()
-  @IsUUID('4')
+  @IsString()
   examTargetId?: string;
 
   @IsOptional()
-  @IsUUID('4')
+  @IsString()
   subjectId?: string;
 
   @IsOptional()

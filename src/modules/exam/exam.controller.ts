@@ -1,12 +1,22 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, Query, UseGuards,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ExamService } from './exam.service';
 import {
-  CreateExamDto, UpdateExamDto,
-  GenerateExamQuestionsDto, AddExamQuestionsDto,
+  CreateExamDto,
+  UpdateExamDto,
+  GenerateExamQuestionsDto,
+  AddExamQuestionsDto,
   ExamFilterDto,
+  CreateExamFromTemplateDto,
 } from './dto/exam.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -24,6 +34,12 @@ export class ExamController {
   @Roles('ADMIN', 'SUPER_ADMIN')
   createExam(@Body() dto: CreateExamDto, @CurrentUser() user: any) {
     return this.examService.createExam(dto, user.userId);
+  }
+
+  @Post('create-from-template')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  createExamFromTemplate(@Body() dto: CreateExamFromTemplateDto, @CurrentUser() user: any) {
+    return this.examService.createExamFromTemplate(dto, user.userId);
   }
 
   @Post('generate-questions')
@@ -78,6 +94,12 @@ export class ExamController {
   @Get('available/:examTargetId')
   getAvailableExams(@Param('examTargetId') examTargetId: string) {
     return this.examService.getAvailableExams(examTargetId);
+  }
+
+  @Get(':id/details')
+  getExamDetails(@Param('id') id: string, @CurrentUser() user: any) {
+    const userId = user?.userId || user?.id || user?.sub;
+    return this.examService.getExamDetails(id, userId);
   }
 
   @Get(':id')

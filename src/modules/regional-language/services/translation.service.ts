@@ -47,7 +47,10 @@ export class TranslationService {
   /**
    * Get translation for a specific question & language
    */
-  async getQuestionTranslationByLanguage(questionId: string, languageId: string) {
+  async getQuestionTranslationByLanguage(
+    questionId: string,
+    languageId: string,
+  ) {
     const translation = await this.prisma.questionTranslation.findUnique({
       where: {
         questionId_languageId: { questionId, languageId },
@@ -98,10 +101,13 @@ export class TranslationService {
       },
       update: {
         questionText: dto.questionText,
-        passageText: dto.passageText !== undefined ? dto.passageText : undefined,
-        assertionText: dto.assertionText !== undefined ? dto.assertionText : undefined,
+        passageText:
+          dto.passageText !== undefined ? dto.passageText : undefined,
+        assertionText:
+          dto.assertionText !== undefined ? dto.assertionText : undefined,
         reasonText: dto.reasonText !== undefined ? dto.reasonText : undefined,
-        explanation: dto.explanation !== undefined ? dto.explanation : undefined,
+        explanation:
+          dto.explanation !== undefined ? dto.explanation : undefined,
       },
       include: {
         language: {
@@ -145,24 +151,31 @@ export class TranslationService {
         },
         update: {
           questionText: dto.questionText,
-          passageText: dto.passageText !== undefined ? dto.passageText : undefined,
-          assertionText: dto.assertionText !== undefined ? dto.assertionText : undefined,
+          passageText:
+            dto.passageText !== undefined ? dto.passageText : undefined,
+          assertionText:
+            dto.assertionText !== undefined ? dto.assertionText : undefined,
           reasonText: dto.reasonText !== undefined ? dto.reasonText : undefined,
-          explanation: dto.explanation !== undefined ? dto.explanation : undefined,
+          explanation:
+            dto.explanation !== undefined ? dto.explanation : undefined,
         },
         include: {
-          language: { select: { id: true, code: true, name: true, nativeName: true } },
+          language: {
+            select: { id: true, code: true, name: true, nativeName: true },
+          },
         },
       });
 
       // 2. Upsert Option Translations if provided
       const updatedOptions: any[] = [];
       if (dto.optionTranslations && dto.optionTranslations.length > 0) {
-
         for (const optTr of dto.optionTranslations) {
           const opt = await tx.questionOptionTranslation.upsert({
             where: {
-              optionId_languageId: { optionId: optTr.optionId, languageId: dto.languageId },
+              optionId_languageId: {
+                optionId: optTr.optionId,
+                languageId: dto.languageId,
+              },
             },
             create: {
               optionId: optTr.optionId,
@@ -197,11 +210,15 @@ export class TranslationService {
     }
 
     if (question.translations.length <= 1) {
-      throw new BadRequestException('Cannot delete the only remaining translation for a question.');
+      throw new BadRequestException(
+        'Cannot delete the only remaining translation for a question.',
+      );
     }
 
     if (question.defaultLanguageId === languageId) {
-      throw new BadRequestException('Cannot delete the default language translation for a question.');
+      throw new BadRequestException(
+        'Cannot delete the default language translation for a question.',
+      );
     }
 
     await this.prisma.questionTranslation.delete({
@@ -267,7 +284,9 @@ export class TranslationService {
 
       const totalOptions = question.options.length;
       const translatedOptionsCount = question.options.filter((opt) =>
-        opt.translations.some((ot) => ot.languageId === lang.id && ot.optionText?.trim()),
+        opt.translations.some(
+          (ot) => ot.languageId === lang.id && ot.optionText?.trim(),
+        ),
       ).length;
 
       const isComplete =
@@ -298,10 +317,16 @@ export class TranslationService {
   /**
    * Validate that all 9 mandatory regional languages are translated for a question
    */
-  async validateQuestionMandatoryTranslations(questionId: string): Promise<{ isValid: boolean; missingLanguages: string[] }> {
+  async validateQuestionMandatoryTranslations(
+    questionId: string,
+  ): Promise<{ isValid: boolean; missingLanguages: string[] }> {
     const completeness = await this.getTranslationCompleteness(questionId);
     const missing = completeness.completeness
-      .filter((c) => MANDATORY_LANGUAGE_CODES.includes(c.languageCode as any) && !c.isComplete)
+      .filter(
+        (c) =>
+          MANDATORY_LANGUAGE_CODES.includes(c.languageCode as any) &&
+          !c.isComplete,
+      )
       .map((c) => c.languageName);
 
     return {

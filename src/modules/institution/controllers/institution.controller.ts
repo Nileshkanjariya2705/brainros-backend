@@ -35,7 +35,9 @@ export class InstitutionController {
 
   @Get('me')
   async getMyInstitution(@CurrentUser() user: any) {
-    const { institution, admin } = await this.accessService.getMyInstitution(user.userId);
+    const { institution, admin } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return {
       institution,
       adminRole: admin.role,
@@ -47,7 +49,9 @@ export class InstitutionController {
     @CurrentUser() user: any,
     @Body() dto: UpdateInstitutionDto,
   ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.institutionService.update(institution.id, dto);
   }
 
@@ -82,10 +86,7 @@ export class InstitutionController {
   }
 
   @Post(':id/admins')
-  async assignAdmin(
-    @Param('id') id: string,
-    @Body() dto: AssignAdminDto,
-  ) {
+  async assignAdmin(@Param('id') id: string, @Body() dto: AssignAdminDto) {
     return this.institutionService.assignAdmin(id, dto);
   }
 }

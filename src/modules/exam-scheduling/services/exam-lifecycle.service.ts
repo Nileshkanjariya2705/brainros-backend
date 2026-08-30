@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamLifecycleAction } from '@prisma/client';
+import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
 
 export const VALID_LIFECYCLE_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['SUBMITTED', 'CANCELLED'],
@@ -23,7 +24,10 @@ export const VALID_LIFECYCLE_TRANSITIONS: Record<string, string[]> = {
 export class ExamLifecycleService {
   private readonly logger = new Logger(ExamLifecycleService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationQueue: NotificationQueueService,
+  ) {}
 
   /**
    * Asserts whether a transition between two statuses is valid
@@ -185,7 +189,9 @@ export class ExamLifecycleService {
         tx,
       );
 
-      this.logger.log(`Exam '${examId}' approved by Super Admin '${performedById}'`);
+      this.logger.log(
+        `Exam '${examId}' approved by Super Admin '${performedById}'`,
+      );
       return updated;
     });
   }
@@ -208,10 +214,10 @@ export class ExamLifecycleService {
 
     this.validateTransition(exam.status.name, 'CANCELLED');
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const cancelledStatus = await this.getOrCreateExamStatus('CANCELLED', tx);
 
-      const updated = await tx.exam.update({
+      const updatedExam = await tx.exam.update({
         where: { id: examId },
         data: { statusId: cancelledStatus.id },
         include: { status: true },
@@ -244,8 +250,58 @@ export class ExamLifecycleService {
       );
 
       this.logger.log(`Exam '${examId}' cancelled by user '${performedById}'`);
-      return updated;
+      return updatedExam;
     });
+
+    // 1. Direct in-app notification creation for all active students
+    try {
+      const students = await this.prisma.student.findMany({
+        where: { status: 'ACTIVE' },
+        select: { userId: true, name: true },
+      });
+
+      if (students.length > 0) {
+        const records = students.map((s) => ({
+          userId: s.userId,
+          recipientUserId: s.userId,
+          channel: 'IN_APP' as any,
+          type: 'EXAM_CANCELLED' as any,
+          title: `Exam Cancelled: ${exam.title}`,
+          message: `The scheduled examination "${exam.title}" has been cancelled by administration.${reason ? ' Reason: ' + reason : ''}`,
+          data: {
+            entityType: 'EXAM',
+            entityId: exam.id,
+            action: 'VIEW',
+            examTitle: exam.title,
+            reason: reason || null,
+          },
+          payload: {
+            examTitle: exam.title,
+            reason: reason || null,
+          },
+          priority: 'HIGH' as any,
+          status: 'DELIVERED' as any,
+          isRead: false,
+          idempotencyKey: `cancel_${exam.id}_${s.userId}_${Date.now()}`,
+        }));
+
+        await this.prisma.notification.createMany({
+          data: records,
+          skipDuplicates: true,
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Direct cancel notification creation error: ${err.message}`);
+    }
+
+    // 2. Dispatch BullMQ background notification job
+    this.notificationQueue.dispatchExamNotificationJob({
+      type: 'EXAM_CANCELLED',
+      examId,
+      message: reason ? `Exam ${exam.title} cancelled: ${reason}` : undefined,
+    });
+
+    return updated;
   }
 
   /**

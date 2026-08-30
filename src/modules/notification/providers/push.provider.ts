@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel } from '@prisma/client';
 import { INotificationProvider } from './notification-provider.interface';
-import { NotificationPayload, ProviderResult } from '../interfaces/notification.interface';
+import {
+  NotificationPayload,
+  ProviderResult,
+} from '../interfaces/notification.interface';
 
 @Injectable()
 export class PushProvider implements INotificationProvider {
@@ -15,7 +18,10 @@ export class PushProvider implements INotificationProvider {
         `[PushProvider] Dispatching FCM push notification for ${payload.type} to token ${payload.recipientAddress.substring(0, 15)}...`,
       );
 
-      if (!payload.recipientAddress || payload.recipientAddress.trim().length === 0) {
+      if (
+        !payload.recipientAddress ||
+        payload.recipientAddress.trim().length === 0
+      ) {
         return {
           success: false,
           provider: this.providerName,

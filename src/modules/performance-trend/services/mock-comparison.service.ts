@@ -49,7 +49,9 @@ export class MockComparisonService {
     });
 
     if (attempts.length !== 2) {
-      throw new NotFoundException('Both attempt records must exist for comparison');
+      throw new NotFoundException(
+        'Both attempt records must exist for comparison',
+      );
     }
 
     const attA = attempts.find((a) => a.id === attemptAId)!;
@@ -60,8 +62,10 @@ export class MockComparisonService {
     });
     const resolvedStudentId = student ? student.id : studentId;
 
-    const matchesA = attA.studentId === studentId || attA.studentId === resolvedStudentId;
-    const matchesB = attB.studentId === studentId || attB.studentId === resolvedStudentId;
+    const matchesA =
+      attA.studentId === studentId || attA.studentId === resolvedStudentId;
+    const matchesB =
+      attB.studentId === studentId || attB.studentId === resolvedStudentId;
 
     if (!matchesA || !matchesB) {
       throw new ForbiddenException('You can only compare your own attempts');
@@ -71,11 +75,15 @@ export class MockComparisonService {
     const mockB = this.mapToMockDataPoint(attB, 2, 'Mock B');
 
     const scoreDelta = Math.round((mockB.score - mockA.score) * 100) / 100;
-    const accuracyDelta = Math.round((mockB.accuracy - mockA.accuracy) * 100) / 100;
-    const percentageDelta = Math.round((mockB.percentage - mockA.percentage) * 100) / 100;
+    const accuracyDelta =
+      Math.round((mockB.accuracy - mockA.accuracy) * 100) / 100;
+    const percentageDelta =
+      Math.round((mockB.percentage - mockA.percentage) * 100) / 100;
 
     const rankDelta =
-      mockB.rank !== null && mockA.rank !== null ? mockB.rank - mockA.rank : null;
+      mockB.rank !== null && mockA.rank !== null
+        ? mockB.rank - mockA.rank
+        : null;
     const rankImprovement = rankDelta !== null ? -rankDelta : null;
 
     const percentileDelta =
@@ -121,7 +129,11 @@ export class MockComparisonService {
     };
   }
 
-  private mapToMockDataPoint(att: any, mockNumber: number, label: string): MockDataPoint {
+  private mapToMockDataPoint(
+    att: any,
+    mockNumber: number,
+    label: string,
+  ): MockDataPoint {
     const res = att.result || {};
     const rankRecord = att.candidateRanks?.[0];
     const timeRecord = att.timeAnalyses?.[0];
@@ -143,8 +155,12 @@ export class MockComparisonService {
       rank: rankRecord ? rankRecord.rank : null,
       totalCandidates: rankRecord ? rankRecord.totalCandidates : null,
       percentile: rankRecord ? rankRecord.percentile : null,
-      timeUsedSeconds: timeRecord ? timeRecord.totalTimeUsedSeconds : res.timeUsedSeconds ?? null,
-      timeUtilizationPercentage: timeRecord ? timeRecord.timeUtilizationPercentage : null,
+      timeUsedSeconds: timeRecord
+        ? timeRecord.totalTimeUsedSeconds
+        : (res.timeUsedSeconds ?? null),
+      timeUtilizationPercentage: timeRecord
+        ? timeRecord.timeUtilizationPercentage
+        : null,
     };
   }
 }

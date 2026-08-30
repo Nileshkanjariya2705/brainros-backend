@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Post,
-  Param,
-  Body,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Post, Param, Body, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AdminHighRiskService } from '../services/admin-high-risk.service';
 import {

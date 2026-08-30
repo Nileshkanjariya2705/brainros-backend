@@ -1,6 +1,13 @@
 import {
-  IsNotEmpty, IsString, IsUUID, IsOptional, IsNumber,
-  IsEnum, IsArray, ValidateNested, Min,
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+  IsOptional,
+  IsNumber,
+  IsEnum,
+  IsArray,
+  ValidateNested,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { QuestionDifficultyEnum } from '../enums/question-difficulty.enum';

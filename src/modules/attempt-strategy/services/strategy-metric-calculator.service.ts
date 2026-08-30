@@ -34,11 +34,17 @@ export class StrategyMetricCalculatorService {
     const questionTimeMap = new Map<string, number>();
     for (const log of timeLogs) {
       const prev = questionTimeMap.get(log.examQuestionId) || 0;
-      questionTimeMap.set(log.examQuestionId, prev + (log.timeSpentSeconds || 0));
+      questionTimeMap.set(
+        log.examQuestionId,
+        prev + (log.timeSpentSeconds || 0),
+      );
     }
 
     const totalTimeAvailableSeconds = (exam.durationMinutes || 60) * 60;
-    const benchmarkSeconds = totalQuestions > 0 ? Math.round(totalTimeAvailableSeconds / totalQuestions) : 60;
+    const benchmarkSeconds =
+      totalQuestions > 0
+        ? Math.round(totalTimeAvailableSeconds / totalQuestions)
+        : 60;
 
     let attemptedCount = 0;
     let correctCount = 0;
@@ -68,7 +74,11 @@ export class StrategyMetricCalculatorService {
         q.difficultyLevel === 'VERY_HARD' ||
         (exam.defaultNegativeMarks && negMark > exam.defaultNegativeMarks);
 
-      const isAttempted = !!ans && (!!ans.selectedOptionId || ans.numericalAnswer !== null || !!ans.selectedOptions);
+      const isAttempted =
+        !!ans &&
+        (!!ans.selectedOptionId ||
+          ans.numericalAnswer !== null ||
+          !!ans.selectedOptions);
 
       if (ans?.isMarkedForReview) {
         reviewedQuestionCount++;
@@ -115,20 +125,38 @@ export class StrategyMetricCalculatorService {
     }
 
     const unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
-    const attemptedPercentage = Math.round((attemptedCount / totalQuestions) * 10000) / 100;
-    const unattemptedPercentage = Math.round((unattemptedCount / totalQuestions) * 10000) / 100;
-    const accuracy = attemptedCount > 0 ? Math.round((correctCount / attemptedCount) * 10000) / 100 : 0;
-    const highRiskAccuracy = highRiskAttemptCount > 0
-      ? Math.round(((highRiskAttemptCount - highRiskWrongCount) / highRiskAttemptCount) * 10000) / 100
-      : 0;
+    const attemptedPercentage =
+      Math.round((attemptedCount / totalQuestions) * 10000) / 100;
+    const unattemptedPercentage =
+      Math.round((unattemptedCount / totalQuestions) * 10000) / 100;
+    const accuracy =
+      attemptedCount > 0
+        ? Math.round((correctCount / attemptedCount) * 10000) / 100
+        : 0;
+    const highRiskAccuracy =
+      highRiskAttemptCount > 0
+        ? Math.round(
+            ((highRiskAttemptCount - highRiskWrongCount) /
+              highRiskAttemptCount) *
+              10000,
+          ) / 100
+        : 0;
 
-    const negativeMarkingImpactPercentage = totalMaxScore > 0
-      ? Math.round((totalNegativeMarksLost / totalMaxScore) * 10000) / 100
-      : 0;
+    const negativeMarkingImpactPercentage =
+      totalMaxScore > 0
+        ? Math.round((totalNegativeMarksLost / totalMaxScore) * 10000) / 100
+        : 0;
 
     // Conservative Projected Improvement Model
-    const projectedImprovementMarks = Math.round(avoidableNegativeMarks * 100) / 100;
-    const projectedScore = Math.round(Math.min(totalMaxScore, actualObtainedMarks + projectedImprovementMarks) * 100) / 100;
+    const projectedImprovementMarks =
+      Math.round(avoidableNegativeMarks * 100) / 100;
+    const projectedScore =
+      Math.round(
+        Math.min(
+          totalMaxScore,
+          actualObtainedMarks + projectedImprovementMarks,
+        ) * 100,
+      ) / 100;
 
     const summary: StrategySummaryMetrics = {
       totalQuestions,
@@ -158,14 +186,22 @@ export class StrategyMetricCalculatorService {
 
     // Build metric map for rule engine
     const metricMap = new Map<string, StrategyMetricItem>();
-    const register = (code: string, value: number, unit: StrategyMetricItem['unit']) => {
+    const register = (
+      code: string,
+      value: number,
+      unit: StrategyMetricItem['unit'],
+    ) => {
       metricMap.set(code, { metricCode: code, value, unit });
     };
 
     register('ATTEMPTED_COUNT', summary.attemptedCount, 'COUNT');
     register('ATTEMPTED_PERCENTAGE', summary.attemptedPercentage, 'PERCENTAGE');
     register('UNATTEMPTED_COUNT', summary.unattemptedCount, 'COUNT');
-    register('UNATTEMPTED_PERCENTAGE', summary.unattemptedPercentage, 'PERCENTAGE');
+    register(
+      'UNATTEMPTED_PERCENTAGE',
+      summary.unattemptedPercentage,
+      'PERCENTAGE',
+    );
     register('CORRECT_COUNT', summary.correctCount, 'COUNT');
     register('WRONG_COUNT', summary.wrongCount, 'COUNT');
     register('ACCURACY', summary.accuracy, 'PERCENTAGE');
@@ -173,14 +209,30 @@ export class StrategyMetricCalculatorService {
     register('HIGH_RISK_WRONG_COUNT', summary.highRiskWrongCount, 'COUNT');
     register('HIGH_RISK_ACCURACY', summary.highRiskAccuracy, 'PERCENTAGE');
     register('NEGATIVE_MARKS_LOST', summary.negativeMarksLost, 'MARKS');
-    register('AVOIDABLE_NEGATIVE_MARKS', summary.avoidableNegativeMarks, 'MARKS');
-    register('NEGATIVE_MARKING_IMPACT_PERCENTAGE', summary.negativeMarkingImpactPercentage, 'PERCENTAGE');
+    register(
+      'AVOIDABLE_NEGATIVE_MARKS',
+      summary.avoidableNegativeMarks,
+      'MARKS',
+    );
+    register(
+      'NEGATIVE_MARKING_IMPACT_PERCENTAGE',
+      summary.negativeMarkingImpactPercentage,
+      'PERCENTAGE',
+    );
     register('TIME_HEAVY_WRONG_COUNT', summary.timeHeavyWrongCount, 'COUNT');
-    register('TIME_HEAVY_ATTEMPT_COUNT', summary.timeHeavyAttemptCount, 'COUNT');
+    register(
+      'TIME_HEAVY_ATTEMPT_COUNT',
+      summary.timeHeavyAttemptCount,
+      'COUNT',
+    );
     register('REVIEWED_QUESTION_COUNT', summary.reviewedQuestionCount, 'COUNT');
     register('REVIEWED_CORRECT_COUNT', summary.reviewedCorrectCount, 'COUNT');
     register('REVIEWED_WRONG_COUNT', summary.reviewedWrongCount, 'COUNT');
-    register('PROJECTED_IMPROVEMENT_MARKS', summary.projectedImprovementMarks, 'MARKS');
+    register(
+      'PROJECTED_IMPROVEMENT_MARKS',
+      summary.projectedImprovementMarks,
+      'MARKS',
+    );
 
     return { summary, metricMap };
   }
@@ -202,7 +254,9 @@ export class StrategyMetricCalculatorService {
         const selected = answer.selectedOptions as string[] | null;
         if (!selected || selected.length === 0) return false;
         const correctIds = new Set<string>(
-          question.options?.filter((o: any) => o.isCorrect).map((o: any) => o.id) || [],
+          question.options
+            ?.filter((o: any) => o.isCorrect)
+            .map((o: any) => o.id) || [],
         );
         const selectedSet = new Set<string>(selected);
         if (correctIds.size !== selectedSet.size) return false;
@@ -212,14 +266,25 @@ export class StrategyMetricCalculatorService {
         return true;
       }
       case 'NUM': {
-        if (answer.numericalAnswer === null || answer.numericalAnswer === undefined) return false;
+        if (
+          answer.numericalAnswer === null ||
+          answer.numericalAnswer === undefined
+        )
+          return false;
         const correctVal = question.correctAnswer;
         if (correctVal === null || correctVal === undefined) return false;
         if (typeof correctVal === 'number') {
           return Math.abs(answer.numericalAnswer - correctVal) < 0.001;
         }
-        if (typeof correctVal === 'object' && correctVal.min !== undefined && correctVal.max !== undefined) {
-          return answer.numericalAnswer >= correctVal.min && answer.numericalAnswer <= correctVal.max;
+        if (
+          typeof correctVal === 'object' &&
+          correctVal.min !== undefined &&
+          correctVal.max !== undefined
+        ) {
+          return (
+            answer.numericalAnswer >= correctVal.min &&
+            answer.numericalAnswer <= correctVal.max
+          );
         }
         return false;
       }

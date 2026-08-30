@@ -56,24 +56,42 @@ export class QuestionTimingService {
       where: { id: examQuestionId, examId: attempt.examId },
     });
     if (!examQuestion) {
-      throw new NotFoundException('Question does not belong to this exam attempt');
+      throw new NotFoundException(
+        'Question does not belong to this exam attempt',
+      );
     }
 
     // 2. Check server-authoritative time expiry
-    const isExpired = attempt.serverEndTime ? serverNow > attempt.serverEndTime : false;
+    const isExpired = attempt.serverEndTime
+      ? serverNow > attempt.serverEndTime
+      : false;
     if (isExpired) {
-      await this.finalizeActiveTiming(attemptId, 'AUTO_SUBMIT', attempt.serverEndTime!);
-      throw new BadRequestException('Exam time has expired. Question timing cannot be started.');
+      await this.finalizeActiveTiming(
+        attemptId,
+        'AUTO_SUBMIT',
+        attempt.serverEndTime!,
+      );
+      throw new BadRequestException(
+        'Exam time has expired. Question timing cannot be started.',
+      );
     }
 
     // 3. Event Deduplication
     if (dto.eventId) {
-      const isNewEvent = await this.timingStore.recordProcessedEvent(attemptId, dto.eventId);
+      const isNewEvent = await this.timingStore.recordProcessedEvent(
+        attemptId,
+        dto.eventId,
+      );
       if (!isNewEvent) {
         // Return existing active state idempotently
         const current = await this.timingStore.getActiveTiming(attemptId);
         if (current && current.examQuestionId === examQuestionId) {
-          return this.formatTimingResponse(attempt, current.examQuestionId, current.visitNumber, current.serverStartedAt);
+          return this.formatTimingResponse(
+            attempt,
+            current.examQuestionId,
+            current.visitNumber,
+            current.serverStartedAt,
+          );
         }
       }
     }
@@ -123,7 +141,12 @@ export class QuestionTimingService {
 
     await this.timingStore.setActiveTiming(attemptId, activeState);
 
-    return this.formatTimingResponse(attempt, examQuestionId, visitNumber, serverNow.toISOString());
+    return this.formatTimingResponse(
+      attempt,
+      examQuestionId,
+      visitNumber,
+      serverNow.toISOString(),
+    );
   }
 
   /**
@@ -169,7 +192,9 @@ export class QuestionTimingService {
       examQuestionId: dto.examQuestionId,
       visitNumber: currentActive.visitNumber,
       timeSpentSeconds: log.timeSpentSeconds,
-      serverEndTime: log.endTime ? log.endTime.toISOString() : serverNow.toISOString(),
+      serverEndTime: log.endTime
+        ? log.endTime.toISOString()
+        : serverNow.toISOString(),
       source: log.source,
     };
   }
@@ -188,15 +213,24 @@ export class QuestionTimingService {
     if (!currentActive) {
       const serverNow = new Date();
       const timeRemaining = attempt.serverEndTime
-        ? Math.max(0, Math.floor((attempt.serverEndTime.getTime() - serverNow.getTime()) / 1000))
+        ? Math.max(
+            0,
+            Math.floor(
+              (attempt.serverEndTime.getTime() - serverNow.getTime()) / 1000,
+            ),
+          )
         : 0;
       return {
         attemptId,
         examQuestionId: '',
         visitNumber: 0,
         serverTime: serverNow.toISOString(),
-        serverStartTime: attempt.startedAt ? attempt.startedAt.toISOString() : serverNow.toISOString(),
-        serverEndTime: attempt.serverEndTime ? attempt.serverEndTime.toISOString() : null,
+        serverStartTime: attempt.startedAt
+          ? attempt.startedAt.toISOString()
+          : serverNow.toISOString(),
+        serverEndTime: attempt.serverEndTime
+          ? attempt.serverEndTime.toISOString()
+          : null,
         timeRemainingSeconds: timeRemaining,
         isExpired: timeRemaining <= 0,
         activeQuestionId: '',
@@ -227,7 +261,12 @@ export class QuestionTimingService {
     const currentActive = await this.timingStore.getActiveTiming(attemptId);
     if (currentActive) {
       const serverEnd = fixedEndTime || new Date();
-      await this.closeIntervalInternal(attempt, currentActive, serverEnd, source);
+      await this.closeIntervalInternal(
+        attempt,
+        currentActive,
+        serverEnd,
+        source,
+      );
       await this.timingStore.clearActiveTiming(attemptId);
     }
   }
@@ -258,7 +297,10 @@ export class QuestionTimingService {
     }
 
     // Clamp non-negative
-    const timeSpentSeconds = Math.max(0, Math.floor((effectiveEnd.getTime() - startedAt.getTime()) / 1000));
+    const timeSpentSeconds = Math.max(
+      0,
+      Math.floor((effectiveEnd.getTime() - startedAt.getTime()) / 1000),
+    );
 
     return this.prisma.questionTimeLog.create({
       data: {
@@ -270,7 +312,11 @@ export class QuestionTimingService {
         visitNumber: active.visitNumber,
         source,
         eventId: eventId || active.lastEventId || null,
-        clientTimestamp: clientTimestamp ? new Date(clientTimestamp) : (active.clientTimestamp ? new Date(active.clientTimestamp) : null),
+        clientTimestamp: clientTimestamp
+          ? new Date(clientTimestamp)
+          : active.clientTimestamp
+            ? new Date(active.clientTimestamp)
+            : null,
         clientSequence: clientSequence ?? active.clientSequence ?? null,
         metadata: metadata || active.metadata || null,
       },
@@ -280,7 +326,10 @@ export class QuestionTimingService {
   private async verifyAttempt(attemptId: string, studentIdOrUserId: string) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
-      include: { status: true, student: { select: { id: true, userId: true } } },
+      include: {
+        status: true,
+        student: { select: { id: true, userId: true } },
+      },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
     if (
@@ -294,7 +343,9 @@ export class QuestionTimingService {
 
   private verifyInProgress(attempt: any) {
     if (attempt.status.name !== 'IN_PROGRESS') {
-      throw new BadRequestException(`Attempt is in '${attempt.status.name}' status. Timing only allowed for IN_PROGRESS attempts.`);
+      throw new BadRequestException(
+        `Attempt is in '${attempt.status.name}' status. Timing only allowed for IN_PROGRESS attempts.`,
+      );
     }
   }
 
@@ -306,7 +357,12 @@ export class QuestionTimingService {
   ): AuthoritativeTimingResponse {
     const serverNow = new Date();
     const timeRemaining = attempt.serverEndTime
-      ? Math.max(0, Math.floor((attempt.serverEndTime.getTime() - serverNow.getTime()) / 1000))
+      ? Math.max(
+          0,
+          Math.floor(
+            (attempt.serverEndTime.getTime() - serverNow.getTime()) / 1000,
+          ),
+        )
       : 0;
 
     return {
@@ -315,7 +371,9 @@ export class QuestionTimingService {
       visitNumber,
       serverTime: serverNow.toISOString(),
       serverStartTime,
-      serverEndTime: attempt.serverEndTime ? attempt.serverEndTime.toISOString() : null,
+      serverEndTime: attempt.serverEndTime
+        ? attempt.serverEndTime.toISOString()
+        : null,
       timeRemainingSeconds: timeRemaining,
       isExpired: timeRemaining <= 0,
       activeQuestionId: examQuestionId,

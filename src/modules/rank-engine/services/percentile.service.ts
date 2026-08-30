@@ -13,7 +13,11 @@ export class PercentileService {
    * Rank 50 of 100 -> 51.00%
    * Rank 100 of 100 -> 1.00%
    */
-  calculatePercentile(rank: number, totalCandidates: number, method: 'STANDARD' | 'FRACTIONAL' = 'STANDARD'): number {
+  calculatePercentile(
+    rank: number,
+    totalCandidates: number,
+    method: 'STANDARD' | 'FRACTIONAL' = 'STANDARD',
+  ): number {
     if (totalCandidates <= 0) return 0;
     if (totalCandidates === 1) return 100;
 

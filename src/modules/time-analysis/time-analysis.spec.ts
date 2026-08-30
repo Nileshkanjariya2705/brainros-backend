@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { QuestionTimingService } from './services/question-timing.service';
 import { TimeAnalysisService } from './services/time-analysis.service';
 import { RedisTimingStore } from './stores/redis-timing.store';
@@ -69,10 +73,15 @@ describe('Time Analysis Subsystem', () => {
     describe('startQuestionTiming', () => {
       it('starts a new question timing interval and records active state in Redis', async () => {
         prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-        prismaMock.examQuestion.findFirst.mockResolvedValue({ id: 'eq-1', examId: 'exam-123' });
+        prismaMock.examQuestion.findFirst.mockResolvedValue({
+          id: 'eq-1',
+          examId: 'exam-123',
+        });
         timingStoreMock.recordProcessedEvent.mockResolvedValue(true);
         timingStoreMock.getActiveTiming.mockResolvedValue(null);
-        prismaMock.questionTimeLog.aggregate.mockResolvedValue({ _max: { visitNumber: 0 } });
+        prismaMock.questionTimeLog.aggregate.mockResolvedValue({
+          _max: { visitNumber: 0 },
+        });
         timingStoreMock.setActiveTiming.mockResolvedValue(undefined);
 
         const res = await timingService.startQuestionTiming(
@@ -95,7 +104,10 @@ describe('Time Analysis Subsystem', () => {
 
       it('auto-closes previous active question when transitioning to a new question', async () => {
         prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-        prismaMock.examQuestion.findFirst.mockResolvedValue({ id: 'eq-2', examId: 'exam-123' });
+        prismaMock.examQuestion.findFirst.mockResolvedValue({
+          id: 'eq-2',
+          examId: 'exam-123',
+        });
         timingStoreMock.recordProcessedEvent.mockResolvedValue(true);
 
         const currentActive = {
@@ -106,8 +118,13 @@ describe('Time Analysis Subsystem', () => {
           serverRevision: 1,
         };
         timingStoreMock.getActiveTiming.mockResolvedValue(currentActive);
-        prismaMock.questionTimeLog.create.mockResolvedValue({ id: 'log-1', timeSpentSeconds: 30 });
-        prismaMock.questionTimeLog.aggregate.mockResolvedValue({ _max: { visitNumber: 0 } });
+        prismaMock.questionTimeLog.create.mockResolvedValue({
+          id: 'log-1',
+          timeSpentSeconds: 30,
+        });
+        prismaMock.questionTimeLog.aggregate.mockResolvedValue({
+          _max: { visitNumber: 0 },
+        });
         timingStoreMock.setActiveTiming.mockResolvedValue(undefined);
 
         const res = await timingService.startQuestionTiming(
@@ -133,7 +150,10 @@ describe('Time Analysis Subsystem', () => {
 
       it('deduplicates start events and returns existing state without incrementing visit count', async () => {
         prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-        prismaMock.examQuestion.findFirst.mockResolvedValue({ id: 'eq-1', examId: 'exam-123' });
+        prismaMock.examQuestion.findFirst.mockResolvedValue({
+          id: 'eq-1',
+          examId: 'exam-123',
+        });
         timingStoreMock.recordProcessedEvent.mockResolvedValue(false); // duplicate!
         const existingActive = {
           attemptId,
@@ -160,10 +180,17 @@ describe('Time Analysis Subsystem', () => {
           serverEndTime: new Date(Date.now() - 1000), // expired!
         };
         prismaMock.attempt.findUnique.mockResolvedValue(expiredAttempt);
-        prismaMock.examQuestion.findFirst.mockResolvedValue({ id: 'eq-1', examId: 'exam-123' });
+        prismaMock.examQuestion.findFirst.mockResolvedValue({
+          id: 'eq-1',
+          examId: 'exam-123',
+        });
 
         await expect(
-          timingService.startQuestionTiming(attemptId, { examQuestionId: 'eq-1' }, studentId),
+          timingService.startQuestionTiming(
+            attemptId,
+            { examQuestionId: 'eq-1' },
+            studentId,
+          ),
         ).rejects.toThrow(BadRequestException);
       });
     });
@@ -194,7 +221,9 @@ describe('Time Analysis Subsystem', () => {
         );
 
         expect(res.timeSpentSeconds).toBe(45);
-        expect(timingStoreMock.clearActiveTiming).toHaveBeenCalledWith(attemptId);
+        expect(timingStoreMock.clearActiveTiming).toHaveBeenCalledWith(
+          attemptId,
+        );
       });
     });
 
@@ -213,7 +242,11 @@ describe('Time Analysis Subsystem', () => {
         timingStoreMock.clearActiveTiming.mockResolvedValue(undefined);
 
         const submitTime = new Date();
-        await timingService.finalizeActiveTiming(attemptId, 'SUBMIT', submitTime);
+        await timingService.finalizeActiveTiming(
+          attemptId,
+          'SUBMIT',
+          submitTime,
+        );
 
         expect(prismaMock.questionTimeLog.create).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -223,7 +256,9 @@ describe('Time Analysis Subsystem', () => {
             }),
           }),
         );
-        expect(timingStoreMock.clearActiveTiming).toHaveBeenCalledWith(attemptId);
+        expect(timingStoreMock.clearActiveTiming).toHaveBeenCalledWith(
+          attemptId,
+        );
       });
     });
   });
@@ -243,13 +278,39 @@ describe('Time Analysis Subsystem', () => {
         sections: [{ id: 'sec-1', name: 'Physics', subjectId: 'sub-1' }],
       },
       timeLogs: [
-        { examQuestionId: 'eq-1', startTime: new Date(), endTime: new Date(), timeSpentSeconds: 40, visitNumber: 1 },
-        { examQuestionId: 'eq-1', startTime: new Date(), endTime: new Date(), timeSpentSeconds: 20, visitNumber: 2 },
-        { examQuestionId: 'eq-2', startTime: new Date(), endTime: new Date(), timeSpentSeconds: 150, visitNumber: 1 },
+        {
+          examQuestionId: 'eq-1',
+          startTime: new Date(),
+          endTime: new Date(),
+          timeSpentSeconds: 40,
+          visitNumber: 1,
+        },
+        {
+          examQuestionId: 'eq-1',
+          startTime: new Date(),
+          endTime: new Date(),
+          timeSpentSeconds: 20,
+          visitNumber: 2,
+        },
+        {
+          examQuestionId: 'eq-2',
+          startTime: new Date(),
+          endTime: new Date(),
+          timeSpentSeconds: 150,
+          visitNumber: 1,
+        },
       ],
       answers: [
-        { examQuestionId: 'eq-1', selectedOptionId: 'opt-1', isMarkedForReview: true },
-        { examQuestionId: 'eq-2', selectedOptionId: 'opt-wrong', isMarkedForReview: false },
+        {
+          examQuestionId: 'eq-1',
+          selectedOptionId: 'opt-1',
+          isMarkedForReview: true,
+        },
+        {
+          examQuestionId: 'eq-2',
+          selectedOptionId: 'opt-wrong',
+          isMarkedForReview: false,
+        },
       ],
     };
 
@@ -261,7 +322,11 @@ describe('Time Analysis Subsystem', () => {
         question: {
           id: 'q-1',
           questionType: { code: 'SCQ' },
-          chapter: { id: 'chap-1', name: 'Kinematics', subject: { name: 'Physics' } },
+          chapter: {
+            id: 'chap-1',
+            name: 'Kinematics',
+            subject: { name: 'Physics' },
+          },
           options: [{ id: 'opt-1', isCorrect: true }],
         },
       },
@@ -272,8 +337,15 @@ describe('Time Analysis Subsystem', () => {
         question: {
           id: 'q-2',
           questionType: { code: 'SCQ' },
-          chapter: { id: 'chap-2', name: 'Thermodynamics', subject: { name: 'Physics' } },
-          options: [{ id: 'opt-2-correct', isCorrect: true }, { id: 'opt-wrong', isCorrect: false }],
+          chapter: {
+            id: 'chap-2',
+            name: 'Thermodynamics',
+            subject: { name: 'Physics' },
+          },
+          options: [
+            { id: 'opt-2-correct', isCorrect: true },
+            { id: 'opt-wrong', isCorrect: false },
+          ],
         },
       },
     ];

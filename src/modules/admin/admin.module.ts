@@ -6,6 +6,7 @@ import { InstitutionModule } from '../institution/institution.module';
 
 // Controllers
 import { AdminDashboardController } from './controllers/admin-dashboard.controller';
+import { SuperAdminDashboardController } from './controllers/super-admin-dashboard.controller';
 import { AdminApprovalController } from './controllers/admin-approval.controller';
 import { AdminExamControlController } from './controllers/admin-exam-control.controller';
 import { AdminAuditLogController } from './controllers/admin-audit-log.controller';
@@ -13,6 +14,7 @@ import { AdminUserSearchController } from './controllers/admin-user-search.contr
 
 // Services
 import { AdminDashboardService } from './dashboard/services/admin-dashboard.service';
+import { SuperAdminDashboardService } from './dashboard/services/super-admin-dashboard.service';
 import { AuditLogService } from './audit/services/audit-log.service';
 import { ApprovalWorkflowService } from './approval/services/approval-workflow.service';
 import { AdminHighRiskService } from './services/admin-high-risk.service';
@@ -25,14 +27,10 @@ import { InstitutionApprovalHandler } from './approval/handlers/institution-appr
 import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-approval.handler';
 
 @Module({
-  imports: [
-    PrismaModule,
-    RedisModule,
-    ExamSchedulingModule,
-    InstitutionModule,
-  ],
+  imports: [PrismaModule, RedisModule, ExamSchedulingModule, InstitutionModule],
   controllers: [
     AdminDashboardController,
+    SuperAdminDashboardController,
     AdminApprovalController,
     AdminExamControlController,
     AdminAuditLogController,
@@ -41,6 +39,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
   providers: [
     // Core Services
     AdminDashboardService,
+    SuperAdminDashboardService,
     AuditLogService,
     ApprovalWorkflowService,
     AdminHighRiskService,
@@ -54,6 +53,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
   ],
   exports: [
     AdminDashboardService,
+    SuperAdminDashboardService,
     AuditLogService,
     ApprovalWorkflowService,
     AdminHighRiskService,

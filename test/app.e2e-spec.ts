@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe, BadRequestException } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  BadRequestException,
+} from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
@@ -15,7 +19,11 @@ describe('Authentication & Passwordless Flow (e2e)', () => {
   let mockRedisStore: Record<string, string> = {};
 
   const mockRedis = {
-    get: jest.fn().mockImplementation((key) => Promise.resolve(mockRedisStore[key] || null)),
+    get: jest
+      .fn()
+      .mockImplementation((key) =>
+        Promise.resolve(mockRedisStore[key] || null),
+      ),
     set: jest.fn().mockImplementation((key, val) => {
       mockRedisStore[key] = val;
       return Promise.resolve();
@@ -78,9 +86,7 @@ describe('Authentication & Passwordless Flow (e2e)', () => {
   });
 
   it('1. GET / should return formatted success response envelope', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/')
-      .expect(200);
+    const response = await request(app.getHttpServer()).get('/').expect(200);
 
     expect(response.body).toEqual({
       success: true,

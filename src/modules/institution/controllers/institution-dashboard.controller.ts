@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { InstitutionDashboardService } from '../services/institution-dashboard.service';
 import { InstitutionAccessService } from '../services/institution-access.service';
 import { DashboardQueryDto } from '../dto/institution.dto';
@@ -25,7 +19,9 @@ export class InstitutionDashboardController {
     @CurrentUser() user: any,
     @Query() query: DashboardQueryDto,
   ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.dashboardService.getDashboardSummary(institution.id, query);
   }
 

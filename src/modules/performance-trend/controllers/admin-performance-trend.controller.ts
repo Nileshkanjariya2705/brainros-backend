@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { StudentTrendService } from '../services/student-trend.service';
 import { GetTrendsQueryDto } from '../dto/performance-trend.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';

@@ -1,13 +1,24 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, Query, UseGuards,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import { AcademicService } from './academic.service';
 import {
-  CreateSubjectDto, UpdateSubjectDto,
-  CreateChapterDto, UpdateChapterDto,
-  CreateTopicDto, UpdateTopicDto,
-  CreateSubTopicDto, UpdateSubTopicDto,
+  CreateSubjectDto,
+  UpdateSubjectDto,
+  CreateChapterDto,
+  UpdateChapterDto,
+  CreateTopicDto,
+  UpdateTopicDto,
+  CreateSubTopicDto,
+  UpdateSubTopicDto,
 } from './dto/academic.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';

@@ -24,8 +24,12 @@ describe('AuthController', () => {
           expiresIn: 900,
         },
       }),
-      logout: jest.fn().mockResolvedValue({ message: 'Logged out successfully.' }),
-      logoutAll: jest.fn().mockResolvedValue({ message: 'All sessions logged out successfully.' }),
+      logout: jest
+        .fn()
+        .mockResolvedValue({ message: 'Logged out successfully.' }),
+      logoutAll: jest.fn().mockResolvedValue({
+        message: 'All sessions logged out successfully.',
+      }),
     };
 
     configServiceMock = {
@@ -62,7 +66,12 @@ describe('AuthController', () => {
 
     expect(authServiceMock.verifyPasswordlessLoginOtp).toHaveBeenCalled();
     expect(mockRes.cookie).toHaveBeenCalledWith(
-      'refreshToken',
+      'access_token',
+      'test-access-token',
+      expect.objectContaining({ httpOnly: true }),
+    );
+    expect(mockRes.cookie).toHaveBeenCalledWith(
+      'refresh_token',
       'test-refresh-token',
       expect.objectContaining({ httpOnly: true }),
     );
@@ -71,28 +80,43 @@ describe('AuthController', () => {
 
   it('should refresh session from HttpOnly cookie and set new rotated cookie', async () => {
     const mockRes: any = { cookie: jest.fn() };
-    const mockReq: any = { cookies: { refreshToken: 'cookie-refresh-token' } };
+    const mockReq: any = { cookies: { refresh_token: 'cookie-refresh-token' } };
 
     const result = await controller.refreshSession('', '', mockReq, mockRes);
 
-    expect(authServiceMock.refreshSession).toHaveBeenCalledWith('cookie-refresh-token', mockReq);
+    expect(authServiceMock.refreshSession).toHaveBeenCalledWith(
+      'cookie-refresh-token',
+      mockReq,
+    );
     expect(mockRes.cookie).toHaveBeenCalledWith(
-      'refreshToken',
+      'access_token',
+      'new-access-token',
+      expect.objectContaining({ httpOnly: true }),
+    );
+    expect(mockRes.cookie).toHaveBeenCalledWith(
+      'refresh_token',
       'new-refresh-token',
       expect.objectContaining({ httpOnly: true }),
     );
     expect(result.data.accessToken).toBe('new-access-token');
   });
 
-  it('should clear refresh cookie on logout', async () => {
+  it('should clear refresh and access cookies on logout', async () => {
     const mockRes: any = { clearCookie: jest.fn() };
-    const mockReq: any = { cookies: { refreshToken: 'active-cookie' } };
+    const mockReq: any = { cookies: { refresh_token: 'active-cookie' } };
 
     await controller.logout('', '', mockReq, mockRes);
 
-    expect(authServiceMock.logout).toHaveBeenCalledWith('active-cookie', mockReq);
+    expect(authServiceMock.logout).toHaveBeenCalledWith(
+      'active-cookie',
+      mockReq,
+    );
     expect(mockRes.clearCookie).toHaveBeenCalledWith(
-      'refreshToken',
+      'access_token',
+      expect.objectContaining({ httpOnly: true }),
+    );
+    expect(mockRes.clearCookie).toHaveBeenCalledWith(
+      'refresh_token',
       expect.objectContaining({ httpOnly: true }),
     );
   });

@@ -28,12 +28,17 @@ export class StudentTrendService {
     // 1. Check Redis Cache
     const cached = await this.redisService.get(cacheKey);
     if (cached) {
-      this.logger.debug(`Cache hit for student '${studentId}' performance trends`);
+      this.logger.debug(
+        `Cache hit for student '${studentId}' performance trends`,
+      );
       return JSON.parse(cached);
     }
 
     // 2. Load attempts from database
-    const rawAttempts = await this.dataProvider.loadStudentMockAttempts(studentId, filters);
+    const rawAttempts = await this.dataProvider.loadStudentMockAttempts(
+      studentId,
+      filters,
+    );
 
     // 3. Aggregate trends
     const response = this.aggregationService.aggregateTrends(rawAttempts);

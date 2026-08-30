@@ -7,7 +7,11 @@ import { TranslationController } from './controllers/translation.controller';
 import { ExamLanguageController } from './controllers/exam-language.controller';
 
 @Module({
-  controllers: [LanguageController, TranslationController, ExamLanguageController],
+  controllers: [
+    LanguageController,
+    TranslationController,
+    ExamLanguageController,
+  ],
   providers: [LanguageService, TranslationService, ExamLanguageService],
   exports: [LanguageService, TranslationService, ExamLanguageService],
 })

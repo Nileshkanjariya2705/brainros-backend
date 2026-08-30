@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamLifecycleService } from './exam-lifecycle.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
+import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
 
 @Injectable()
 export class ExamScheduleService {
@@ -15,6 +16,7 @@ export class ExamScheduleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly lifecycleService: ExamLifecycleService,
+    private readonly notificationQueue: NotificationQueueService,
   ) {}
 
   /**
@@ -29,7 +31,7 @@ export class ExamScheduleService {
       where: { id: examId },
       include: {
         status: true,
-        versions: { where: { id: dto.examVersionId } },
+        versions: dto.examVersionId ? { where: { id: dto.examVersionId } } : true,
       },
     });
 
@@ -37,23 +39,41 @@ export class ExamScheduleService {
       throw new NotFoundException(`Exam with ID '${examId}' not found`);
     }
 
-    if (exam.status.name !== 'APPROVED') {
+    if (exam.status.name === 'CANCELLED' || exam.status.name === 'ENDED' || exam.status.name === 'COMPLETED') {
       throw new BadRequestException(
-        `Cannot schedule exam with status '${exam.status.name}'. Only 'APPROVED' exams can be scheduled.`,
+        `Cannot schedule exam with status '${exam.status.name}'.`,
       );
     }
 
-    if (exam.versions.length === 0) {
-      throw new BadRequestException(
-        `Specified ExamVersion '${dto.examVersionId}' does not exist or does not belong to Exam '${examId}'.`,
-      );
+    let versionId = dto.examVersionId;
+    if (!versionId || exam.versions.length === 0) {
+      let version = await this.prisma.examVersion.findFirst({
+        where: { examId },
+        orderBy: { versionNumber: 'desc' },
+      });
+      if (!version) {
+        version = await this.prisma.examVersion.create({
+          data: {
+            examId,
+            versionNumber: 1,
+            status: 'PUBLISHED',
+            totalQuestions: exam.totalQuestions,
+            durationMinutes: exam.durationMinutes,
+            totalMarks: exam.totalMarks,
+            generatedById: scheduledById,
+          },
+        });
+      }
+      versionId = version.id;
     }
 
     const startTime = new Date(dto.startTime);
     const endTime = new Date(dto.endTime);
 
     if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-      throw new BadRequestException('Invalid startTime or endTime ISO timestamp format.');
+      throw new BadRequestException(
+        'Invalid startTime or endTime ISO timestamp format.',
+      );
     }
 
     if (startTime >= endTime) {
@@ -62,12 +82,12 @@ export class ExamScheduleService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const scheduled = await this.prisma.$transaction(async (tx) => {
       // 1. Create schedule record
       const schedule = await tx.examSchedule.create({
         data: {
           examId,
-          examVersionId: dto.examVersionId,
+          examVersionId: versionId,
           startTime,
           endTime,
           timezone: dto.timezone || 'Asia/Kolkata',
@@ -99,10 +119,10 @@ export class ExamScheduleService {
       await this.lifecycleService.recordHistory(
         {
           examId,
-          examVersionId: dto.examVersionId,
+          examVersionId: versionId,
           scheduleId: schedule.id,
           action: 'SCHEDULE',
-          fromStatus: 'APPROVED',
+          fromStatus: exam.status.name,
           toStatus: 'SCHEDULED',
           performedById: scheduledById,
           comment: `Scheduled for window ${startTime.toISOString()} - ${endTime.toISOString()} (${dto.timezone || 'Asia/Kolkata'})`,
@@ -120,6 +140,66 @@ export class ExamScheduleService {
       );
       return schedule;
     });
+
+    // 1. Direct in-app notification creation for all active students
+    try {
+      const students = await this.prisma.student.findMany({
+        where: { status: 'ACTIVE' },
+        select: { userId: true, name: true },
+      });
+
+      if (students.length > 0) {
+        const formattedDate = startTime.toLocaleString('en-IN', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+          timeZone: dto.timezone || 'Asia/Kolkata',
+        });
+
+        const records = students.map((s) => ({
+          userId: s.userId,
+          recipientUserId: s.userId,
+          channel: 'IN_APP' as any,
+          type: 'EXAM_SCHEDULED' as any,
+          title: `New Exam Scheduled: ${exam.title}`,
+          message: `${exam.title} has been scheduled for ${formattedDate} (${dto.timezone || 'Asia/Kolkata'}). Duration: ${exam.durationMinutes} mins.`,
+          data: {
+            entityType: 'EXAM',
+            entityId: exam.id,
+            action: 'VIEW',
+            examTitle: exam.title,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            durationMinutes: exam.durationMinutes,
+          },
+          payload: {
+            examTitle: exam.title,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            durationMinutes: exam.durationMinutes,
+          },
+          priority: 'NORMAL' as any,
+          status: 'DELIVERED' as any,
+          isRead: false,
+          idempotencyKey: `sched_${exam.id}_${s.userId}_${scheduled.id}`,
+        }));
+
+        await this.prisma.notification.createMany({
+          data: records,
+          skipDuplicates: true,
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Direct schedule notification creation error: ${err.message}`);
+    }
+
+    // 2. Asynchronously dispatch BullMQ notification job to all eligible students
+    this.notificationQueue.dispatchExamNotificationJob({
+      type: 'EXAM_SCHEDULED',
+      examId,
+      scheduleId: scheduled.id,
+    });
+
+    return scheduled;
   }
 
   /**
@@ -149,7 +229,9 @@ export class ExamScheduleService {
     const newEndTime = new Date(dto.endTime);
 
     if (isNaN(newStartTime.getTime()) || isNaN(newEndTime.getTime())) {
-      throw new BadRequestException('Invalid startTime or endTime ISO timestamp format.');
+      throw new BadRequestException(
+        'Invalid startTime or endTime ISO timestamp format.',
+      );
     }
 
     if (newStartTime >= newEndTime) {
@@ -158,14 +240,14 @@ export class ExamScheduleService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const oldWindow = {
         startTime: schedule.startTime.toISOString(),
         endTime: schedule.endTime.toISOString(),
         timezone: schedule.timezone,
       };
 
-      const updated = await tx.examSchedule.update({
+      const updatedSchedule = await tx.examSchedule.update({
         where: { id: scheduleId },
         data: {
           startTime: newStartTime,
@@ -204,9 +286,20 @@ export class ExamScheduleService {
         tx,
       );
 
-      this.logger.log(`Schedule '${scheduleId}' rescheduled by user '${performedById}'`);
-      return updated;
+      this.logger.log(
+        `Schedule '${scheduleId}' rescheduled by user '${performedById}'`,
+      );
+      return updatedSchedule;
     });
+
+    // Asynchronously dispatch BullMQ notification job
+    this.notificationQueue.dispatchExamNotificationJob({
+      type: 'EXAM_RESCHEDULED',
+      examId: schedule.examId,
+      scheduleId,
+    });
+
+    return updated;
   }
 
   /**
@@ -240,7 +333,7 @@ export class ExamScheduleService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const activated = await this.prisma.$transaction(async (tx) => {
       // 1. Conditional atomic update for schedule
       const updatedSchedule = await tx.examSchedule.update({
         where: { id: scheduleId },
@@ -252,7 +345,10 @@ export class ExamScheduleService {
       });
 
       // 2. Transition Exam to ACTIVE
-      const activeStatus = await this.lifecycleService.getOrCreateExamStatus('ACTIVE', tx);
+      const activeStatus = await this.lifecycleService.getOrCreateExamStatus(
+        'ACTIVE',
+        tx,
+      );
 
       await tx.exam.update({
         where: { id: schedule.examId },
@@ -291,6 +387,15 @@ export class ExamScheduleService {
         schedule: updatedSchedule,
       };
     });
+
+    // Asynchronously dispatch BullMQ notification job for activation
+    this.notificationQueue.dispatchExamNotificationJob({
+      type: 'EXAM_STARTING_SOON',
+      examId: schedule.examId,
+      scheduleId,
+    });
+
+    return activated;
   }
 
   /**
@@ -304,14 +409,23 @@ export class ExamScheduleService {
       },
       orderBy: { createdAt: 'desc' },
       include: {
-        examVersion: { select: { id: true, versionNumber: true, status: true, totalQuestions: true } },
+        examVersion: {
+          select: {
+            id: true,
+            versionNumber: true,
+            status: true,
+            totalQuestions: true,
+          },
+        },
         scheduledBy: { select: { id: true, email: true } },
         activatedBy: { select: { id: true, email: true } },
       },
     });
 
     if (!schedule) {
-      throw new NotFoundException(`No active or scheduled schedule found for Exam '${examId}'`);
+      throw new NotFoundException(
+        `No active or scheduled schedule found for Exam '${examId}'`,
+      );
     }
 
     return schedule;

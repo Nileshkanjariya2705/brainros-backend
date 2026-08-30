@@ -52,7 +52,9 @@ export class ExamGenerationController {
 
   @Get('exam-versions/:versionId')
   @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
-  async getExamVersionById(@Param('versionId', ParseUUIDPipe) versionId: string) {
+  async getExamVersionById(
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ) {
     const data = await this.generationService.getExamVersionById(versionId);
     return {
       statusCode: 200,
@@ -63,7 +65,9 @@ export class ExamGenerationController {
 
   @Post('exam-versions/:versionId/publish')
   @Roles('SUPER_ADMIN', 'ADMIN')
-  async publishExamVersion(@Param('versionId', ParseUUIDPipe) versionId: string) {
+  async publishExamVersion(
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ) {
     const data = await this.generationService.publishExamVersion(versionId);
     return {
       statusCode: 200,

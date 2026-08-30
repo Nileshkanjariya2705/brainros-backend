@@ -29,7 +29,12 @@ export class ApprovalWorkflowService {
   /**
    * Submit an entity for administrative approval review.
    */
-  async submit(dto: SubmitApprovalDto, submittedById: string, ipAddress?: string, userAgent?: string) {
+  async submit(
+    dto: SubmitApprovalDto,
+    submittedById: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
     const handler = this.registry.getHandler(dto.entityType);
 
     // 1. Verify entity existence and eligibility via domain handler
@@ -106,7 +111,9 @@ export class ApprovalWorkflowService {
 
     // ── Self-Approval Prevention Rule ──
     if (request.requestedById === reviewerId) {
-      this.logger.warn(`Self-approval blocked for user '${reviewerId}' on request '${requestId}'`);
+      this.logger.warn(
+        `Self-approval blocked for user '${reviewerId}' on request '${requestId}'`,
+      );
       throw new ForbiddenException(
         'Self-approval is forbidden. An administrative action must be reviewed by another authorized administrator.',
       );
@@ -116,7 +123,12 @@ export class ApprovalWorkflowService {
 
     return this.prisma.$transaction(async (tx) => {
       // Execute domain-specific transition
-      const { beforeState, afterState } = await handler.onApprove(request, reviewerId, dto.comment, tx);
+      const { beforeState, afterState } = await handler.onApprove(
+        request,
+        reviewerId,
+        dto.comment,
+        tx,
+      );
 
       const updatedRequest = await tx.approvalRequest.update({
         where: { id: requestId },
@@ -176,7 +188,12 @@ export class ApprovalWorkflowService {
     const handler = this.registry.getHandler(request.resourceType);
 
     return this.prisma.$transaction(async (tx) => {
-      const { beforeState, afterState } = await handler.onReject(request, reviewerId, dto.reason, tx);
+      const { beforeState, afterState } = await handler.onReject(
+        request,
+        reviewerId,
+        dto.reason,
+        tx,
+      );
 
       const updatedRequest = await tx.approvalRequest.update({
         where: { id: requestId },
@@ -225,7 +242,9 @@ export class ApprovalWorkflowService {
     }
 
     if (request.status !== 'PENDING') {
-      throw new BadRequestException(`Cannot cancel request with status '${request.status}'.`);
+      throw new BadRequestException(
+        `Cannot cancel request with status '${request.status}'.`,
+      );
     }
 
     const handler = this.registry.getHandler(request.resourceType);
@@ -271,7 +290,11 @@ export class ApprovalWorkflowService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const results: Array<{ id: string; status: 'APPROVED' | 'FAILED'; error?: string }> = [];
+    const results: Array<{
+      id: string;
+      status: 'APPROVED' | 'FAILED';
+      error?: string;
+    }> = [];
 
     for (const id of requestIds) {
       try {

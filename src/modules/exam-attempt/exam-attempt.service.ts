@@ -37,7 +37,11 @@ export class ExamAttemptService {
    *   3. Duplicate-attempt guard (allow recovery for INTERRUPTED / IN_PROGRESS)
    *   4. Create attempt bound to the active scheduleId + examVersionId
    */
-  async startAttempt(dto: StartAttemptDto, studentId: string, ipAddress?: string) {
+  async startAttempt(
+    dto: StartAttemptDto,
+    studentId: string,
+    ipAddress?: string,
+  ) {
     // ── 1. Validate access (scheduling window + lifecycle + eligibility) ──
     const access = await this.examAccessService.validateStudentAccess(
       dto.examId,
@@ -83,7 +87,9 @@ export class ExamAttemptService {
 
     // Server-authoritative end time:
     // min(examDuration from now, live window end) — whichever is sooner
-    const durationEnd = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
+    const durationEnd = new Date(
+      now.getTime() + exam.durationMinutes * 60 * 1000,
+    );
     const windowEnd = new Date(access.endTime);
     const serverEndTime = durationEnd < windowEnd ? durationEnd : windowEnd;
 
@@ -146,7 +152,11 @@ export class ExamAttemptService {
    * Bulk save multiple answers at once (auto-save scenario).
    * Does NOT check time expiry — client handles timer; partial saves are fine.
    */
-  async bulkSaveAnswers(attemptId: string, dto: BulkSaveAnswersDto, studentId: string) {
+  async bulkSaveAnswers(
+    attemptId: string,
+    dto: BulkSaveAnswersDto,
+    studentId: string,
+  ) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
     this.verifyAttemptInProgress(attempt);
 
@@ -208,7 +218,11 @@ export class ExamAttemptService {
 
     // Finalize any open active timing interval
     const now = new Date();
-    await this.questionTimingService.finalizeActiveTiming(attemptId, 'SUBMIT', now);
+    await this.questionTimingService.finalizeActiveTiming(
+      attemptId,
+      'SUBMIT',
+      now,
+    );
 
     const submittedStatus = await this.getStatus('SUBMITTED');
     await this.prisma.attempt.update({
@@ -242,10 +256,17 @@ export class ExamAttemptService {
     if (attempt.status.name !== 'IN_PROGRESS') return;
 
     const now = new Date();
-    const effectiveEndTime = attempt.serverEndTime && now > attempt.serverEndTime ? attempt.serverEndTime : now;
+    const effectiveEndTime =
+      attempt.serverEndTime && now > attempt.serverEndTime
+        ? attempt.serverEndTime
+        : now;
 
     // Finalize active timing interval up to expiration
-    await this.questionTimingService.finalizeActiveTiming(attemptId, 'AUTO_SUBMIT', effectiveEndTime);
+    await this.questionTimingService.finalizeActiveTiming(
+      attemptId,
+      'AUTO_SUBMIT',
+      effectiveEndTime,
+    );
 
     const autoSubmittedStatus = await this.getStatus('AUTO_SUBMITTED');
     await this.prisma.attempt.update({
@@ -300,7 +321,11 @@ export class ExamAttemptService {
    * Seamless in-flight language switch during an active exam attempt
    * (Zero reset of timer, answers, or attempt identity).
    */
-  async switchAttemptLanguage(attemptId: string, languageIdOrCode: string, studentId: string) {
+  async switchAttemptLanguage(
+    attemptId: string,
+    languageIdOrCode: string,
+    studentId: string,
+  ) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
     this.verifyAttemptInProgress(attempt);
     this.checkTimeExpiry(attempt);
@@ -320,7 +345,9 @@ export class ExamAttemptService {
       });
     }
     if (!language || !language.isActive) {
-      throw new BadRequestException('The selected language is not active or available.');
+      throw new BadRequestException(
+        'The selected language is not active or available.',
+      );
     }
 
     // 2. Verify language is allowed for this exam (if ExamLanguage configured)
@@ -333,7 +360,9 @@ export class ExamAttemptService {
         where: { examId: attempt.examId, languageId: language.id },
       });
       if (!isAllowed) {
-        throw new BadRequestException(`Language '${language.name}' is not enabled for this exam.`);
+        throw new BadRequestException(
+          `Language '${language.name}' is not enabled for this exam.`,
+        );
       }
     }
 
@@ -360,7 +389,10 @@ export class ExamAttemptService {
    */
   async getAttemptQuestions(attemptId: string, studentId: string) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
-    return this.examService.getExamQuestionsForAttempt(attempt.examId, attempt.languageId);
+    return this.examService.getExamQuestionsForAttempt(
+      attempt.examId,
+      attempt.languageId,
+    );
   }
 
   /**
@@ -415,10 +447,16 @@ export class ExamAttemptService {
   // PRIVATE HELPERS
   // ═══════════════════════════════════════════════════════════════
 
-  private async verifyAttemptOwnership(attemptId: string, studentIdOrUserId: string) {
+  private async verifyAttemptOwnership(
+    attemptId: string,
+    studentIdOrUserId: string,
+  ) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
-      include: { status: true, student: { select: { id: true, userId: true } } },
+      include: {
+        status: true,
+        student: { select: { id: true, userId: true } },
+      },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
     if (
@@ -440,13 +478,20 @@ export class ExamAttemptService {
     if (attempt.serverEndTime && new Date() > attempt.serverEndTime) {
       // Lazy auto-submit on expiry
       this.autoSubmitAttempt(attempt.id).catch(() => {});
-      throw new BadRequestException('Exam time has expired. Your answers have been auto-submitted.');
+      throw new BadRequestException(
+        'Exam time has expired. Your answers have been auto-submitted.',
+      );
     }
   }
 
   private async getStatus(name: string) {
-    const status = await this.prisma.attemptStatus.findUnique({ where: { name } });
-    if (!status) throw new BadRequestException(`Attempt status '${name}' not found. Run seeds.`);
+    const status = await this.prisma.attemptStatus.findUnique({
+      where: { name },
+    });
+    if (!status)
+      throw new BadRequestException(
+        `Attempt status '${name}' not found. Run seeds.`,
+      );
     return status;
   }
 

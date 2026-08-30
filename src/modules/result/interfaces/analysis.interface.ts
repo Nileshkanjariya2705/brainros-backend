@@ -1,8 +1,8 @@
 export interface PerformanceThresholds {
   excellent: number; // default: 90
-  strong: number;    // default: 75
-  good: number;      // default: 60
-  weak: number;      // default: 40
+  strong: number; // default: 75
+  good: number; // default: 60
+  weak: number; // default: 40
 }
 
 export const DEFAULT_PERFORMANCE_THRESHOLDS: PerformanceThresholds = {
@@ -12,7 +12,8 @@ export const DEFAULT_PERFORMANCE_THRESHOLDS: PerformanceThresholds = {
   weak: 40,
 };
 
-export type PerformanceStatus = 'EXCELLENT' | 'STRONG' | 'GOOD' | 'WEAK' | 'CRITICAL' | 'NOT_ATTEMPTED';
+export type PerformanceStatus =
+  'EXCELLENT' | 'STRONG' | 'GOOD' | 'WEAK' | 'CRITICAL' | 'NOT_ATTEMPTED';
 
 export interface OverallPerformanceMetrics {
   totalMarks: number;
@@ -29,7 +30,11 @@ export interface OverallPerformanceMetrics {
   negativeMarksLost: number;
   potentialMarks: number; // score if wrong answers were not attempted
   overallStatus: PerformanceStatus;
-  speedAccuracyQuadrant: 'FAST_AND_ACCURATE' | 'SLOW_AND_ACCURATE' | 'RUSHED_AND_INACCURATE' | 'SLOW_AND_STRUGGLING';
+  speedAccuracyQuadrant:
+    | 'FAST_AND_ACCURATE'
+    | 'SLOW_AND_ACCURATE'
+    | 'RUSHED_AND_INACCURATE'
+    | 'SLOW_AND_STRUGGLING';
 }
 
 export interface SubjectAnalyticsItem {
@@ -68,6 +73,23 @@ export interface ChapterAnalyticsItem {
   status: PerformanceStatus;
 }
 
+export interface QuestionTimeExtreme {
+  questionId: string;
+  examQuestionId: string;
+  displayOrder: number;
+  timeSeconds: number;
+  sectionName: string;
+  isCorrect: boolean;
+}
+
+export interface SubjectBenchmarkComparison {
+  subjectName: string;
+  actualSeconds: number;
+  recommendedSeconds: number;
+  deltaPercent: number;
+  observation: string;
+}
+
 export interface TimeAnalyticsReport {
   totalExamDurationMinutes: number;
   totalTimeUsedSeconds: number;
@@ -79,6 +101,9 @@ export interface TimeAnalyticsReport {
   avgTimeOnWrongSeconds: number;
   timeOnUnattemptedQuestionsSeconds: number;
   avgTimeOnUnattemptedSeconds: number;
+  timeWastedSeconds: number;
+  fastestQuestion: QuestionTimeExtreme | null;
+  slowestQuestion: QuestionTimeExtreme | null;
   pacingMetrics: {
     rushedCount: number; // < 20s
     optimalPaceCount: number;
@@ -89,6 +114,7 @@ export interface TimeAnalyticsReport {
     timeSpentSeconds: number;
     percentageOfTotalTime: number;
   }[];
+  subjectBenchmarkComparisons: SubjectBenchmarkComparison[];
 }
 
 export interface AttemptStrategyReport {
@@ -104,11 +130,18 @@ export interface AttemptStrategyReport {
   attemptRatio: number; // percentage of exam attempted
   accuracyVsSpeedProfile: string;
   strategicTakeaways: string[];
+  overAttemptingWarning: string | null;
+  underAttemptingWarning: string | null;
+  potentialScoreGainMessage: string;
 }
 
 export interface ActionableRecommendation {
   id: string;
-  category: 'CHAPTER_REVISION' | 'TIME_MANAGEMENT' | 'NEGATIVE_MARKING' | 'ATTEMPT_STRATEGY';
+  category:
+    | 'CHAPTER_REVISION'
+    | 'TIME_MANAGEMENT'
+    | 'NEGATIVE_MARKING'
+    | 'ATTEMPT_STRATEGY';
   priority: 'HIGH' | 'MEDIUM' | 'LOW';
   title: string;
   description: string;

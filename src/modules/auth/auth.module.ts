@@ -17,7 +17,8 @@ import { RedisModule } from '../redis/redis.module';
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super-secret-jwt-key-replace-in-production',
+      secret:
+        process.env.JWT_SECRET || 'super-secret-jwt-key-replace-in-production',
       signOptions: { expiresIn: '15m' },
     }),
     RedisModule,

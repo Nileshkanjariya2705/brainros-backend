@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { IApprovalHandler } from '../interfaces/approval-handler.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
 
@@ -19,7 +23,9 @@ export class InstitutionApprovalHandler implements IApprovalHandler {
     }
 
     if (inst.status === 'ACTIVE' || inst.status === 'APPROVED') {
-      throw new BadRequestException(`Institution '${entityId}' is already in status '${inst.status}'.`);
+      throw new BadRequestException(
+        `Institution '${entityId}' is already in status '${inst.status}'.`,
+      );
     }
 
     return inst;
@@ -30,17 +36,26 @@ export class InstitutionApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     comment?: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const inst = await db.institution.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!inst) {
-      throw new NotFoundException(`Institution '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Institution '${request.resourceId}' not found.`,
+      );
     }
 
-    const beforeState = { status: inst.status, name: inst.name, code: inst.code };
+    const beforeState = {
+      status: inst.status,
+      name: inst.name,
+      code: inst.code,
+    };
 
     const updated = await db.institution.update({
       where: { id: inst.id },
@@ -49,7 +64,11 @@ export class InstitutionApprovalHandler implements IApprovalHandler {
       },
     });
 
-    const afterState = { status: updated.status, approvedById: reviewerId, comment };
+    const afterState = {
+      status: updated.status,
+      approvedById: reviewerId,
+      comment,
+    };
     return { beforeState, afterState };
   }
 
@@ -58,17 +77,26 @@ export class InstitutionApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     reason: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const inst = await db.institution.findUnique({
       where: { id: request.resourceId },
     });
 
     if (!inst) {
-      throw new NotFoundException(`Institution '${request.resourceId}' not found.`);
+      throw new NotFoundException(
+        `Institution '${request.resourceId}' not found.`,
+      );
     }
 
-    const beforeState = { status: inst.status, name: inst.name, code: inst.code };
+    const beforeState = {
+      status: inst.status,
+      name: inst.name,
+      code: inst.code,
+    };
 
     const updated = await db.institution.update({
       where: { id: inst.id },
@@ -85,13 +113,19 @@ export class InstitutionApprovalHandler implements IApprovalHandler {
     request: any,
     actorId: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const inst = await db.institution.findUnique({
       where: { id: request.resourceId },
     });
 
-    if (!inst) throw new NotFoundException(`Institution '${request.resourceId}' not found.`);
+    if (!inst)
+      throw new NotFoundException(
+        `Institution '${request.resourceId}' not found.`,
+      );
 
     const beforeState = { status: inst.status };
     const updated = await db.institution.update({

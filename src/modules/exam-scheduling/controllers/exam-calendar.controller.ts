@@ -32,9 +32,7 @@ export class ExamCalendarController {
 
   @Post()
   @Roles('SUPER_ADMIN', 'ADMIN')
-  async createCalendarEvent(
-    @Body() dto: CreateExamCalendarEventDto,
-  ) {
+  async createCalendarEvent(@Body() dto: CreateExamCalendarEventDto) {
     return this.calendarService.createCalendarEvent(dto);
   }
 

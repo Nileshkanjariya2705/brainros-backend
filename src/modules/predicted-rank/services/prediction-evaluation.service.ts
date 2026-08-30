@@ -39,10 +39,14 @@ export class PredictionEvaluationService {
       const actualRank = cRank.rank;
       const predictedRank = pred.predictedRank;
       const absoluteError = Math.abs(actualRank - predictedRank);
-      const relativeError = actualRank > 0 ? Math.round((absoluteError / actualRank) * 10000) / 100 : 0;
+      const relativeError =
+        actualRank > 0
+          ? Math.round((absoluteError / actualRank) * 10000) / 100
+          : 0;
       const withinPredictedRange =
         pred.predictedRankMin !== null && pred.predictedRankMax !== null
-          ? actualRank >= pred.predictedRankMin && actualRank <= pred.predictedRankMax
+          ? actualRank >= pred.predictedRankMin &&
+            actualRank <= pred.predictedRankMax
           : false;
 
       // Upsert evaluation record
@@ -60,14 +64,18 @@ export class PredictionEvaluationService {
       evaluatedCount++;
     }
 
-    this.logger.log(`Evaluated ${evaluatedCount} predictions against actual ranks for exam '${examId}'`);
+    this.logger.log(
+      `Evaluated ${evaluatedCount} predictions against actual ranks for exam '${examId}'`,
+    );
     return { evaluatedCount };
   }
 
   /**
    * Aggregate model performance metrics (MAE, Median AE, Range Coverage)
    */
-  async getModelAccuracySummary(modelVersion: string = 'v1.0.0'): Promise<ModelAccuracySummary> {
+  async getModelAccuracySummary(
+    modelVersion: string = 'v1.0.0',
+  ): Promise<ModelAccuracySummary> {
     const evaluations = await this.prisma.predictionEvaluation.findMany({
       where: {
         predictionResult: { modelVersion },
@@ -87,14 +95,21 @@ export class PredictionEvaluationService {
       };
     }
 
-    const absErrors = evaluations.map((e) => e.absoluteError).sort((a, b) => a - b);
+    const absErrors = evaluations
+      .map((e) => e.absoluteError)
+      .sort((a, b) => a - b);
     const relErrors = evaluations.map((e) => e.relativeError);
-    const withinCount = evaluations.filter((e) => e.withinPredictedRange).length;
+    const withinCount = evaluations.filter(
+      (e) => e.withinPredictedRange,
+    ).length;
 
     const sumAbs = absErrors.reduce((a, b) => a + b, 0);
     const sumRel = relErrors.reduce((a, b) => a + b, 0);
     const mid = Math.floor(absErrors.length / 2);
-    const medianAbs = absErrors.length % 2 !== 0 ? absErrors[mid] : (absErrors[mid - 1] + absErrors[mid]) / 2;
+    const medianAbs =
+      absErrors.length % 2 !== 0
+        ? absErrors[mid]
+        : (absErrors[mid - 1] + absErrors[mid]) / 2;
 
     return {
       modelCode: 'HISTORICAL_INTERPOLATION',
@@ -103,7 +118,8 @@ export class PredictionEvaluationService {
       meanAbsoluteError: Math.round((sumAbs / evaluations.length) * 10) / 10,
       medianAbsoluteError: Math.round(medianAbs * 10) / 10,
       meanRelativeError: Math.round((sumRel / evaluations.length) * 100) / 100,
-      rangeCoveragePercentage: Math.round((withinCount / evaluations.length) * 10000) / 100,
+      rangeCoveragePercentage:
+        Math.round((withinCount / evaluations.length) * 10000) / 100,
       withinRangeCount: withinCount,
     };
   }

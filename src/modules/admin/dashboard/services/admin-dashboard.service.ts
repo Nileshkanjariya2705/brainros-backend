@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RedisService } from '../../../redis/redis.service';
 import { AdminDashboardOverview } from '../../interfaces/admin.interface';
-import { AdminDashboardFilterDto, AdminUserSearchDto } from '../../dto/admin.dto';
+import {
+  AdminDashboardFilterDto,
+  AdminUserSearchDto,
+} from '../../dto/admin.dto';
 
 const DASHBOARD_CACHE_TTL_SECONDS = 180; // 3 minutes
 
@@ -18,7 +21,9 @@ export class AdminDashboardService {
   /**
    * Main Admin / Super Admin Dashboard Aggregated Overview.
    */
-  async getDashboardOverview(filter: AdminDashboardFilterDto = {}): Promise<AdminDashboardOverview> {
+  async getDashboardOverview(
+    filter: AdminDashboardFilterDto = {},
+  ): Promise<AdminDashboardOverview> {
     const cacheKey = `admin:dashboard:${filter.range || 'ALL'}`;
     const cached = await this.redis.get(cacheKey);
 
@@ -75,16 +80,20 @@ export class AdminDashboardService {
       this.prisma.questionTranslation.count(),
     ]);
 
-    const activeSupportedLanguages = await this.prisma.preferredLanguage.findMany({
-      where: { isActive: true },
-    });
+    const activeSupportedLanguages =
+      await this.prisma.preferredLanguage.findMany({
+        where: { isActive: true },
+      });
 
     const languageBreakdowns = await Promise.all(
       activeSupportedLanguages.map(async (lang) => {
         const count = await this.prisma.questionTranslation.count({
           where: { languageId: lang.id },
         });
-        const completionRate = totalQuestions > 0 ? Number(((count / totalQuestions) * 100).toFixed(1)) : 0;
+        const completionRate =
+          totalQuestions > 0
+            ? Number(((count / totalQuestions) * 100).toFixed(1))
+            : 0;
         return {
           code: lang.code || '',
           name: lang.name,
@@ -98,7 +107,8 @@ export class AdminDashboardService {
       totalQuestions > 0 && activeSupportedLanguages.length > 0
         ? Number(
             (
-              (totalQuestionTranslations / (totalQuestions * activeSupportedLanguages.length)) *
+              (totalQuestionTranslations /
+                (totalQuestions * activeSupportedLanguages.length)) *
               100
             ).toFixed(1),
           )
@@ -156,7 +166,9 @@ export class AdminDashboardService {
     ] = await Promise.all([
       this.prisma.institution.count(),
       this.prisma.institution.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.institution.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
+      this.prisma.institution.count({
+        where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } },
+      }),
       this.prisma.institution.count({ where: { status: 'SUSPENDED' } }),
       this.prisma.institutionBatch.count(),
       this.prisma.batchStudent.count({ where: { status: 'ACTIVE' } }),
@@ -234,7 +246,9 @@ export class AdminDashboardService {
       evaluation: {
         totalEvaluated: evalResults._count.id,
         averageScore: Number((evalResults._avg.totalScore || 0).toFixed(1)),
-        averagePercentage: Number((evalResults._avg.percentage || 0).toFixed(1)),
+        averagePercentage: Number(
+          (evalResults._avg.percentage || 0).toFixed(1),
+        ),
         averageAccuracy: Number((evalResults._avg.accuracy || 0).toFixed(1)),
       },
       institutions: {
@@ -247,7 +261,8 @@ export class AdminDashboardService {
       },
       sales: {
         available: false,
-        message: 'Direct Stripe/Razorpay billing telemetry configured separately.',
+        message:
+          'Direct Stripe/Razorpay billing telemetry configured separately.',
       },
       notifications: {
         queued: 0,
@@ -267,7 +282,11 @@ export class AdminDashboardService {
       timestamp: now.toISOString(),
     };
 
-    await this.redis.set(cacheKey, JSON.stringify(overview), DASHBOARD_CACHE_TTL_SECONDS);
+    await this.redis.set(
+      cacheKey,
+      JSON.stringify(overview),
+      DASHBOARD_CACHE_TTL_SECONDS,
+    );
     return overview;
   }
 
@@ -307,7 +326,9 @@ export class AdminDashboardService {
         include: {
           student: { select: { id: true, studentId: true, name: true } },
           userRoles: { include: { role: true } },
-          institutionAdmins: { include: { institution: { select: { name: true, code: true } } } },
+          institutionAdmins: {
+            include: { institution: { select: { name: true, code: true } } },
+          },
         },
       }),
       this.prisma.user.count({ where }),

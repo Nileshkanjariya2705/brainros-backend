@@ -28,8 +28,12 @@ describe('ExamCalendarService (Academic Planning, UTC & Reminder Sync)', () => {
       examCalendar: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn(),
-        create: jest.fn().mockImplementation((args) => ({ id: 'cal-1', ...args.data })),
-        update: jest.fn().mockImplementation((args) => ({ id: args.where.id, ...args.data })),
+        create: jest
+          .fn()
+          .mockImplementation((args) => ({ id: 'cal-1', ...args.data })),
+        update: jest
+          .fn()
+          .mockImplementation((args) => ({ id: args.where.id, ...args.data })),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
       },
@@ -85,7 +89,9 @@ describe('ExamCalendarService (Academic Planning, UTC & Reminder Sync)', () => {
         plannedEndTime: '2026-09-10T07:00:00Z',
       };
 
-      await expect(service.createCalendarEvent(dto)).rejects.toThrow(BadRequestException);
+      await expect(service.createCalendarEvent(dto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should reject creation if planned date is outside cycle window', async () => {
@@ -97,7 +103,9 @@ describe('ExamCalendarService (Academic Planning, UTC & Reminder Sync)', () => {
         plannedEndTime: '2025-01-01T07:50:00Z',
       };
 
-      await expect(service.createCalendarEvent(dto)).rejects.toThrow(BadRequestException);
+      await expect(service.createCalendarEvent(dto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

@@ -1,4 +1,5 @@
-export type TrendDirection = 'IMPROVING' | 'STABLE' | 'DECLINING' | 'INSUFFICIENT_DATA';
+export type TrendDirection =
+  'IMPROVING' | 'STABLE' | 'DECLINING' | 'INSUFFICIENT_DATA';
 
 export interface MockDataPoint {
   attemptId: string;

@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ApprovalWorkflowService } from './approval-workflow.service';
 import { ApprovalHandlerRegistry } from '../handlers/approval-handler.registry';
 import { AuditLogService } from '../../audit/services/audit-log.service';
@@ -15,7 +19,9 @@ describe('ApprovalWorkflowService (Central Workflow & Self-Approval Prevention)'
   beforeEach(async () => {
     mockHandler = {
       entityType: 'QUESTION',
-      validateEntity: jest.fn().mockResolvedValue({ id: 'q-1', status: 'SUBMITTED' }),
+      validateEntity: jest
+        .fn()
+        .mockResolvedValue({ id: 'q-1', status: 'SUBMITTED' }),
       onApprove: jest.fn().mockResolvedValue({
         beforeState: { status: 'SUBMITTED' },
         afterState: { status: 'APPROVED' },
@@ -43,7 +49,9 @@ describe('ApprovalWorkflowService (Central Workflow & Self-Approval Prevention)'
         findMany: jest.fn(),
         count: jest.fn(),
       },
-      $transaction: jest.fn((cb) => (typeof cb === 'function' ? cb(prisma) : Promise.all(cb))),
+      $transaction: jest.fn((cb) =>
+        typeof cb === 'function' ? cb(prisma) : Promise.all(cb),
+      ),
     };
 
     auditService = {
@@ -95,7 +103,10 @@ describe('ApprovalWorkflowService (Central Workflow & Self-Approval Prevention)'
       });
 
       await expect(
-        service.submit({ entityType: 'QUESTION', entityId: 'q-1' }, 'admin-user-1'),
+        service.submit(
+          { entityType: 'QUESTION', entityId: 'q-1' },
+          'admin-user-1',
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -131,11 +142,9 @@ describe('ApprovalWorkflowService (Central Workflow & Self-Approval Prevention)'
         reviewedById: 'super-admin-reviewer',
       });
 
-      const result = await service.approve(
-        'req-1',
-        'super-admin-reviewer',
-        { comment: 'Verified' },
-      );
+      const result = await service.approve('req-1', 'super-admin-reviewer', {
+        comment: 'Verified',
+      });
 
       expect(result.status).toBe('APPROVED');
       expect(mockHandler.onApprove).toHaveBeenCalled();

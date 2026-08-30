@@ -71,7 +71,9 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
     examQuestion: {
       findMany: jest.fn(),
     },
-    $transaction: jest.fn((cb) => (typeof cb === 'function' ? cb(mockPrisma) : Promise.all(cb))),
+    $transaction: jest.fn((cb) =>
+      typeof cb === 'function' ? cb(mockPrisma) : Promise.all(cb),
+    ),
   };
 
   const mockExamService = {
@@ -89,9 +91,18 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         ExamAttemptService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ExamService, useValue: mockExamService },
-        { provide: ExamAccessService, useValue: { validateStudentAccess: jest.fn() } },
-        { provide: QuestionTimingService, useValue: { logQuestionTransition: jest.fn() } },
-        { provide: ResultService, useValue: { calculateResult: jest.fn(), getResult: jest.fn() } },
+        {
+          provide: ExamAccessService,
+          useValue: { validateStudentAccess: jest.fn() },
+        },
+        {
+          provide: QuestionTimingService,
+          useValue: { logQuestionTransition: jest.fn() },
+        },
+        {
+          provide: ResultService,
+          useValue: { calculateResult: jest.fn(), getResult: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -109,12 +120,24 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
     it('should have all 9 standardized regional languages defined', () => {
       expect(SUPPORTED_NINE_REGIONAL_LANGUAGES).toHaveLength(9);
       const codes = SUPPORTED_NINE_REGIONAL_LANGUAGES.map((l) => l.code);
-      expect(codes).toEqual(['en', 'kn', 'hi', 'ta', 'te', 'mr', 'ml', 'bn', 'gu']);
+      expect(codes).toEqual([
+        'en',
+        'kn',
+        'hi',
+        'ta',
+        'te',
+        'mr',
+        'ml',
+        'bn',
+        'gu',
+      ]);
     });
 
     it('should seed 9 regional languages on boot if not existing', async () => {
       mockPrisma.preferredLanguage.findFirst.mockResolvedValue(null);
-      mockPrisma.preferredLanguage.create.mockImplementation(({ data }) => Promise.resolve({ id: 'lang-uuid', ...data }));
+      mockPrisma.preferredLanguage.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'lang-uuid', ...data }),
+      );
 
       await languageService.seedNineRegionalLanguages();
 
@@ -128,8 +151,22 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
 
     it('should retrieve active languages sorted by displayOrder', async () => {
       const mockList = [
-        { id: '1', code: 'en', name: 'English', nativeName: 'English', displayOrder: 1, isActive: true },
-        { id: '2', code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', displayOrder: 2, isActive: true },
+        {
+          id: '1',
+          code: 'en',
+          name: 'English',
+          nativeName: 'English',
+          displayOrder: 1,
+          isActive: true,
+        },
+        {
+          id: '2',
+          code: 'hi',
+          name: 'Hindi',
+          nativeName: 'हिन्दी',
+          displayOrder: 2,
+          isActive: true,
+        },
       ];
       mockPrisma.preferredLanguage.findMany.mockResolvedValue(mockList);
 
@@ -163,8 +200,15 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
     const hindiLangId = 'lang-hi-uuid';
 
     it('should atomically upsert a full question translation with option translations', async () => {
-      mockPrisma.preferredLanguage.findUnique.mockResolvedValue({ id: hindiLangId, code: 'hi', name: 'Hindi' });
-      mockPrisma.question.findUnique.mockResolvedValue({ id: questionId, options: [{ id: 'opt-501' }, { id: 'opt-502' }] });
+      mockPrisma.preferredLanguage.findUnique.mockResolvedValue({
+        id: hindiLangId,
+        code: 'hi',
+        name: 'Hindi',
+      });
+      mockPrisma.question.findUnique.mockResolvedValue({
+        id: questionId,
+        options: [{ id: 'opt-501' }, { id: 'opt-502' }],
+      });
       mockPrisma.questionTranslation.upsert.mockResolvedValue({
         id: 'qt-1',
         questionId,
@@ -178,18 +222,25 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         optionText: 'माइटोकॉन्ड्रिया',
       });
 
-      const res = await translationService.upsertFullQuestionTranslation(questionId, {
-        languageId: hindiLangId,
-        questionText: 'कोशिका का पावरहाउस क्या है?',
-        optionTranslations: [
-          { optionId: 'opt-501', optionText: 'माइटोकॉन्ड्रिया' },
-          { optionId: 'opt-502', optionText: 'राइबोसोम' },
-        ],
-      });
+      const res = await translationService.upsertFullQuestionTranslation(
+        questionId,
+        {
+          languageId: hindiLangId,
+          questionText: 'कोशिका का पावरहाउस क्या है?',
+          optionTranslations: [
+            { optionId: 'opt-501', optionText: 'माइटोकॉन्ड्रिया' },
+            { optionId: 'opt-502', optionText: 'राइबोसोम' },
+          ],
+        },
+      );
 
-      expect(res.questionTranslation.questionText).toBe('कोशिका का पावरहाउस क्या है?');
+      expect(res.questionTranslation.questionText).toBe(
+        'कोशिका का पावरहाउस क्या है?',
+      );
       expect(mockPrisma.questionTranslation.upsert).toHaveBeenCalled();
-      expect(mockPrisma.questionOptionTranslation.upsert).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.questionOptionTranslation.upsert).toHaveBeenCalledTimes(
+        2,
+      );
     });
 
     it('should calculate translation completeness matrix across all languages', async () => {
@@ -217,7 +268,8 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         { id: 'lang-gu', code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી' },
       ]);
 
-      const report = await translationService.getTranslationCompleteness(questionId);
+      const report =
+        await translationService.getTranslationCompleteness(questionId);
 
       expect(report.completeness).toHaveLength(3);
       expect(report.completeness[0].languageCode).toBe('en');
@@ -239,7 +291,9 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
     it('should configure allowed languages for an exam and enforce a default', async () => {
       mockPrisma.exam.findUnique.mockResolvedValue({ id: examId });
       mockPrisma.examLanguage.deleteMany.mockResolvedValue({ count: 1 });
-      mockPrisma.examLanguage.create.mockImplementation(({ data }) => Promise.resolve({ id: 'el-1', ...data }));
+      mockPrisma.examLanguage.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'el-1', ...data }),
+      );
 
       const res = await examLanguageService.setExamLanguages(examId, {
         languages: [
@@ -250,7 +304,9 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
       });
 
       expect(res).toHaveLength(3);
-      expect(mockPrisma.examLanguage.deleteMany).toHaveBeenCalledWith({ where: { examId } });
+      expect(mockPrisma.examLanguage.deleteMany).toHaveBeenCalledWith({
+        where: { examId },
+      });
       expect(mockPrisma.examLanguage.create).toHaveBeenCalledTimes(3);
     });
 
@@ -262,7 +318,10 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         language: { isActive: true },
       });
 
-      const isAllowed = await examLanguageService.validateExamLanguageAllowed(examId, 'lang-hi');
+      const isAllowed = await examLanguageService.validateExamLanguageAllowed(
+        examId,
+        'lang-hi',
+      );
       expect(isAllowed).toBe(true);
     });
   });
@@ -296,10 +355,20 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         isActive: true,
       });
       mockPrisma.examLanguage.count.mockResolvedValue(1);
-      mockPrisma.examLanguage.findFirst.mockResolvedValue({ examId, languageId: hindiLangId });
-      mockPrisma.attempt.update.mockResolvedValue({ ...activeAttempt, languageId: hindiLangId });
+      mockPrisma.examLanguage.findFirst.mockResolvedValue({
+        examId,
+        languageId: hindiLangId,
+      });
+      mockPrisma.attempt.update.mockResolvedValue({
+        ...activeAttempt,
+        languageId: hindiLangId,
+      });
 
-      const res = await examAttemptService.switchAttemptLanguage(attemptId, hindiLangId, studentId);
+      const res = await examAttemptService.switchAttemptLanguage(
+        attemptId,
+        hindiLangId,
+        studentId,
+      );
 
       expect(res.attemptId).toBe(attemptId);
       expect(res.language.code).toBe('hi');
@@ -328,9 +397,15 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
       mockPrisma.attempt.findUnique.mockResolvedValue(activeAttempt);
 
       // Verify Attempt status before switch
-      const statusBefore = await examAttemptService.getAttemptStatus(attemptId, studentId);
+      const statusBefore = await examAttemptService.getAttemptStatus(
+        attemptId,
+        studentId,
+      );
       expect(statusBefore.answers[0].selectedOptionId).toBe('501-uuid');
-      expect(statusBefore.answers[0].selectedOptions).toEqual(['501-uuid', '503-uuid']);
+      expect(statusBefore.answers[0].selectedOptions).toEqual([
+        '501-uuid',
+        '503-uuid',
+      ]);
 
       // Switch language to Gujarati
       mockPrisma.preferredLanguage.findUnique.mockResolvedValue({
@@ -341,12 +416,22 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         isActive: true,
       });
       mockPrisma.examLanguage.count.mockResolvedValue(0); // all active allowed
-      await examAttemptService.switchAttemptLanguage(attemptId, gujaratiLangId, studentId);
+      await examAttemptService.switchAttemptLanguage(
+        attemptId,
+        gujaratiLangId,
+        studentId,
+      );
 
       // Verify Attempt status after switch: Answer state is 100% IDENTICAL
-      const statusAfter = await examAttemptService.getAttemptStatus(attemptId, studentId);
+      const statusAfter = await examAttemptService.getAttemptStatus(
+        attemptId,
+        studentId,
+      );
       expect(statusAfter.answers[0].selectedOptionId).toBe('501-uuid');
-      expect(statusAfter.answers[0].selectedOptions).toEqual(['501-uuid', '503-uuid']);
+      expect(statusAfter.answers[0].selectedOptions).toEqual([
+        '501-uuid',
+        '503-uuid',
+      ]);
       expect(statusAfter.answers[0].isMarkedForReview).toBe(true);
     });
 
@@ -363,7 +448,11 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
 
       let error: any;
       try {
-        await examAttemptService.switchAttemptLanguage(attemptId, 'lang-ta-uuid', studentId);
+        await examAttemptService.switchAttemptLanguage(
+          attemptId,
+          'lang-ta-uuid',
+          studentId,
+        );
       } catch (err) {
         error = err;
       }
@@ -378,7 +467,11 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
 
       let error: any;
       try {
-        await examAttemptService.switchAttemptLanguage(attemptId, hindiLangId, studentId);
+        await examAttemptService.switchAttemptLanguage(
+          attemptId,
+          hindiLangId,
+          studentId,
+        );
       } catch (err) {
         error = err;
       }

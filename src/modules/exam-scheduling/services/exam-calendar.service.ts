@@ -44,7 +44,9 @@ export class ExamCalendarService {
     const plannedDate = new Date(dto.plannedDate);
 
     if (start >= end) {
-      throw new BadRequestException('Event plannedStartTime must be strictly before plannedEndTime.');
+      throw new BadRequestException(
+        'Event plannedStartTime must be strictly before plannedEndTime.',
+      );
     }
 
     if (plannedDate < cycle.startDate || plannedDate > cycle.endDate) {
@@ -105,7 +107,11 @@ export class ExamCalendarService {
   /**
    * Reschedule a planned calendar event, increment schedule version, and invalidate old reminders.
    */
-  async rescheduleEvent(eventId: string, dto: RescheduleCalendarEventDto, actorUserId: string) {
+  async rescheduleEvent(
+    eventId: string,
+    dto: RescheduleCalendarEventDto,
+    actorUserId: string,
+  ) {
     const existing = await this.prisma.examCalendar.findUnique({
       where: { id: eventId },
       include: { exam: true },
@@ -120,7 +126,9 @@ export class ExamCalendarService {
     const newPlannedDate = new Date(dto.plannedDate);
 
     if (newStart >= newEnd) {
-      throw new BadRequestException('plannedStartTime must be strictly before plannedEndTime.');
+      throw new BadRequestException(
+        'plannedStartTime must be strictly before plannedEndTime.',
+      );
     }
 
     const newVersion = existing.scheduleVersion + 1;
@@ -140,7 +148,10 @@ export class ExamCalendarService {
     });
 
     // Invalidate old reminder jobs and re-arm reminders for new schedule version
-    await this.reminderService.handleExamRescheduled(updated, existing.scheduleVersion);
+    await this.reminderService.handleExamRescheduled(
+      updated,
+      existing.scheduleVersion,
+    );
 
     return updated;
   }
@@ -171,7 +182,14 @@ export class ExamCalendarService {
         take: limit,
         orderBy: { plannedStartTime: 'asc' },
         include: {
-          exam: { select: { id: true, title: true, durationMinutes: true, totalQuestions: true } },
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              durationMinutes: true,
+              totalQuestions: true,
+            },
+          },
           cycle: { select: { id: true, name: true, academicYear: true } },
         },
       }),

@@ -85,7 +85,9 @@ export class FeatureActivationService {
         isActive: dto.isActive,
         activatedById: dto.isActive ? actorUserId : existing?.activatedById,
         activatedAt: dto.isActive ? new Date() : existing?.activatedAt,
-        deactivatedById: !dto.isActive ? actorUserId : existing?.deactivatedById,
+        deactivatedById: !dto.isActive
+          ? actorUserId
+          : existing?.deactivatedById,
         deactivatedAt: !dto.isActive ? new Date() : existing?.deactivatedAt,
         reason: dto.reason || null,
       },

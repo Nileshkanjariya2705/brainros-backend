@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const MOBILE_REGEX = /^[6-9]\d{9}$/;
@@ -51,30 +48,38 @@ export class BulkUploadValidatorService {
       // ─── Field validation ───
       if (!data.name || data.name.length < 2) {
         rowErrors.push({
-          rowId: row.id, rowNumber: row.rowNumber,
-          field: 'name', errorCode: 'MISSING_NAME',
+          rowId: row.id,
+          rowNumber: row.rowNumber,
+          field: 'name',
+          errorCode: 'MISSING_NAME',
           message: 'Student name is required (min 2 characters).',
         });
       }
 
       if (!data.mobile) {
         rowErrors.push({
-          rowId: row.id, rowNumber: row.rowNumber,
-          field: 'mobile', errorCode: 'MISSING_MOBILE',
+          rowId: row.id,
+          rowNumber: row.rowNumber,
+          field: 'mobile',
+          errorCode: 'MISSING_MOBILE',
           message: 'Mobile number is required.',
         });
       } else if (!MOBILE_REGEX.test(data.mobile)) {
         rowErrors.push({
-          rowId: row.id, rowNumber: row.rowNumber,
-          field: 'mobile', errorCode: 'INVALID_MOBILE',
+          rowId: row.id,
+          rowNumber: row.rowNumber,
+          field: 'mobile',
+          errorCode: 'INVALID_MOBILE',
           message: `Invalid mobile number '${data.mobile}'. Must be 10 digits starting with 6-9.`,
         });
       }
 
       if (data.email && !EMAIL_REGEX.test(data.email)) {
         rowErrors.push({
-          rowId: row.id, rowNumber: row.rowNumber,
-          field: 'email', errorCode: 'INVALID_EMAIL',
+          rowId: row.id,
+          rowNumber: row.rowNumber,
+          field: 'email',
+          errorCode: 'INVALID_EMAIL',
           message: `Invalid email address '${data.email}'.`,
         });
       }
@@ -87,8 +92,10 @@ export class BulkUploadValidatorService {
           dedupStatus = 'DUPLICATE_IN_FILE';
           duplicateCount++;
           rowErrors.push({
-            rowId: row.id, rowNumber: row.rowNumber,
-            field: 'mobile', errorCode: 'DUPLICATE_MOBILE_IN_FILE',
+            rowId: row.id,
+            rowNumber: row.rowNumber,
+            field: 'mobile',
+            errorCode: 'DUPLICATE_MOBILE_IN_FILE',
             message: `Mobile '${data.mobile}' already appears on row ${mobilesSeen.get(data.mobile)}.`,
           });
         } else {
@@ -99,13 +106,14 @@ export class BulkUploadValidatorService {
       // ─── Global deduplication (existing student match) ───
       let matchedStudentId: string | null = null;
 
-      if (dedupStatus !== 'DUPLICATE_IN_FILE' && data.mobile && MOBILE_REGEX.test(data.mobile)) {
+      if (
+        dedupStatus !== 'DUPLICATE_IN_FILE' &&
+        data.mobile &&
+        MOBILE_REGEX.test(data.mobile)
+      ) {
         const existingUser = await this.prisma.user.findFirst({
           where: {
-            OR: [
-              { phone: data.mobile },
-              { mobileNumber: data.mobile },
-            ],
+            OR: [{ phone: data.mobile }, { mobileNumber: data.mobile }],
           },
           include: { student: true },
         });
@@ -117,17 +125,20 @@ export class BulkUploadValidatorService {
 
           // Check if already in batch
           if (batchId) {
-            const existingMembership = await this.prisma.batchStudent.findUnique({
-              where: {
-                batchId_studentId: { batchId, studentId: matchedStudentId },
-              },
-            });
+            const existingMembership =
+              await this.prisma.batchStudent.findUnique({
+                where: {
+                  batchId_studentId: { batchId, studentId: matchedStudentId },
+                },
+              });
 
             if (existingMembership && existingMembership.status === 'ACTIVE') {
               dedupStatus = 'ALREADY_IN_BATCH';
               rowErrors.push({
-                rowId: row.id, rowNumber: row.rowNumber,
-                field: 'mobile', errorCode: 'STUDENT_ALREADY_IN_BATCH',
+                rowId: row.id,
+                rowNumber: row.rowNumber,
+                field: 'mobile',
+                errorCode: 'STUDENT_ALREADY_IN_BATCH',
                 message: `Student with mobile '${data.mobile}' is already an active member of this batch.`,
               });
             }
@@ -152,9 +163,7 @@ export class BulkUploadValidatorService {
         },
       });
 
-      allErrors.push(
-        ...rowErrors.map((e) => ({ ...e, uploadId })),
-      );
+      allErrors.push(...rowErrors.map((e) => ({ ...e, uploadId })));
     }
 
     // ─── Persist errors in bulk ───

@@ -8,10 +8,19 @@ import {
   Body,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   HttpCode,
   HttpStatus,
+  Res,
+  Logger,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { QuestionBankService } from './question-bank.service';
+import { QuestionImportService } from './services/question-import.service';
 import {
   CreateQuestionDto,
   UpdateQuestionDto,
@@ -20,6 +29,11 @@ import {
   RejectQuestionDto,
   ArchiveQuestionDto,
 } from './dto/question.dto';
+import {
+  QuestionImportFilterDto,
+  UpdateImportRowDto,
+  ImportFormatEnum,
+} from './dto/question-import.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -28,7 +42,208 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @Controller('questions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class QuestionBankController {
-  constructor(private readonly questionBankService: QuestionBankService) {}
+  private readonly logger = new Logger(QuestionBankController.name);
+
+  constructor(
+    private readonly questionBankService: QuestionBankService,
+    private readonly questionImportService: QuestionImportService,
+    @InjectQueue('question-import')
+    private readonly importQueue: Queue,
+  ) {}
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BULK IMPORT APIS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Download sample question import template (.xlsx or .csv)
+   * GET /questions/import/template
+   */
+  @Get('import/template')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async downloadTemplate(
+    @Query('format') format: ImportFormatEnum = ImportFormatEnum.XLSX,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName, contentType } =
+      await this.questionImportService.generateTemplate(format);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"`,
+    );
+    res.send(buffer);
+  }
+
+  /**
+   * Upload CSV or Excel file to initiate bulk question import session
+   * POST /questions/import
+   */
+  @Post('import')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImportFile(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const session = await this.questionImportService.createImportSession(
+      file,
+      user.userId,
+    );
+
+    // Enqueue background validation job
+    try {
+      if (this.importQueue) {
+        await this.importQueue.add('validate-import', {
+          importId: session.id,
+          userId: user.userId,
+          action: 'VALIDATE',
+        });
+      } else {
+        // Fallback: run async without waiting
+        this.questionImportService
+          .parseAndValidateImport(session.id)
+          .catch((err) =>
+            this.logger.error(`Async validation fallback error: ${err.message}`),
+          );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to enqueue BullMQ job: ${err.message}. Falling back to in-process async processing.`,
+      );
+      this.questionImportService
+        .parseAndValidateImport(session.id)
+        .catch((e) =>
+          this.logger.error(`Async validation fallback error: ${e.message}`),
+        );
+    }
+
+    return {
+      id: session.id,
+      fileName: session.fileName,
+      fileType: session.fileType,
+      status: session.status,
+      message: 'File uploaded successfully. Validation is running in background.',
+    };
+  }
+
+  /**
+   * Get single import session status & counters
+   * GET /questions/import/:importId
+   */
+  @Get('import/:importId')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  getImportSession(@Param('importId') importId: string) {
+    return this.questionImportService.getImportSession(importId);
+  }
+
+  /**
+   * Get paginated staging rows for preview & error inspection
+   * GET /questions/import/:importId/rows
+   */
+  @Get('import/:importId/rows')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  getImportRows(
+    @Param('importId') importId: string,
+    @Query() query: QuestionImportFilterDto,
+  ) {
+    return this.questionImportService.getImportRows(importId, query);
+  }
+
+  /**
+   * Update an imported staging row before confirmation
+   * PATCH /questions/import/:importId/rows/:rowId
+   */
+  @Patch('import/:importId/rows/:rowId')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  updateImportRow(
+    @Param('importId') importId: string,
+    @Param('rowId') rowId: string,
+    @Body() dto: UpdateImportRowDto,
+  ) {
+    return this.questionImportService.updateImportRow(importId, rowId, dto);
+  }
+
+  /**
+   * Confirm and execute batch question import
+   * POST /questions/import/:importId/confirm
+   */
+  @Post('import/:importId/confirm')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async confirmImport(
+    @Param('importId') importId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    try {
+      if (this.importQueue) {
+        await this.importQueue.add('execute-import', {
+          importId,
+          userId: user.userId,
+          action: 'EXECUTE',
+        });
+      } else {
+        this.questionImportService
+          .executeImport(importId, user.userId)
+          .catch((err) =>
+            this.logger.error(`Async execution fallback error: ${err.message}`),
+          );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to enqueue execution job: ${err.message}. Falling back to in-process execution.`,
+      );
+      this.questionImportService
+        .executeImport(importId, user.userId)
+        .catch((e) =>
+          this.logger.error(`Async execution fallback error: ${e.message}`),
+        );
+    }
+
+    return {
+      importId,
+      status: 'IMPORTING',
+      message: 'Batch import started. Processing questions in background.',
+    };
+  }
+
+  /**
+   * Cancel an import session
+   * POST /questions/import/:importId/cancel
+   */
+  @Post('import/:importId/cancel')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  cancelImport(@Param('importId') importId: string) {
+    return this.questionImportService.cancelImportSession(importId);
+  }
+
+  /**
+   * Download Error Report (.xlsx or .csv) for an import session
+   * GET /questions/import/:importId/errors/export
+   */
+  @Get('import/:importId/errors/export')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async exportImportErrors(
+    @Param('importId') importId: string,
+    @Query('format') format: ImportFormatEnum = ImportFormatEnum.XLSX,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName, contentType } =
+      await this.questionImportService.generateErrorReport(importId, format);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"`,
+    );
+    res.send(buffer);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STANDARD QUESTION BANK CRUD APIS
+  // ═══════════════════════════════════════════════════════════════════
 
   /**
    * Create a new question (DRAFT)
@@ -115,7 +330,12 @@ export class QuestionBankController {
     @Body() dto: UpdateQuestionDto,
     @CurrentUser() user: { userId: string; roles: string[] },
   ) {
-    return this.questionBankService.updateQuestion(id, dto, user.userId, user.roles);
+    return this.questionBankService.updateQuestion(
+      id,
+      dto,
+      user.userId,
+      user.roles,
+    );
   }
 
   /**
@@ -130,7 +350,11 @@ export class QuestionBankController {
     @Body() dto: SubmitQuestionDto,
     @CurrentUser() user: { userId: string },
   ) {
-    return this.questionBankService.submitQuestion(id, user.userId, dto?.comment);
+    return this.questionBankService.submitQuestion(
+      id,
+      user.userId,
+      dto?.comment,
+    );
   }
 
   /**
@@ -160,7 +384,12 @@ export class QuestionBankController {
     @Body() dto: SubmitQuestionDto,
     @CurrentUser() user: { userId: string; roles: string[] },
   ) {
-    return this.questionBankService.approveQuestion(id, user.userId, user.roles, dto?.comment);
+    return this.questionBankService.approveQuestion(
+      id,
+      user.userId,
+      user.roles,
+      dto?.comment,
+    );
   }
 
   /**
@@ -190,7 +419,11 @@ export class QuestionBankController {
     @Body() dto: ArchiveQuestionDto,
     @CurrentUser() user: { userId: string },
   ) {
-    return this.questionBankService.archiveQuestion(id, user.userId, dto?.reason);
+    return this.questionBankService.archiveQuestion(
+      id,
+      user.userId,
+      dto?.reason,
+    );
   }
 
   /**

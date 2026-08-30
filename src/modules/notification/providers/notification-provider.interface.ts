@@ -1,5 +1,8 @@
 import { NotificationChannel } from '@prisma/client';
-import { NotificationPayload, ProviderResult } from '../interfaces/notification.interface';
+import {
+  NotificationPayload,
+  ProviderResult,
+} from '../interfaces/notification.interface';
 
 export interface INotificationProvider {
   readonly channel: NotificationChannel;

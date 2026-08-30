@@ -55,10 +55,13 @@ export class NotificationTemplateService implements OnModuleInit {
     templateBody: string,
     variables: Record<string, any> = {},
   ): string {
-    return templateBody.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
-      const val = variables[key];
-      return val !== undefined && val !== null ? String(val) : '';
-    });
+    return templateBody.replace(
+      /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
+      (match, key) => {
+        const val = variables[key];
+        return val !== undefined && val !== null ? String(val) : '';
+      },
+    );
   }
 
   /**

@@ -38,7 +38,11 @@ export class ExamBlueprintController {
     @Body() dto: CreateBlueprintDto,
     @CurrentUser('id') userId: string,
   ) {
-    const data = await this.blueprintService.createBlueprint(examId, dto, userId);
+    const data = await this.blueprintService.createBlueprint(
+      examId,
+      dto,
+      userId,
+    );
     return {
       statusCode: 201,
       message: 'Exam blueprint created successfully',
@@ -136,7 +140,10 @@ export class ExamBlueprintController {
     @Param('blueprintId', ParseUUIDPipe) blueprintId: string,
     @Body() dto: ValidateBlueprintDto,
   ) {
-    const data = await this.generationService.validateBlueprintForExam(blueprintId, dto);
+    const data = await this.generationService.validateBlueprintForExam(
+      blueprintId,
+      dto,
+    );
     return {
       statusCode: 200,
       message: 'Blueprint validation and pool distribution completed',

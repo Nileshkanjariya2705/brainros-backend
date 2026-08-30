@@ -11,7 +11,8 @@ export class SessionService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.sessionExpiryDays = Number(this.configService.get('SESSION_EXPIRY_DAYS')) || 30;
+    this.sessionExpiryDays =
+      Number(this.configService.get('SESSION_EXPIRY_DAYS')) || 30;
   }
 
   /**
@@ -43,12 +44,14 @@ export class SessionService {
    * Update last activity timestamp
    */
   async touchSession(sessionId: string): Promise<void> {
-    await this.prisma.loginSession.update({
-      where: { id: sessionId },
-      data: { lastActivityAt: new Date() },
-    }).catch(() => {
-      // Non-critical, don't throw
-    });
+    await this.prisma.loginSession
+      .update({
+        where: { id: sessionId },
+        data: { lastActivityAt: new Date() },
+      })
+      .catch(() => {
+        // Non-critical, don't throw
+      });
   }
 
   /**

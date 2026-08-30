@@ -73,7 +73,8 @@ export class ExamAccessService {
     if (currentStatus === 'APPROVED') {
       throw new ForbiddenException({
         code: 'EXAM_NOT_SCHEDULED',
-        message: 'This exam is approved but has not yet been scheduled or activated.',
+        message:
+          'This exam is approved but has not yet been scheduled or activated.',
       });
     }
 
@@ -115,7 +116,9 @@ export class ExamAccessService {
 
       // Rule: serverNow must be >= startTime
       if (serverNow.getTime() < startTime.getTime()) {
-        const waitSeconds = Math.ceil((startTime.getTime() - serverNow.getTime()) / 1000);
+        const waitSeconds = Math.ceil(
+          (startTime.getTime() - serverNow.getTime()) / 1000,
+        );
         throw new ForbiddenException({
           code: 'EXAM_NOT_YET_STARTED',
           message: `This exam is scheduled to start at ${startTime.toISOString()}. Please wait ${waitSeconds} seconds.`,
@@ -128,7 +131,9 @@ export class ExamAccessService {
       // Rule: serverNow must be < endTime
       if (serverNow.getTime() >= endTime.getTime()) {
         this.lifecycleService.endExam(examId).catch((err) => {
-          this.logger.error(`Error transitioning exam '${examId}' to ENDED: ${err.message}`);
+          this.logger.error(
+            `Error transitioning exam '${examId}' to ENDED: ${err.message}`,
+          );
         });
 
         throw new ForbiddenException({
@@ -145,7 +150,11 @@ export class ExamAccessService {
           where: { id: studentId },
         });
 
-        if (student && student.examTargetId && student.examTargetId !== exam.examTargetId) {
+        if (
+          student &&
+          student.examTargetId &&
+          student.examTargetId !== exam.examTargetId
+        ) {
           // If different, allow if open practice, otherwise strict check if explicit mock test
           // Here we do not block open practice mock tests
         }
@@ -170,7 +179,9 @@ export class ExamAccessService {
 
     // If no schedule exists (e.g. self-paced mock test), provide standard exam duration window
     const durationMinutes = exam.durationMinutes || 60;
-    const openEndTime = new Date(serverNow.getTime() + durationMinutes * 60 * 1000);
+    const openEndTime = new Date(
+      serverNow.getTime() + durationMinutes * 60 * 1000,
+    );
 
     return {
       isAllowed: true,

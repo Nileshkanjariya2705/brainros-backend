@@ -51,11 +51,17 @@ export class HistoricalInterpolationModel implements RankPredictionModel {
       // 1. Normalize current score to historical exam totalMarks if needed
       const normalizedScore =
         input.totalMarks > 0 && dataset.totalMarks > 0
-          ? Math.round(((input.score * dataset.totalMarks) / input.totalMarks) * 100) / 100
+          ? Math.round(
+              ((input.score * dataset.totalMarks) / input.totalMarks) * 100,
+            ) / 100
           : input.score;
 
       // 2. Perform piecewise linear interpolation
-      const estimatedRank = this.interpolateRank(normalizedScore, ranges, dataset.totalCandidates);
+      const estimatedRank = this.interpolateRank(
+        normalizedScore,
+        ranges,
+        dataset.totalCandidates,
+      );
       if (estimatedRank !== null) {
         estimates.push({
           datasetId: dataset.historicalExamId,
@@ -94,15 +100,23 @@ export class HistoricalInterpolationModel implements RankPredictionModel {
     }
 
     const predictedRank =
-      totalWeight > 0 ? Math.round(weightedRankSum / totalWeight) : Math.round(rankValues[0]);
+      totalWeight > 0
+        ? Math.round(weightedRankSum / totalWeight)
+        : Math.round(rankValues[0]);
 
     // 4. Derive dynamic prediction range [min, max]
     const minEstimated = Math.min(...rankValues);
     const maxEstimated = Math.max(...rankValues);
     const spread = Math.max(3, Math.ceil(predictedRank * 0.05));
 
-    const predictedRankMin = Math.max(1, Math.min(minEstimated, predictedRank - spread));
-    const predictedRankMax = Math.max(predictedRankMin + 1, Math.max(maxEstimated, predictedRank + spread));
+    const predictedRankMin = Math.max(
+      1,
+      Math.min(minEstimated, predictedRank - spread),
+    );
+    const predictedRankMax = Math.max(
+      predictedRankMin + 1,
+      Math.max(maxEstimated, predictedRank + spread),
+    );
 
     // 5. Confidence Score (0 - 100)
     let confidenceScore = 50; // base for 1 dataset
@@ -124,7 +138,15 @@ export class HistoricalInterpolationModel implements RankPredictionModel {
     const avgTotal = totalCandidatePool / estimates.length;
     const percentileEstimate =
       avgTotal > 0
-        ? Math.round(Math.max(0, Math.min(100, ((avgTotal - (predictedRank - 1)) / avgTotal) * 100)) * 100) / 100
+        ? Math.round(
+            Math.max(
+              0,
+              Math.min(
+                100,
+                ((avgTotal - (predictedRank - 1)) / avgTotal) * 100,
+              ),
+            ) * 100,
+          ) / 100
         : 95.0;
 
     return {
@@ -172,7 +194,9 @@ export class HistoricalInterpolationModel implements RankPredictionModel {
     totalCandidates: number,
   ): number | null {
     // Sort ranges ascending by score
-    const sorted = [...ranges].sort((a, b) => a.representativeScore - b.representativeScore);
+    const sorted = [...ranges].sort(
+      (a, b) => a.representativeScore - b.representativeScore,
+    );
 
     const minObserved = sorted[0].minScore;
     const maxObserved = sorted[sorted.length - 1].maxScore;
@@ -192,7 +216,8 @@ export class HistoricalInterpolationModel implements RankPredictionModel {
       // Exact match with range bucket
       if (score >= curr.minScore && score <= curr.maxScore) {
         if (curr.maxScore === curr.minScore) return curr.minRank;
-        const bucketRatio = (score - curr.minScore) / (curr.maxScore - curr.minScore);
+        const bucketRatio =
+          (score - curr.minScore) / (curr.maxScore - curr.minScore);
         // Note: higher score within bucket gives lower (better) rank
         const rank = curr.maxRank - bucketRatio * (curr.maxRank - curr.minRank);
         return Math.round(rank);

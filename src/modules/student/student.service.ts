@@ -9,8 +9,14 @@ import { SecurityEventService } from '../auth/services/security-event.service';
 import { OtpService } from '../auth/services/otp.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
-import { RequestChangeMobileDto, VerifyChangeMobileDto } from './dto/change-mobile.dto';
-import { RequestChangeEmailDto, VerifyChangeEmailDto } from './dto/change-email.dto';
+import {
+  RequestChangeMobileDto,
+  VerifyChangeMobileDto,
+} from './dto/change-mobile.dto';
+import {
+  RequestChangeEmailDto,
+  VerifyChangeEmailDto,
+} from './dto/change-email.dto';
 
 @Injectable()
 export class StudentService {
@@ -83,7 +89,10 @@ export class StudentService {
         this.prisma.studentClass.findFirst(),
         this.prisma.preferredLanguage.findFirst({ where: { isActive: true } }),
         this.prisma.examTarget.findFirst(),
-        this.prisma.state.findFirst({ where: { isActive: true }, include: { districts: true } }),
+        this.prisma.state.findFirst({
+          where: { isActive: true },
+          include: { districts: true },
+        }),
       ]);
 
       if (!firstClass) {
@@ -93,7 +102,12 @@ export class StudentService {
       }
       if (!firstLang) {
         firstLang = await this.prisma.preferredLanguage.create({
-          data: { name: 'English', code: 'en', nativeName: 'English', isActive: true },
+          data: {
+            name: 'English',
+            code: 'en',
+            nativeName: 'English',
+            isActive: true,
+          },
         });
       }
       if (!firstTarget) {
@@ -120,7 +134,11 @@ export class StudentService {
           userId: user.id,
           studentId: studentIdStr,
           studentCode,
-          name: user.email?.split('@')[0] || user.mobileNumber || user.phone || 'Student',
+          name:
+            user.email?.split('@')[0] ||
+            user.mobileNumber ||
+            user.phone ||
+            'Student',
           state: firstState?.name || 'Karnataka',
           district: firstState?.districts?.[0]?.name || 'Bengaluru',
           stateId: firstState?.id || null,
@@ -160,7 +178,11 @@ export class StudentService {
   /**
    * Update student profile permitted fields with strict validation of master data
    */
-  async updateProfile(userId: string, dto: UpdateStudentProfileDto, requestContext?: any) {
+  async updateProfile(
+    userId: string,
+    dto: UpdateStudentProfileDto,
+    requestContext?: any,
+  ) {
     let currentStudent = await this.prisma.student.findUnique({
       where: { userId },
     });
@@ -171,40 +193,55 @@ export class StudentService {
 
     // Validate relationships if provided
     if (dto.classId) {
-      const cls = await this.prisma.studentClass.findUnique({ where: { id: dto.classId } });
+      const cls = await this.prisma.studentClass.findUnique({
+        where: { id: dto.classId },
+      });
       if (!cls) throw new NotFoundException('Selected class not found.');
     }
 
     if (dto.examTargetId) {
-      const target = await this.prisma.examTarget.findUnique({ where: { id: dto.examTargetId } });
-      if (!target) throw new NotFoundException('Selected exam target not found.');
+      const target = await this.prisma.examTarget.findUnique({
+        where: { id: dto.examTargetId },
+      });
+      if (!target)
+        throw new NotFoundException('Selected exam target not found.');
     }
 
     if (dto.preferredLanguageId) {
       const lang = await this.prisma.preferredLanguage.findUnique({
         where: { id: dto.preferredLanguageId },
       });
-      if (!lang) throw new NotFoundException('Selected preferred language not found.');
-      if (!lang.isActive) throw new BadRequestException('Selected language is not active.');
+      if (!lang)
+        throw new NotFoundException('Selected preferred language not found.');
+      if (!lang.isActive)
+        throw new BadRequestException('Selected language is not active.');
     }
 
     let stateName = currentStudent.state;
     let districtName = currentStudent.district;
 
     if (dto.stateId) {
-      const state = await this.prisma.state.findUnique({ where: { id: dto.stateId } });
+      const state = await this.prisma.state.findUnique({
+        where: { id: dto.stateId },
+      });
       if (!state) throw new NotFoundException('Selected state not found.');
-      if (!state.isActive) throw new BadRequestException('Selected state is not active.');
+      if (!state.isActive)
+        throw new BadRequestException('Selected state is not active.');
       stateName = state.name;
     }
 
     if (dto.districtId) {
-      const district = await this.prisma.district.findUnique({ where: { id: dto.districtId } });
-      if (!district) throw new NotFoundException('Selected district not found.');
+      const district = await this.prisma.district.findUnique({
+        where: { id: dto.districtId },
+      });
+      if (!district)
+        throw new NotFoundException('Selected district not found.');
 
       const effectiveStateId = dto.stateId || currentStudent.stateId;
       if (effectiveStateId && district.stateId !== effectiveStateId) {
-        throw new BadRequestException('Selected district does not belong to the selected state.');
+        throw new BadRequestException(
+          'Selected district does not belong to the selected state.',
+        );
       }
       districtName = district.name;
     }
@@ -214,7 +251,10 @@ export class StudentService {
       where: { userId },
       data: {
         name: dto.name !== undefined ? dto.name.trim() : undefined,
-        schoolCollege: dto.schoolCollege !== undefined ? dto.schoolCollege.trim() : undefined,
+        schoolCollege:
+          dto.schoolCollege !== undefined
+            ? dto.schoolCollege.trim()
+            : undefined,
         classId: dto.classId,
         examTargetId: dto.examTargetId,
         preferredLanguageId: dto.preferredLanguageId,
@@ -262,8 +302,14 @@ export class StudentService {
   /**
    * Request mobile change: validates uniqueness and sends OTP to the NEW mobile number
    */
-  async requestChangeMobile(userId: string, dto: RequestChangeMobileDto, requestContext?: any) {
-    const normalizedNewMobile = this.otpService.normalizeMobileNumber(dto.newMobileNumber);
+  async requestChangeMobile(
+    userId: string,
+    dto: RequestChangeMobileDto,
+    requestContext?: any,
+  ) {
+    const normalizedNewMobile = this.otpService.normalizeMobileNumber(
+      dto.newMobileNumber,
+    );
 
     // Check if new mobile is already in use by another user
     const existing = await this.prisma.user.findFirst({
@@ -277,13 +323,18 @@ export class StudentService {
     });
 
     if (existing) {
-      throw new BadRequestException('This mobile number is already in use by another account.');
+      throw new BadRequestException(
+        'This mobile number is already in use by another account.',
+      );
     }
 
     // Save pending change in Redis (5 min TTL)
     await this.redisService.set(
       `mobile-change:${userId}`,
-      JSON.stringify({ newMobile: normalizedNewMobile, createdAt: new Date().toISOString() }),
+      JSON.stringify({
+        newMobile: normalizedNewMobile,
+        createdAt: new Date().toISOString(),
+      }),
       300,
     );
 
@@ -302,10 +353,16 @@ export class StudentService {
   /**
    * Verify mobile change OTP: verifies OTP on new mobile and updates User record
    */
-  async verifyChangeMobile(userId: string, dto: VerifyChangeMobileDto, requestContext?: any) {
+  async verifyChangeMobile(
+    userId: string,
+    dto: VerifyChangeMobileDto,
+    requestContext?: any,
+  ) {
     const rawData = await this.redisService.get(`mobile-change:${userId}`);
     if (!rawData) {
-      throw new BadRequestException('Mobile change request expired or not found. Please request again.');
+      throw new BadRequestException(
+        'Mobile change request expired or not found. Please request again.',
+      );
     }
 
     const { newMobile } = JSON.parse(rawData);
@@ -349,7 +406,11 @@ export class StudentService {
   /**
    * Request email change: validates uniqueness and sends OTP
    */
-  async requestChangeEmail(userId: string, dto: RequestChangeEmailDto, requestContext?: any) {
+  async requestChangeEmail(
+    userId: string,
+    dto: RequestChangeEmailDto,
+    requestContext?: any,
+  ) {
     const normalizedEmail = dto.newEmail.toLowerCase().trim();
 
     const existing = await this.prisma.user.findUnique({
@@ -357,12 +418,16 @@ export class StudentService {
     });
 
     if (existing && existing.id !== userId) {
-      throw new BadRequestException('This email is already in use by another account.');
+      throw new BadRequestException(
+        'This email is already in use by another account.',
+      );
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || (!user.mobileNumber && !user.phone)) {
-      throw new BadRequestException('User does not have a verified mobile for authorization.');
+      throw new BadRequestException(
+        'User does not have a verified mobile for authorization.',
+      );
     }
 
     const targetMobile = user.mobileNumber || user.phone!;
@@ -370,7 +435,10 @@ export class StudentService {
     // Save pending change in Redis (5 min TTL)
     await this.redisService.set(
       `email-change:${userId}`,
-      JSON.stringify({ newEmail: normalizedEmail, createdAt: new Date().toISOString() }),
+      JSON.stringify({
+        newEmail: normalizedEmail,
+        createdAt: new Date().toISOString(),
+      }),
       300,
     );
 
@@ -381,7 +449,8 @@ export class StudentService {
     });
 
     return {
-      message: 'Security OTP sent to your registered mobile to authorize email change.',
+      message:
+        'Security OTP sent to your registered mobile to authorize email change.',
       data: { requiresOtp: true, purpose: 'VERIFY_EMAIL', expiresIn: 300 },
     };
   }
@@ -389,10 +458,16 @@ export class StudentService {
   /**
    * Verify email change OTP: updates User email
    */
-  async verifyChangeEmail(userId: string, dto: VerifyChangeEmailDto, requestContext?: any) {
+  async verifyChangeEmail(
+    userId: string,
+    dto: VerifyChangeEmailDto,
+    requestContext?: any,
+  ) {
     const rawData = await this.redisService.get(`email-change:${userId}`);
     if (!rawData) {
-      throw new BadRequestException('Email change request expired or not found. Please request again.');
+      throw new BadRequestException(
+        'Email change request expired or not found. Please request again.',
+      );
     }
 
     const { newEmail } = JSON.parse(rawData);

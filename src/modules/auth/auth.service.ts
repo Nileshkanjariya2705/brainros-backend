@@ -81,7 +81,9 @@ export class AuthService {
 
   // ─── Helper: Build user response ──────────────────────────────
   private buildUserResponse(user: any) {
-    const roles = (user.userRoles || []).map((ur: any) => ur.role?.name || ur.role || ur);
+    const roles = (user.userRoles || []).map(
+      (ur: any) => ur.role?.name || ur.role || ur,
+    );
     return {
       userId: user.id,
       email: user.email,
@@ -199,15 +201,14 @@ export class AuthService {
     // 1. Check if mobile already exists
     const existingUserByMobile = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { mobileNumber: normalizedMobile },
-          { phone: normalizedMobile },
-        ],
+        OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
       },
     });
 
     if (existingUserByMobile) {
-      throw new BadRequestException('A user with this mobile number already exists.');
+      throw new BadRequestException(
+        'A user with this mobile number already exists.',
+      );
     }
 
     // 2. Check if email already exists
@@ -224,30 +225,46 @@ export class AuthService {
     // 3. Validate master data references
     const [targetClass, targetLang, targetExam] = await Promise.all([
       this.prisma.studentClass.findUnique({ where: { id: classId } }),
-      this.prisma.preferredLanguage.findUnique({ where: { id: preferredLanguageId } }),
+      this.prisma.preferredLanguage.findUnique({
+        where: { id: preferredLanguageId },
+      }),
       this.prisma.examTarget.findUnique({ where: { id: examTargetId } }),
     ]);
 
-    if (!targetClass) throw new NotFoundException('Selected class does not exist.');
-    if (!targetLang) throw new NotFoundException('Selected preferred language does not exist.');
-    if (!targetExam) throw new NotFoundException('Selected exam target does not exist.');
+    if (!targetClass)
+      throw new NotFoundException('Selected class does not exist.');
+    if (!targetLang)
+      throw new NotFoundException(
+        'Selected preferred language does not exist.',
+      );
+    if (!targetExam)
+      throw new NotFoundException('Selected exam target does not exist.');
 
     let resolvedStateName = state || '';
     let resolvedDistrictName = district || '';
 
     // Validate state & district
     if (stateId) {
-      const stateRecord = await this.prisma.state.findUnique({ where: { id: stateId } });
-      if (!stateRecord) throw new NotFoundException('Selected state does not exist.');
-      if (!stateRecord.isActive) throw new BadRequestException('Selected state is not active.');
+      const stateRecord = await this.prisma.state.findUnique({
+        where: { id: stateId },
+      });
+      if (!stateRecord)
+        throw new NotFoundException('Selected state does not exist.');
+      if (!stateRecord.isActive)
+        throw new BadRequestException('Selected state is not active.');
       resolvedStateName = stateRecord.name;
     }
 
     if (districtId) {
-      const districtRecord = await this.prisma.district.findUnique({ where: { id: districtId } });
-      if (!districtRecord) throw new NotFoundException('Selected district does not exist.');
+      const districtRecord = await this.prisma.district.findUnique({
+        where: { id: districtId },
+      });
+      if (!districtRecord)
+        throw new NotFoundException('Selected district does not exist.');
       if (stateId && districtRecord.stateId !== stateId) {
-        throw new BadRequestException('Selected district does not belong to the selected state.');
+        throw new BadRequestException(
+          'Selected district does not belong to the selected state.',
+        );
       }
       resolvedDistrictName = districtRecord.name;
     }
@@ -283,11 +300,16 @@ export class AuthService {
 
     await this.securityEventService.log('OTP_REQUESTED', {
       ...ctx,
-      metadata: { registrationId, purpose: 'REGISTER', mobile: normalizedMobile },
+      metadata: {
+        registrationId,
+        purpose: 'REGISTER',
+        mobile: normalizedMobile,
+      },
     });
 
     return {
-      message: 'Registration initiated. OTP sent to your registered mobile number.',
+      message:
+        'Registration initiated. OTP sent to your registered mobile number.',
       data: {
         requiresOtp: true,
         purpose: 'REGISTER',
@@ -308,14 +330,20 @@ export class AuthService {
     const { registrationId, otp } = dto;
 
     // 1. Load pending registration from Redis
-    const rawData = await this.redisService.get(`registration:${registrationId}`);
+    const rawData = await this.redisService.get(
+      `registration:${registrationId}`,
+    );
     if (!rawData) {
-      throw new BadRequestException('Registration session expired or invalid. Please register again.');
+      throw new BadRequestException(
+        'Registration session expired or invalid. Please register again.',
+      );
     }
 
     const registration: PendingRegistrationData = JSON.parse(rawData);
     if (registration.status !== 'PENDING_OTP') {
-      throw new BadRequestException('Registration has already been processed or is invalid.');
+      throw new BadRequestException(
+        'Registration has already been processed or is invalid.',
+      );
     }
 
     // 2. Verify OTP for purpose REGISTER
@@ -338,7 +366,9 @@ export class AuthService {
       });
 
       if (existingUser) {
-        throw new BadRequestException('A user with this mobile number or email already exists.');
+        throw new BadRequestException(
+          'A user with this mobile number or email already exists.',
+        );
       }
 
       // Create User
@@ -357,7 +387,9 @@ export class AuthService {
       });
 
       // Ensure STUDENT role exists & assign
-      let studentRole = await tx.role.findUnique({ where: { name: 'STUDENT' } });
+      let studentRole = await tx.role.findUnique({
+        where: { name: 'STUDENT' },
+      });
       if (!studentRole) {
         studentRole = await tx.role.create({ data: { name: 'STUDENT' } });
       }
@@ -411,13 +443,20 @@ export class AuthService {
     const fullUser = await this.loadUserWithRoles(result.user.id);
 
     // 6. Create session and tokens
-    const { session, tokens } = await this.createSessionAndTokens(result.user.id, req);
+    const { session, tokens } = await this.createSessionAndTokens(
+      result.user.id,
+      req,
+    );
 
     // 7. Log security events
     await this.securityEventService.log('REGISTER_SUCCESS', {
       userId: result.user.id,
       ...ctx,
-      metadata: { method: 'OTP_REGISTRATION', studentId: result.student.studentId, studentCode: result.student.studentCode },
+      metadata: {
+        method: 'OTP_REGISTRATION',
+        studentId: result.student.studentId,
+        studentCode: result.student.studentCode,
+      },
     });
 
     return {
@@ -447,7 +486,10 @@ export class AuthService {
    * Resolves the User account, checks account status, and sends OTP to
    * the verified mobile number associated with that account.
    */
-  async requestPasswordlessLoginOtp(dto: RequestPasswordlessLoginOtpDto, req?: any) {
+  async requestPasswordlessLoginOtp(
+    dto: RequestPasswordlessLoginOtpDto,
+    req?: any,
+  ) {
     const ctx = this.extractRequestContext(req);
     const rawIdentifier = dto.identifier.trim();
     if (!rawIdentifier) {
@@ -466,7 +508,11 @@ export class AuthService {
     }
 
     // B. Check if identifier is a Student ID (e.g. BRN-2026-000001, STU001001)
-    if (!user && (rawIdentifier.toUpperCase().startsWith('BRN-') || rawIdentifier.toUpperCase().startsWith('STU'))) {
+    if (
+      !user &&
+      (rawIdentifier.toUpperCase().startsWith('BRN-') ||
+        rawIdentifier.toUpperCase().startsWith('STU'))
+    ) {
       const student = await this.prisma.student.findFirst({
         where: {
           OR: [
@@ -487,13 +533,11 @@ export class AuthService {
 
     // C. Check if identifier is a Mobile Number
     if (!user) {
-      const normalizedMobile = this.otpService.normalizeMobileNumber(rawIdentifier);
+      const normalizedMobile =
+        this.otpService.normalizeMobileNumber(rawIdentifier);
       user = await this.prisma.user.findFirst({
         where: {
-          OR: [
-            { mobileNumber: normalizedMobile },
-            { phone: normalizedMobile },
-          ],
+          OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
         },
         include: { userRoles: { include: { role: true } }, student: true },
       });
@@ -520,7 +564,9 @@ export class AuthService {
     }
 
     if (!user) {
-      throw new NotFoundException('No active account found with the provided identifier.');
+      throw new NotFoundException(
+        'No active account found with the provided identifier.',
+      );
     }
 
     // Verify account status
@@ -529,7 +575,9 @@ export class AuthService {
     // Ensure account has a verified mobile number
     const targetMobile = user.mobileNumber || user.phone;
     if (!targetMobile) {
-      throw new BadRequestException('Account does not have a registered mobile number for OTP login.');
+      throw new BadRequestException(
+        'Account does not have a registered mobile number for OTP login.',
+      );
     }
 
     // Create temporary login request in Redis
@@ -579,19 +627,26 @@ export class AuthService {
    * Verify Login OTP: Validates the OTP for LOGIN purpose,
    * creates a LoginSession, and issues access + refresh tokens.
    */
-  async verifyPasswordlessLoginOtp(dto: VerifyPasswordlessLoginOtpDto, req?: any) {
+  async verifyPasswordlessLoginOtp(
+    dto: VerifyPasswordlessLoginOtpDto,
+    req?: any,
+  ) {
     const ctx = this.extractRequestContext(req);
     const { loginRequestId, otp } = dto;
 
     // 1. Load login request from Redis
     const rawData = await this.redisService.get(`login:${loginRequestId}`);
     if (!rawData) {
-      throw new BadRequestException('Login request has expired or is invalid. Please request a new OTP.');
+      throw new BadRequestException(
+        'Login request has expired or is invalid. Please request a new OTP.',
+      );
     }
 
     const loginRequest: PendingLoginData = JSON.parse(rawData);
     if (loginRequest.status !== 'PENDING_OTP') {
-      throw new BadRequestException('Login request has already been consumed or is invalid.');
+      throw new BadRequestException(
+        'Login request has already been consumed or is invalid.',
+      );
     }
 
     // 2. Verify OTP
@@ -644,9 +699,13 @@ export class AuthService {
     const ctx = this.extractRequestContext(req);
 
     if (dto.registrationId) {
-      const rawData = await this.redisService.get(`registration:${dto.registrationId}`);
+      const rawData = await this.redisService.get(
+        `registration:${dto.registrationId}`,
+      );
       if (!rawData) {
-        throw new BadRequestException('Registration session expired or invalid. Please register again.');
+        throw new BadRequestException(
+          'Registration session expired or invalid. Please register again.',
+        );
       }
       const registration: PendingRegistrationData = JSON.parse(rawData);
       await this.otpService.sendOtp(registration.mobile, 'REGISTER', ctx);
@@ -657,9 +716,13 @@ export class AuthService {
     }
 
     if (dto.loginRequestId) {
-      const rawData = await this.redisService.get(`login:${dto.loginRequestId}`);
+      const rawData = await this.redisService.get(
+        `login:${dto.loginRequestId}`,
+      );
       if (!rawData) {
-        throw new BadRequestException('Login request expired. Please request a new login OTP.');
+        throw new BadRequestException(
+          'Login request expired. Please request a new login OTP.',
+        );
       }
       const loginRequest: PendingLoginData = JSON.parse(rawData);
       await this.otpService.sendOtp(loginRequest.mobile, 'LOGIN', {
@@ -682,7 +745,9 @@ export class AuthService {
       };
     }
 
-    throw new BadRequestException('registrationId, loginRequestId, or mobileNumber must be provided to resend OTP.');
+    throw new BadRequestException(
+      'registrationId, loginRequestId, or mobileNumber must be provided to resend OTP.',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -692,21 +757,24 @@ export class AuthService {
   /**
    * Legacy / Direct verify OTP and authenticate user
    */
-  async verifyOtpAndLogin(mobileNumber: string, otp: string, purpose: OtpPurpose, req?: any) {
+  async verifyOtpAndLogin(
+    mobileNumber: string,
+    otp: string,
+    purpose: OtpPurpose,
+    req?: any,
+  ) {
     const ctx = this.extractRequestContext(req);
 
     // 1. Verify OTP
     await this.otpService.verifyOtp(mobileNumber, otp, purpose, ctx);
 
-    const normalizedMobile = this.otpService.normalizeMobileNumber(mobileNumber);
+    const normalizedMobile =
+      this.otpService.normalizeMobileNumber(mobileNumber);
 
     // 2. Find or create user
     let user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { mobileNumber: normalizedMobile },
-          { phone: normalizedMobile },
-        ],
+        OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
       },
       include: {
         userRoles: { include: { role: true } },
@@ -730,7 +798,9 @@ export class AuthService {
           },
         });
 
-        let studentRole = await tx.role.findUnique({ where: { name: 'STUDENT' } });
+        let studentRole = await tx.role.findUnique({
+          where: { name: 'STUDENT' },
+        });
         if (!studentRole) {
           studentRole = await tx.role.create({ data: { name: 'STUDENT' } });
         }
@@ -755,7 +825,9 @@ export class AuthService {
     }
 
     if (!user) {
-      throw new InternalServerErrorException('Failed to retrieve or create user.');
+      throw new InternalServerErrorException(
+        'Failed to retrieve or create user.',
+      );
     }
 
     this.verifyAccountActive(user);
@@ -814,7 +886,7 @@ export class AuthService {
 
     const isPasswordValid = await this.passwordService.comparePassword(
       password,
-      user.passwordHash!,
+      user.passwordHash,
     );
 
     if (!isPasswordValid) {
@@ -829,7 +901,12 @@ export class AuthService {
     const { session, tokens } = await this.createSessionAndTokens(user.id, req);
     const fullUser = await this.loadUserWithRoles(user.id);
 
-    return this.buildAuthResponse(fullUser, session.id, tokens, 'Login successful');
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Login successful',
+    );
   }
 
   async loginWithStudentId(studentId: string, password: string, req?: any) {
@@ -876,7 +953,12 @@ export class AuthService {
     const { session, tokens } = await this.createSessionAndTokens(user.id, req);
     const fullUser = await this.loadUserWithRoles(user.id);
 
-    return this.buildAuthResponse(fullUser, session.id, tokens, 'Login successful');
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Login successful',
+    );
   }
 
   async loginWithGoogle(idToken: string, req?: any) {
@@ -884,7 +966,9 @@ export class AuthService {
     const payload = await this.oauthService.verifyGoogleIdToken(idToken);
 
     if (!payload.email) {
-      throw new BadRequestException('Google token did not contain a valid email.');
+      throw new BadRequestException(
+        'Google token did not contain a valid email.',
+      );
     }
 
     const normalizedEmail = payload.email.toLowerCase().trim();
@@ -907,7 +991,9 @@ export class AuthService {
           },
         });
 
-        let studentRole = await tx.role.findUnique({ where: { name: 'STUDENT' } });
+        let studentRole = await tx.role.findUnique({
+          where: { name: 'STUDENT' },
+        });
         if (!studentRole) {
           studentRole = await tx.role.create({ data: { name: 'STUDENT' } });
         }
@@ -924,7 +1010,9 @@ export class AuthService {
     }
 
     if (!user) {
-      throw new InternalServerErrorException('Failed to create or retrieve user.');
+      throw new InternalServerErrorException(
+        'Failed to create or retrieve user.',
+      );
     }
 
     this.verifyAccountActive(user);
@@ -937,7 +1025,12 @@ export class AuthService {
     const { session, tokens } = await this.createSessionAndTokens(user.id, req);
     const fullUser = await this.loadUserWithRoles(user.id);
 
-    return this.buildAuthResponse(fullUser, session.id, tokens, 'Google authentication successful');
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Google authentication successful',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -946,7 +1039,10 @@ export class AuthService {
 
   async refreshSession(refreshToken: string, req?: any) {
     const ctx = this.extractRequestContext(req);
-    const tokens = await this.tokenService.refreshAccessTokens(refreshToken, ctx);
+    const tokens = await this.tokenService.refreshAccessTokens(
+      refreshToken,
+      ctx,
+    );
 
     let user: any = null;
     if (tokens.userId) {
@@ -1006,7 +1102,10 @@ export class AuthService {
 
   async revokeSession(userId: string, sessionId: string, req?: any) {
     const ctx = this.extractRequestContext(req);
-    const success = await this.sessionService.revokeUserSession(userId, sessionId);
+    const success = await this.sessionService.revokeUserSession(
+      userId,
+      sessionId,
+    );
     if (!success) {
       throw new NotFoundException('Session not found.');
     }

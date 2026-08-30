@@ -1,6 +1,13 @@
 import {
-  IsNotEmpty, IsString, IsUUID, IsOptional, IsNumber,
-  IsArray, ValidateNested, IsDateString, Min,
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+  IsDateString,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -182,4 +189,18 @@ export class ExamFilterDto {
   @IsNumber()
   @Min(1)
   limit?: number;
+}
+
+export class CreateExamFromTemplateDto {
+  @IsNotEmpty()
+  @IsUUID('4')
+  examTargetId: string;
+
+  @IsNotEmpty()
+  @IsString()
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
 }

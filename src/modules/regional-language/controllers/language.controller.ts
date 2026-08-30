@@ -58,10 +58,7 @@ export class LanguageController {
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPER_ADMIN')
-  updateLanguage(
-    @Param('id') id: string,
-    @Body() dto: UpdateLanguageDto,
-  ) {
+  updateLanguage(@Param('id') id: string, @Body() dto: UpdateLanguageDto) {
     return this.languageService.updateLanguage(id, dto);
   }
 

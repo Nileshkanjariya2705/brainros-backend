@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { QuestionBankService } from './question-bank.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { QuestionStatus } from './enums/question-status.enum';
 import { QuestionTypeEnum } from './enums/question-type.enum';
 import { QuestionDifficultyEnum } from './enums/question-difficulty.enum';
@@ -25,7 +29,11 @@ describe('QuestionBankService', () => {
       groupBy: jest.fn(),
     },
     questionTranslation: { createMany: jest.fn(), deleteMany: jest.fn() },
-    questionOption: { create: jest.fn(), findMany: jest.fn(), deleteMany: jest.fn() },
+    questionOption: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     questionOptionTranslation: { createMany: jest.fn(), deleteMany: jest.fn() },
     questionAnswer: { create: jest.fn(), upsert: jest.fn() },
     questionExplanation: { create: jest.fn(), upsert: jest.fn() },
@@ -59,54 +67,115 @@ describe('QuestionBankService', () => {
   // ═════════════════════════════════════════════════════════════════
   describe('validateHierarchy', () => {
     it('should succeed when hierarchy is valid', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Mechanics', subjectId: 'sub-1' });
-      prisma.topic.findUnique.mockResolvedValue({ id: 'top-1', name: 'Kinematics', chapterId: 'chap-1' });
-      prisma.subTopic.findUnique.mockResolvedValue({ id: 'subtop-1', name: 'Vectors', topicId: 'top-1' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Mechanics',
+        subjectId: 'sub-1',
+      });
+      prisma.topic.findUnique.mockResolvedValue({
+        id: 'top-1',
+        name: 'Kinematics',
+        chapterId: 'chap-1',
+      });
+      prisma.subTopic.findUnique.mockResolvedValue({
+        id: 'subtop-1',
+        name: 'Vectors',
+        topicId: 'top-1',
+      });
 
-      await expect(service.validateHierarchy('sub-1', 'chap-1', 'top-1', 'subtop-1')).resolves.not.toThrow();
+      await expect(
+        service.validateHierarchy('sub-1', 'chap-1', 'top-1', 'subtop-1'),
+      ).resolves.not.toThrow();
     });
 
     it('should throw BadRequestException if subject does not exist', async () => {
       prisma.subject.findUnique.mockResolvedValue(null);
-      await expect(service.validateHierarchy('sub-invalid', 'chap-1')).rejects.toThrow(BadRequestException);
+      await expect(
+        service.validateHierarchy('sub-invalid', 'chap-1'),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException if chapter does not belong to subject', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Mechanics', subjectId: 'sub-other' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Mechanics',
+        subjectId: 'sub-other',
+      });
 
-      await expect(service.validateHierarchy('sub-1', 'chap-1')).rejects.toThrow(
-        /does not belong to the selected Subject/,
-      );
+      await expect(
+        service.validateHierarchy('sub-1', 'chap-1'),
+      ).rejects.toThrow(/does not belong to the selected Subject/);
     });
 
     it('should throw BadRequestException if topic does not belong to chapter', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Mechanics', subjectId: 'sub-1' });
-      prisma.topic.findUnique.mockResolvedValue({ id: 'top-1', name: 'Optics', chapterId: 'chap-other' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Mechanics',
+        subjectId: 'sub-1',
+      });
+      prisma.topic.findUnique.mockResolvedValue({
+        id: 'top-1',
+        name: 'Optics',
+        chapterId: 'chap-other',
+      });
 
-      await expect(service.validateHierarchy('sub-1', 'chap-1', 'top-1')).rejects.toThrow(
-        /does not belong to the selected Chapter/,
-      );
+      await expect(
+        service.validateHierarchy('sub-1', 'chap-1', 'top-1'),
+      ).rejects.toThrow(/does not belong to the selected Chapter/);
     });
 
     it('should throw BadRequestException if subTopic does not belong to topic', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Mechanics', subjectId: 'sub-1' });
-      prisma.topic.findUnique.mockResolvedValue({ id: 'top-1', name: 'Kinematics', chapterId: 'chap-1' });
-      prisma.subTopic.findUnique.mockResolvedValue({ id: 'subtop-1', name: 'Lenses', topicId: 'top-other' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Mechanics',
+        subjectId: 'sub-1',
+      });
+      prisma.topic.findUnique.mockResolvedValue({
+        id: 'top-1',
+        name: 'Kinematics',
+        chapterId: 'chap-1',
+      });
+      prisma.subTopic.findUnique.mockResolvedValue({
+        id: 'subtop-1',
+        name: 'Lenses',
+        topicId: 'top-other',
+      });
 
-      await expect(service.validateHierarchy('sub-1', 'chap-1', 'top-1', 'subtop-1')).rejects.toThrow(
-        /does not belong to the selected Topic/,
-      );
+      await expect(
+        service.validateHierarchy('sub-1', 'chap-1', 'top-1', 'subtop-1'),
+      ).rejects.toThrow(/does not belong to the selected Topic/);
     });
 
     it('should throw BadRequestException if subTopic is provided without topic', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Mechanics', subjectId: 'sub-1' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Mechanics',
+        subjectId: 'sub-1',
+      });
 
-      await expect(service.validateHierarchy('sub-1', 'chap-1', undefined, 'subtop-1')).rejects.toThrow(
+      await expect(
+        service.validateHierarchy('sub-1', 'chap-1', undefined, 'subtop-1'),
+      ).rejects.toThrow(
         /Cannot assign a SubTopic without selecting a parent Topic/,
       );
     });
@@ -121,7 +190,12 @@ describe('QuestionBankService', () => {
         { optionKey: 'A', optionLabel: 'Option A', isCorrect: true },
         { optionKey: 'B', optionLabel: 'Option B', isCorrect: false },
       ];
-      expect(() => service.validateQuestionTypeAndAnswer(QuestionTypeEnum.SINGLE_CORRECT, options as any)).not.toThrow();
+      expect(() =>
+        service.validateQuestionTypeAndAnswer(
+          QuestionTypeEnum.SINGLE_CORRECT,
+          options as any,
+        ),
+      ).not.toThrow();
     });
 
     it('should throw for SINGLE_CORRECT with multiple correct options', () => {
@@ -129,9 +203,12 @@ describe('QuestionBankService', () => {
         { optionKey: 'A', optionLabel: 'Option A', isCorrect: true },
         { optionKey: 'B', optionLabel: 'Option B', isCorrect: true },
       ];
-      expect(() => service.validateQuestionTypeAndAnswer(QuestionTypeEnum.SINGLE_CORRECT, options as any)).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        service.validateQuestionTypeAndAnswer(
+          QuestionTypeEnum.SINGLE_CORRECT,
+          options as any,
+        ),
+      ).toThrow(BadRequestException);
     });
 
     it('should validate MULTIPLE_CORRECT with >= 1 correct options', () => {
@@ -139,12 +216,19 @@ describe('QuestionBankService', () => {
         { optionKey: 'A', optionLabel: 'Option A', isCorrect: true },
         { optionKey: 'B', optionLabel: 'Option B', isCorrect: true },
       ];
-      expect(() => service.validateQuestionTypeAndAnswer(QuestionTypeEnum.MULTIPLE_CORRECT, options as any)).not.toThrow();
+      expect(() =>
+        service.validateQuestionTypeAndAnswer(
+          QuestionTypeEnum.MULTIPLE_CORRECT,
+          options as any,
+        ),
+      ).not.toThrow();
     });
 
     it('should validate NUMERICAL with numeric answer or range', () => {
       expect(() =>
-        service.validateQuestionTypeAndAnswer(QuestionTypeEnum.NUMERICAL, [], { numericalAnswer: 42 }),
+        service.validateQuestionTypeAndAnswer(QuestionTypeEnum.NUMERICAL, [], {
+          numericalAnswer: 42,
+        }),
       ).not.toThrow();
 
       expect(() =>
@@ -154,9 +238,13 @@ describe('QuestionBankService', () => {
         }),
       ).not.toThrow();
 
-      expect(() => service.validateQuestionTypeAndAnswer(QuestionTypeEnum.NUMERICAL, [], {})).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        service.validateQuestionTypeAndAnswer(
+          QuestionTypeEnum.NUMERICAL,
+          [],
+          {},
+        ),
+      ).toThrow(BadRequestException);
     });
 
     it('should validate ASSERTION_REASON requires assertion and reason text', () => {
@@ -213,10 +301,24 @@ describe('QuestionBankService', () => {
   // ═════════════════════════════════════════════════════════════════
   describe('createQuestion', () => {
     it('should successfully create a question in DRAFT status', async () => {
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Chemistry' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Organic', subjectId: 'sub-1' });
-      prisma.question.create.mockResolvedValue({ id: 'q-101', status: QuestionStatus.DRAFT, version: 1 });
-      prisma.questionOption.create.mockResolvedValue({ id: 'opt-1', optionKey: 'A' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Chemistry',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Organic',
+        subjectId: 'sub-1',
+      });
+      prisma.question.create.mockResolvedValue({
+        id: 'q-101',
+        status: QuestionStatus.DRAFT,
+        version: 1,
+      });
+      prisma.questionOption.create.mockResolvedValue({
+        id: 'opt-1',
+        optionKey: 'A',
+      });
       prisma.question.findUnique.mockResolvedValue({
         id: 'q-101',
         status: QuestionStatus.DRAFT,
@@ -230,14 +332,16 @@ describe('QuestionBankService', () => {
         defaultLanguageId: 'lang-1',
         type: QuestionTypeEnum.SINGLE_CORRECT,
         difficultyLevel: QuestionDifficultyEnum.EASY,
-        translations: [{ languageId: 'lang-1', questionText: 'What is Benzene?' }],
+        translations: [
+          { languageId: 'lang-1', questionText: 'What is Benzene?' },
+        ],
         options: [
           { optionKey: 'A', optionLabel: 'C6H6', isCorrect: true },
           { optionKey: 'B', optionLabel: 'CH4', isCorrect: false },
         ],
       };
 
-      const result = await service.createQuestion(dto as any, 'user-123');
+      const result = await service.createQuestion(dto, 'user-123');
 
       expect(prisma.question.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -281,7 +385,10 @@ describe('QuestionBankService', () => {
       });
       expect(prisma.questionReviewHistory.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ action: 'SUBMITTED', toStatus: QuestionStatus.SUBMITTED }),
+          data: expect.objectContaining({
+            action: 'SUBMITTED',
+            toStatus: QuestionStatus.SUBMITTED,
+          }),
         }),
       );
     });
@@ -292,7 +399,9 @@ describe('QuestionBankService', () => {
         status: QuestionStatus.APPROVED,
       });
 
-      await expect(service.submitQuestion('q-1', 'admin-1')).rejects.toThrow(BadRequestException);
+      await expect(service.submitQuestion('q-1', 'admin-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('startReview: should transition SUBMITTED to UNDER_REVIEW', async () => {
@@ -319,7 +428,12 @@ describe('QuestionBankService', () => {
         createdById: 'admin-creator',
       });
 
-      await service.approveQuestion('q-1', 'super-admin-1', ['SUPER_ADMIN'], 'LGTM');
+      await service.approveQuestion(
+        'q-1',
+        'super-admin-1',
+        ['SUPER_ADMIN'],
+        'LGTM',
+      );
 
       expect(prisma.question.update).toHaveBeenCalledWith({
         where: { id: 'q-1' },
@@ -337,9 +451,9 @@ describe('QuestionBankService', () => {
         createdById: 'admin-1',
       });
 
-      await expect(service.approveQuestion('q-1', 'admin-1', ['ADMIN'])).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.approveQuestion('q-1', 'admin-1', ['ADMIN']),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('rejectQuestion: should require reason and transition to REJECTED', async () => {
@@ -348,7 +462,11 @@ describe('QuestionBankService', () => {
         status: QuestionStatus.UNDER_REVIEW,
       });
 
-      await service.rejectQuestion('q-1', 'super-admin-1', 'Options are ambiguous');
+      await service.rejectQuestion(
+        'q-1',
+        'super-admin-1',
+        'Options are ambiguous',
+      );
 
       expect(prisma.question.update).toHaveBeenCalledWith({
         where: { id: 'q-1' },
@@ -360,9 +478,9 @@ describe('QuestionBankService', () => {
     });
 
     it('rejectQuestion: should throw if reason is empty', async () => {
-      await expect(service.rejectQuestion('q-1', 'super-admin-1', '   ')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.rejectQuestion('q-1', 'super-admin-1', '   '),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('archiveQuestion: should transition APPROVED to ARCHIVED and set isActive to false', async () => {
@@ -371,7 +489,11 @@ describe('QuestionBankService', () => {
         status: QuestionStatus.APPROVED,
       });
 
-      await service.archiveQuestion('q-1', 'super-admin-1', 'Curriculum updated');
+      await service.archiveQuestion(
+        'q-1',
+        'super-admin-1',
+        'Curriculum updated',
+      );
 
       expect(prisma.question.update).toHaveBeenCalledWith({
         where: { id: 'q-1' },
@@ -407,8 +529,15 @@ describe('QuestionBankService', () => {
       };
 
       prisma.question.findUnique.mockResolvedValue(approvedParent);
-      prisma.subject.findUnique.mockResolvedValue({ id: 'sub-1', name: 'Physics' });
-      prisma.chapter.findUnique.mockResolvedValue({ id: 'chap-1', name: 'Motion', subjectId: 'sub-1' });
+      prisma.subject.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        name: 'Physics',
+      });
+      prisma.chapter.findUnique.mockResolvedValue({
+        id: 'chap-1',
+        name: 'Motion',
+        subjectId: 'sub-1',
+      });
       prisma.question.create.mockResolvedValue({
         id: 'q-v2',
         version: 2,
@@ -417,10 +546,12 @@ describe('QuestionBankService', () => {
       });
 
       const updateDto = {
-        translations: [{ languageId: 'lang-1', questionText: 'Updated text for v2' }],
+        translations: [
+          { languageId: 'lang-1', questionText: 'Updated text for v2' },
+        ],
       };
 
-      await service.updateQuestion('q-v1', updateDto as any, 'admin-2', ['ADMIN']);
+      await service.updateQuestion('q-v1', updateDto, 'admin-2', ['ADMIN']);
 
       expect(prisma.question.create).toHaveBeenCalledWith(
         expect.objectContaining({

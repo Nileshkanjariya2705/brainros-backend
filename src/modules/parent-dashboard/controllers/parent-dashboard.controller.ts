@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ParentStudentAccessService } from '../services/parent-student-access.service';
 import { ParentDashboardService } from '../services/parent-dashboard.service';
 import { GetTrendsQueryDto } from '../../performance-trend/dto/performance-trend.dto';
@@ -56,7 +50,11 @@ export class ParentDashboardController {
     @Param('studentId') studentId: string,
     @Query() query: GetTrendsQueryDto,
   ) {
-    return this.dashboardService.getStudentTrends(user.userId, studentId, query);
+    return this.dashboardService.getStudentTrends(
+      user.userId,
+      studentId,
+      query,
+    );
   }
 
   /**
@@ -67,7 +65,10 @@ export class ParentDashboardController {
     @CurrentUser() user: any,
     @Param('studentId') studentId: string,
   ) {
-    const dash = await this.dashboardService.getStudentDashboard(user.userId, studentId);
+    const dash = await this.dashboardService.getStudentDashboard(
+      user.userId,
+      studentId,
+    );
     return dash.subjects;
   }
 
@@ -79,7 +80,10 @@ export class ParentDashboardController {
     @CurrentUser() user: any,
     @Param('studentId') studentId: string,
   ) {
-    const dash = await this.dashboardService.getStudentDashboard(user.userId, studentId);
+    const dash = await this.dashboardService.getStudentDashboard(
+      user.userId,
+      studentId,
+    );
     return dash.rank;
   }
 
@@ -91,7 +95,10 @@ export class ParentDashboardController {
     @CurrentUser() user: any,
     @Param('studentId') studentId: string,
   ) {
-    const dash = await this.dashboardService.getStudentDashboard(user.userId, studentId);
+    const dash = await this.dashboardService.getStudentDashboard(
+      user.userId,
+      studentId,
+    );
     return dash.recommendations;
   }
 }

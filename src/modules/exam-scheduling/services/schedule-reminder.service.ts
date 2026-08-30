@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../../notification/services/notification.service';
-import { NotificationChannel, NotificationPriority, NotificationType } from '@prisma/client';
+import {
+  NotificationChannel,
+  NotificationPriority,
+  NotificationType,
+} from '@prisma/client';
 
 @Injectable()
 export class ScheduleReminderService {

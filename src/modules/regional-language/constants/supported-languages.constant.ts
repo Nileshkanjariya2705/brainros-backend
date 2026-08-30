@@ -1,13 +1,5 @@
 export type SupportedLanguageCode =
-  | 'en'
-  | 'kn'
-  | 'hi'
-  | 'ta'
-  | 'te'
-  | 'mr'
-  | 'ml'
-  | 'bn'
-  | 'gu';
+  'en' | 'kn' | 'hi' | 'ta' | 'te' | 'mr' | 'ml' | 'bn' | 'gu';
 
 export const MANDATORY_LANGUAGE_CODES: SupportedLanguageCode[] = [
   'en',

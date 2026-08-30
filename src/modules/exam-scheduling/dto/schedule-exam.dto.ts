@@ -7,9 +7,9 @@ import {
 } from 'class-validator';
 
 export class ScheduleExamDto {
-  @IsNotEmpty()
-  @IsUUID('4')
-  examVersionId: string;
+  @IsOptional()
+  @IsString()
+  examVersionId?: string;
 
   @IsNotEmpty()
   @IsISO8601()

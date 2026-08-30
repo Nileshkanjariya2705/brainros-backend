@@ -34,7 +34,9 @@ describe('BulkUploadValidatorService', () => {
       ],
     }).compile();
 
-    service = module.get<BulkUploadValidatorService>(BulkUploadValidatorService);
+    service = module.get<BulkUploadValidatorService>(
+      BulkUploadValidatorService,
+    );
   });
 
   it('should identify valid and invalid rows accurately', async () => {

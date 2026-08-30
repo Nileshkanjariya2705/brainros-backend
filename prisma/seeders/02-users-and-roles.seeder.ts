@@ -67,7 +67,7 @@ export async function seedUsersAndRoles(ctx: SeedContext): Promise<SeederResult>
   };
 
   // 1. Super Admin
-  await ensureUser('superadmin@brainros.test', '+919000000000', ['SUPER_ADMIN', 'ADMIN']);
+  await ensureUser('superadmin@brainros.test', '+919000000000', ['SUPER_ADMIN']);
 
   // 2. Academic Admins
   await ensureUser('admin.neet@brainros.test', '+919000000091', ['ADMIN']);

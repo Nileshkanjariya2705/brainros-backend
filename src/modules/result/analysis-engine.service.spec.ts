@@ -29,27 +29,39 @@ describe('AnalysisEngineService', () => {
 
   describe('evaluateStatus with configurable thresholds', () => {
     it('returns NOT_ATTEMPTED when 0 questions attempted', () => {
-      expect(service.evaluateStatus(0, 0, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('NOT_ATTEMPTED');
+      expect(service.evaluateStatus(0, 0, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe(
+        'NOT_ATTEMPTED',
+      );
     });
 
     it('returns EXCELLENT when accuracy >= 90', () => {
-      expect(service.evaluateStatus(91, 10, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('EXCELLENT');
+      expect(
+        service.evaluateStatus(91, 10, DEFAULT_PERFORMANCE_THRESHOLDS),
+      ).toBe('EXCELLENT');
     });
 
     it('returns STRONG when accuracy is between 75 and 89', () => {
-      expect(service.evaluateStatus(79.5, 10, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('STRONG');
+      expect(
+        service.evaluateStatus(79.5, 10, DEFAULT_PERFORMANCE_THRESHOLDS),
+      ).toBe('STRONG');
     });
 
     it('returns GOOD when accuracy is between 60 and 74', () => {
-      expect(service.evaluateStatus(65, 10, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('GOOD');
+      expect(
+        service.evaluateStatus(65, 10, DEFAULT_PERFORMANCE_THRESHOLDS),
+      ).toBe('GOOD');
     });
 
     it('returns WEAK when accuracy is between 40 and 59', () => {
-      expect(service.evaluateStatus(48, 10, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('WEAK');
+      expect(
+        service.evaluateStatus(48, 10, DEFAULT_PERFORMANCE_THRESHOLDS),
+      ).toBe('WEAK');
     });
 
     it('returns CRITICAL when accuracy < 40', () => {
-      expect(service.evaluateStatus(35, 10, DEFAULT_PERFORMANCE_THRESHOLDS)).toBe('CRITICAL');
+      expect(
+        service.evaluateStatus(35, 10, DEFAULT_PERFORMANCE_THRESHOLDS),
+      ).toBe('CRITICAL');
     });
 
     it('honors custom per-exam thresholds', () => {
@@ -117,7 +129,11 @@ describe('AnalysisEngineService', () => {
           chapterResults: [
             {
               chapterId: 'optics-id',
-              chapter: { name: 'Optics', subjectId: 'phys-id', subject: { name: 'Physics' } },
+              chapter: {
+                name: 'Optics',
+                subjectId: 'phys-id',
+                subject: { name: 'Physics' },
+              },
               totalQuestions: 3,
               correctAnswers: 3,
               wrongAnswers: 0,
@@ -128,7 +144,11 @@ describe('AnalysisEngineService', () => {
             },
             {
               chapterId: 'thermo-id',
-              chapter: { name: 'Thermodynamics', subjectId: 'chem-id', subject: { name: 'Chemistry' } },
+              chapter: {
+                name: 'Thermodynamics',
+                subjectId: 'chem-id',
+                subject: { name: 'Chemistry' },
+              },
               totalQuestions: 3,
               correctAnswers: 1,
               wrongAnswers: 1,
@@ -156,9 +176,7 @@ describe('AnalysisEngineService', () => {
             },
           },
         ],
-        timeLogs: [
-          { examQuestionId: 'eq-1', timeSpentSeconds: 45 },
-        ],
+        timeLogs: [{ examQuestionId: 'eq-1', timeSpentSeconds: 45 }],
       };
 
       prismaMock.attempt.findUnique.mockResolvedValue(mockAttempt);

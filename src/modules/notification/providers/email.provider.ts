@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel } from '@prisma/client';
 import { INotificationProvider } from './notification-provider.interface';
-import { NotificationPayload, ProviderResult } from '../interfaces/notification.interface';
+import {
+  NotificationPayload,
+  ProviderResult,
+} from '../interfaces/notification.interface';
 
 @Injectable()
 export class EmailProvider implements INotificationProvider {
@@ -16,7 +19,10 @@ export class EmailProvider implements INotificationProvider {
       );
 
       // Simulation / SES adapter logic
-      if (!payload.recipientAddress || !payload.recipientAddress.includes('@')) {
+      if (
+        !payload.recipientAddress ||
+        !payload.recipientAddress.includes('@')
+      ) {
         return {
           success: false,
           provider: this.providerName,
@@ -32,7 +38,9 @@ export class EmailProvider implements INotificationProvider {
         providerMessageId: `msg-email-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       };
     } catch (err: any) {
-      this.logger.error(`[EmailProvider] Error sending to ${payload.recipientAddress}: ${err.message}`);
+      this.logger.error(
+        `[EmailProvider] Error sending to ${payload.recipientAddress}: ${err.message}`,
+      );
       return {
         success: false,
         provider: this.providerName,

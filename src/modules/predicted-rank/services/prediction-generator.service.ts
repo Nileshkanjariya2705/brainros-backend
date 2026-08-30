@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { HistoricalDatasetSelectorService } from './historical-dataset-selector.service';
@@ -54,7 +50,9 @@ export class PredictionGeneratorService {
     }
 
     if (!attempt.result) {
-      throw new NotFoundException(`Attempt '${attemptId}' has no evaluated result yet`);
+      throw new NotFoundException(
+        `Attempt '${attemptId}' has no evaluated result yet`,
+      );
     }
 
     const score = attempt.result.totalScore;
@@ -62,11 +60,12 @@ export class PredictionGeneratorService {
     const examType = attempt.exam.examTarget?.name || 'GENERAL';
 
     // 1. Select comparable historical datasets
-    const historicalDatasets = await this.datasetSelector.selectComparableDatasets({
-      examType,
-      totalMarks,
-      limit: 5,
-    });
+    const historicalDatasets =
+      await this.datasetSelector.selectComparableDatasets({
+        examType,
+        totalMarks,
+        limit: 5,
+      });
 
     // 2. Run prediction model
     const predictionOutput = this.interpolationModel.predict(
@@ -133,7 +132,11 @@ export class PredictionGeneratorService {
     });
 
     // 4. Cache in Redis
-    await this.redisService.set(cacheKey, JSON.stringify(predictionOutput), 3600); // 1 hour TTL
+    await this.redisService.set(
+      cacheKey,
+      JSON.stringify(predictionOutput),
+      3600,
+    ); // 1 hour TTL
 
     this.logger.log(
       `Generated prediction for attempt '${attemptId}': Rank ${predictionOutput.predictedRank} (Range: ${predictionOutput.predictedRankMin}-${predictionOutput.predictedRankMax}, Confidence: ${predictionOutput.confidence})`,

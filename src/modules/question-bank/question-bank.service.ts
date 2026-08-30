@@ -42,7 +42,9 @@ export class QuestionBankService {
       where: { id: subjectId },
     });
     if (!subject) {
-      throw new BadRequestException(`Subject with ID '${subjectId}' does not exist.`);
+      throw new BadRequestException(
+        `Subject with ID '${subjectId}' does not exist.`,
+      );
     }
 
     // 2. Verify chapter exists and belongs to subject
@@ -50,7 +52,9 @@ export class QuestionBankService {
       where: { id: chapterId },
     });
     if (!chapter) {
-      throw new BadRequestException(`Chapter with ID '${chapterId}' does not exist.`);
+      throw new BadRequestException(
+        `Chapter with ID '${chapterId}' does not exist.`,
+      );
     }
     if (chapter.subjectId !== subjectId) {
       throw new BadRequestException(
@@ -64,7 +68,9 @@ export class QuestionBankService {
         where: { id: topicId },
       });
       if (!topic) {
-        throw new BadRequestException(`Topic with ID '${topicId}' does not exist.`);
+        throw new BadRequestException(
+          `Topic with ID '${topicId}' does not exist.`,
+        );
       }
       if (topic.chapterId !== chapterId) {
         throw new BadRequestException(
@@ -78,7 +84,9 @@ export class QuestionBankService {
           where: { id: subTopicId },
         });
         if (!subTopic) {
-          throw new BadRequestException(`SubTopic with ID '${subTopicId}' does not exist.`);
+          throw new BadRequestException(
+            `SubTopic with ID '${subTopicId}' does not exist.`,
+          );
         }
         if (subTopic.topicId !== topicId) {
           throw new BadRequestException(
@@ -87,7 +95,9 @@ export class QuestionBankService {
         }
       }
     } else if (subTopicId) {
-      throw new BadRequestException('Cannot assign a SubTopic without selecting a parent Topic.');
+      throw new BadRequestException(
+        'Cannot assign a SubTopic without selecting a parent Topic.',
+      );
     }
   }
 
@@ -111,19 +121,25 @@ export class QuestionBankService {
     switch (type) {
       case QuestionTypeEnum.SINGLE_CORRECT: {
         if (opts.length < 2) {
-          throw new BadRequestException('Single Correct MCQ must have at least 2 options.');
+          throw new BadRequestException(
+            'Single Correct MCQ must have at least 2 options.',
+          );
         }
         const correctCount = opts.filter((o) => o.isCorrect).length;
         const answerIds = answer?.correctOptionIds || [];
         if (correctCount !== 1 && answerIds.length !== 1) {
-          throw new BadRequestException('Single Correct MCQ must have exactly one correct option.');
+          throw new BadRequestException(
+            'Single Correct MCQ must have exactly one correct option.',
+          );
         }
         break;
       }
 
       case QuestionTypeEnum.MULTIPLE_CORRECT: {
         if (opts.length < 2) {
-          throw new BadRequestException('Multiple Correct MCQ must have at least 2 options.');
+          throw new BadRequestException(
+            'Multiple Correct MCQ must have at least 2 options.',
+          );
         }
         const correctCount = opts.filter((o) => o.isCorrect).length;
         const answerIds = answer?.correctOptionIds || [];
@@ -136,7 +152,9 @@ export class QuestionBankService {
       }
 
       case QuestionTypeEnum.NUMERICAL: {
-        const hasDirectAnswer = answer?.numericalAnswer !== undefined && answer.numericalAnswer !== null;
+        const hasDirectAnswer =
+          answer?.numericalAnswer !== undefined &&
+          answer.numericalAnswer !== null;
         const hasRange =
           answer?.numericalRangeStart !== undefined &&
           answer?.numericalRangeEnd !== undefined &&
@@ -176,7 +194,9 @@ export class QuestionBankService {
 
       case QuestionTypeEnum.CASE_BASED: {
         if (!passage?.trim()) {
-          throw new BadRequestException('Case Based question requires a passage/case study text.');
+          throw new BadRequestException(
+            'Case Based question requires a passage/case study text.',
+          );
         }
         break;
       }
@@ -195,11 +215,17 @@ export class QuestionBankService {
    */
   async createQuestion(dto: CreateQuestionDto, createdById: string) {
     // 1. Hierarchy integrity check
-    await this.validateHierarchy(dto.subjectId, dto.chapterId, dto.topicId, dto.subTopicId);
+    await this.validateHierarchy(
+      dto.subjectId,
+      dto.chapterId,
+      dto.topicId,
+      dto.subTopicId,
+    );
 
     // 2. Determine type and difficulty
     const type = dto.type || QuestionTypeEnum.SINGLE_CORRECT;
-    const difficultyLevel = dto.difficultyLevel || QuestionDifficultyEnum.MEDIUM;
+    const difficultyLevel =
+      dto.difficultyLevel || QuestionDifficultyEnum.MEDIUM;
 
     // 3. Validate question type rules
     this.validateQuestionTypeAndAnswer(
@@ -213,7 +239,9 @@ export class QuestionBankService {
 
     // 4. Validate translations presence
     if (!dto.translations || dto.translations.length === 0) {
-      throw new BadRequestException('At least one translation is required for the question.');
+      throw new BadRequestException(
+        'At least one translation is required for the question.',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -296,7 +324,8 @@ export class QuestionBankService {
       // d. Create QuestionAnswer
       const answerPayload = dto.answer;
       const finalCorrectOptionIds =
-        answerPayload?.correctOptionIds && answerPayload.correctOptionIds.length > 0
+        answerPayload?.correctOptionIds &&
+        answerPayload.correctOptionIds.length > 0
           ? answerPayload.correctOptionIds
           : correctOptionIds;
 
@@ -304,7 +333,10 @@ export class QuestionBankService {
         data: {
           questionId: question.id,
           answerType: type,
-          correctOptionIds: finalCorrectOptionIds.length > 0 ? (finalCorrectOptionIds as any) : null,
+          correctOptionIds:
+            finalCorrectOptionIds.length > 0
+              ? (finalCorrectOptionIds as any)
+              : null,
           numericalAnswer: answerPayload?.numericalAnswer ?? null,
           numericalTolerance: answerPayload?.numericalTolerance ?? 0,
           numericalRangeStart: answerPayload?.numericalRangeStart ?? null,
@@ -376,13 +408,18 @@ export class QuestionBankService {
     // ─── Standard In-Place Edit for DRAFT or REJECTED questions ──
     const subjectId = dto.subjectId || existing.subjectId;
     const chapterId = dto.chapterId || existing.chapterId;
-    const topicId = dto.topicId !== undefined ? dto.topicId : existing.topicId || undefined;
-    const subTopicId = dto.subTopicId !== undefined ? dto.subTopicId : existing.subTopicId || undefined;
+    const topicId =
+      dto.topicId !== undefined ? dto.topicId : existing.topicId || undefined;
+    const subTopicId =
+      dto.subTopicId !== undefined
+        ? dto.subTopicId
+        : existing.subTopicId || undefined;
 
     await this.validateHierarchy(subjectId, chapterId, topicId, subTopicId);
 
     const type = (dto.type || existing.type) as QuestionTypeEnum;
-    const difficultyLevel = (dto.difficultyLevel || existing.difficultyLevel) as QuestionDifficultyEnum;
+    const difficultyLevel = (dto.difficultyLevel ||
+      existing.difficultyLevel) as QuestionDifficultyEnum;
 
     this.validateQuestionTypeAndAnswer(
       type,
@@ -394,7 +431,10 @@ export class QuestionBankService {
     );
 
     return this.prisma.$transaction(async (tx) => {
-      const newStatus = existing.status === QuestionStatus.REJECTED ? QuestionStatus.DRAFT : existing.status;
+      const newStatus =
+        existing.status === QuestionStatus.REJECTED
+          ? QuestionStatus.DRAFT
+          : existing.status;
 
       // 1. Update base question
       await tx.question.update({
@@ -404,19 +444,34 @@ export class QuestionBankService {
           chapterId,
           topicId: topicId || null,
           subTopicId: subTopicId || null,
-          difficultyId: dto.difficultyId !== undefined ? dto.difficultyId : existing.difficultyId,
+          difficultyId:
+            dto.difficultyId !== undefined
+              ? dto.difficultyId
+              : existing.difficultyId,
           difficultyLevel,
-          questionTypeId: dto.questionTypeId !== undefined ? dto.questionTypeId : existing.questionTypeId,
+          questionTypeId:
+            dto.questionTypeId !== undefined
+              ? dto.questionTypeId
+              : existing.questionTypeId,
           type,
           status: newStatus,
-          defaultLanguageId: dto.defaultLanguageId || existing.defaultLanguageId,
+          defaultLanguageId:
+            dto.defaultLanguageId || existing.defaultLanguageId,
           marks: dto.marks !== undefined ? dto.marks : existing.marks,
-          negativeMarks: dto.negativeMarks !== undefined ? dto.negativeMarks : existing.negativeMarks,
+          negativeMarks:
+            dto.negativeMarks !== undefined
+              ? dto.negativeMarks
+              : existing.negativeMarks,
           passage: dto.passage !== undefined ? dto.passage : existing.passage,
-          assertion: dto.assertion !== undefined ? dto.assertion : existing.assertion,
+          assertion:
+            dto.assertion !== undefined ? dto.assertion : existing.assertion,
           reason: dto.reason !== undefined ? dto.reason : existing.reason,
-          correctAnswer: dto.correctAnswer !== undefined ? dto.correctAnswer : existing.correctAnswer,
-          isActive: dto.isActive !== undefined ? dto.isActive : existing.isActive,
+          correctAnswer:
+            dto.correctAnswer !== undefined
+              ? dto.correctAnswer
+              : existing.correctAnswer,
+          isActive:
+            dto.isActive !== undefined ? dto.isActive : existing.isActive,
         },
       });
 
@@ -496,7 +551,10 @@ export class QuestionBankService {
           create: {
             questionId: id,
             answerType: type,
-            correctOptionIds: finalCorrectOptionIds.length > 0 ? (finalCorrectOptionIds as any) : null,
+            correctOptionIds:
+              finalCorrectOptionIds.length > 0
+                ? (finalCorrectOptionIds as any)
+                : null,
             numericalAnswer: dto.answer?.numericalAnswer ?? null,
             numericalTolerance: dto.answer?.numericalTolerance ?? 0,
             numericalRangeStart: dto.answer?.numericalRangeStart ?? null,
@@ -505,12 +563,30 @@ export class QuestionBankService {
           },
           update: {
             answerType: type,
-            correctOptionIds: finalCorrectOptionIds.length > 0 ? (finalCorrectOptionIds as any) : undefined,
-            numericalAnswer: dto.answer?.numericalAnswer !== undefined ? dto.answer.numericalAnswer : undefined,
-            numericalTolerance: dto.answer?.numericalTolerance !== undefined ? dto.answer.numericalTolerance : undefined,
-            numericalRangeStart: dto.answer?.numericalRangeStart !== undefined ? dto.answer.numericalRangeStart : undefined,
-            numericalRangeEnd: dto.answer?.numericalRangeEnd !== undefined ? dto.answer.numericalRangeEnd : undefined,
-            matchPairs: dto.answer?.matchPairs !== undefined ? dto.answer.matchPairs : undefined,
+            correctOptionIds:
+              finalCorrectOptionIds.length > 0
+                ? (finalCorrectOptionIds as any)
+                : undefined,
+            numericalAnswer:
+              dto.answer?.numericalAnswer !== undefined
+                ? dto.answer.numericalAnswer
+                : undefined,
+            numericalTolerance:
+              dto.answer?.numericalTolerance !== undefined
+                ? dto.answer.numericalTolerance
+                : undefined,
+            numericalRangeStart:
+              dto.answer?.numericalRangeStart !== undefined
+                ? dto.answer.numericalRangeStart
+                : undefined,
+            numericalRangeEnd:
+              dto.answer?.numericalRangeEnd !== undefined
+                ? dto.answer.numericalRangeEnd
+                : undefined,
+            matchPairs:
+              dto.answer?.matchPairs !== undefined
+                ? dto.answer.matchPairs
+                : undefined,
           },
         });
       }
@@ -526,7 +602,10 @@ export class QuestionBankService {
           },
           update: {
             explanation: dto.explanation.explanation,
-            mediaUrl: dto.explanation.mediaUrl !== undefined ? dto.explanation.mediaUrl : undefined,
+            mediaUrl:
+              dto.explanation.mediaUrl !== undefined
+                ? dto.explanation.mediaUrl
+                : undefined,
           },
         });
       }
@@ -539,7 +618,10 @@ export class QuestionBankService {
           fromStatus: existing.status,
           toStatus: newStatus,
           performedById: userId,
-          comment: existing.status === QuestionStatus.REJECTED ? 'Modified and returned to draft' : 'Question details updated',
+          comment:
+            existing.status === QuestionStatus.REJECTED
+              ? 'Modified and returned to draft'
+              : 'Question details updated',
         },
       });
 
@@ -559,12 +641,14 @@ export class QuestionBankService {
     const subjectId = dto.subjectId || parent.subjectId;
     const chapterId = dto.chapterId || parent.chapterId;
     const topicId = dto.topicId !== undefined ? dto.topicId : parent.topicId;
-    const subTopicId = dto.subTopicId !== undefined ? dto.subTopicId : parent.subTopicId;
+    const subTopicId =
+      dto.subTopicId !== undefined ? dto.subTopicId : parent.subTopicId;
 
     await this.validateHierarchy(subjectId, chapterId, topicId, subTopicId);
 
     const type = (dto.type || parent.type) as QuestionTypeEnum;
-    const difficultyLevel = (dto.difficultyLevel || parent.difficultyLevel) as QuestionDifficultyEnum;
+    const difficultyLevel = (dto.difficultyLevel ||
+      parent.difficultyLevel) as QuestionDifficultyEnum;
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Create new Question version
@@ -574,20 +658,33 @@ export class QuestionBankService {
           chapterId,
           topicId: topicId || null,
           subTopicId: subTopicId || null,
-          difficultyId: dto.difficultyId !== undefined ? dto.difficultyId : parent.difficultyId,
+          difficultyId:
+            dto.difficultyId !== undefined
+              ? dto.difficultyId
+              : parent.difficultyId,
           difficultyLevel,
-          questionTypeId: dto.questionTypeId !== undefined ? dto.questionTypeId : parent.questionTypeId,
+          questionTypeId:
+            dto.questionTypeId !== undefined
+              ? dto.questionTypeId
+              : parent.questionTypeId,
           type,
           status: QuestionStatus.DRAFT,
           version: nextVersion,
           parentQuestionId: parent.id,
           defaultLanguageId: dto.defaultLanguageId || parent.defaultLanguageId,
           marks: dto.marks !== undefined ? dto.marks : parent.marks,
-          negativeMarks: dto.negativeMarks !== undefined ? dto.negativeMarks : parent.negativeMarks,
+          negativeMarks:
+            dto.negativeMarks !== undefined
+              ? dto.negativeMarks
+              : parent.negativeMarks,
           passage: dto.passage !== undefined ? dto.passage : parent.passage,
-          assertion: dto.assertion !== undefined ? dto.assertion : parent.assertion,
+          assertion:
+            dto.assertion !== undefined ? dto.assertion : parent.assertion,
           reason: dto.reason !== undefined ? dto.reason : parent.reason,
-          correctAnswer: dto.correctAnswer !== undefined ? dto.correctAnswer : parent.correctAnswer,
+          correctAnswer:
+            dto.correctAnswer !== undefined
+              ? dto.correctAnswer
+              : parent.correctAnswer,
           createdById: userId,
         },
       });
@@ -652,7 +749,10 @@ export class QuestionBankService {
             questionId: newQuestion.id,
             answerType: type,
             correctOptionIds:
-              dto.answer?.correctOptionIds || (correctOptionIds.length > 0 ? (correctOptionIds as any) : answerPayload.correctOptionIds),
+              dto.answer?.correctOptionIds ||
+              (correctOptionIds.length > 0
+                ? (correctOptionIds as any)
+                : answerPayload.correctOptionIds),
             numericalAnswer: answerPayload.numericalAnswer ?? null,
             numericalTolerance: answerPayload.numericalTolerance ?? 0,
             numericalRangeStart: answerPayload.numericalRangeStart ?? null,
@@ -792,8 +892,13 @@ export class QuestionBankService {
     }
 
     // Role enforcement: Creator cannot self-approve unless they have SUPER_ADMIN role
-    if (question.createdById === approverId && !approverRoles.includes('SUPER_ADMIN')) {
-      throw new ForbiddenException('Admin creators cannot approve their own questions.');
+    if (
+      question.createdById === approverId &&
+      !approverRoles.includes('SUPER_ADMIN')
+    ) {
+      throw new ForbiddenException(
+        'Admin creators cannot approve their own questions.',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -814,7 +919,8 @@ export class QuestionBankService {
           fromStatus: question.status,
           toStatus: QuestionStatus.APPROVED,
           performedById: approverId,
-          comment: comment || 'Question approved and added to active Question Bank',
+          comment:
+            comment || 'Question approved and added to active Question Bank',
         },
       });
 
@@ -827,7 +933,9 @@ export class QuestionBankService {
    */
   async rejectQuestion(id: string, reviewerId: string, reason: string) {
     if (!reason || reason.trim().length === 0) {
-      throw new BadRequestException('A reason must be provided when rejecting a question.');
+      throw new BadRequestException(
+        'A reason must be provided when rejecting a question.',
+      );
     }
 
     const question = await this.findQuestionById(id);
@@ -914,11 +1022,19 @@ export class QuestionBankService {
 
     if (usageCount > 0) {
       // Must archive instead of hard delete to protect exam attempt history
-      return this.archiveQuestion(id, userId, 'Archived due to delete request while associated with exams');
+      return this.archiveQuestion(
+        id,
+        userId,
+        'Archived due to delete request while associated with exams',
+      );
     }
 
     if (question.status === QuestionStatus.APPROVED) {
-      return this.archiveQuestion(id, userId, 'Approved question archived upon delete');
+      return this.archiveQuestion(
+        id,
+        userId,
+        'Approved question archived upon delete',
+      );
     }
 
     // Hard delete unapproved draft/rejected question with no exam linkages
@@ -935,18 +1051,37 @@ export class QuestionBankService {
    */
   async findQuestions(filter: QuestionFilterDto) {
     const page = filter.page && filter.page > 0 ? filter.page : 1;
-    const limit = filter.limit && filter.limit > 0 ? Math.min(filter.limit, 100) : 20;
+    const limit =
+      filter.limit && filter.limit > 0 ? Math.min(filter.limit, 100) : 20;
     const skip = (page - 1) * limit;
 
     const where: any = {};
 
-    // 1. Hierarchy filters
-    if (filter.subjectId) where.subjectId = filter.subjectId;
+    // 1. Hierarchy & Subject Target filters
+    if (filter.subjectId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filter.subjectId);
+      if (isUuid) {
+        where.subjectId = filter.subjectId;
+      } else {
+        const targetSearch = filter.subjectId.trim();
+        where.OR = [
+          { subject: { name: { contains: targetSearch, mode: 'insensitive' } } },
+          { subject: { examTarget: { name: { contains: targetSearch, mode: 'insensitive' } } } },
+        ];
+      }
+    }
     if (filter.chapterId) where.chapterId = filter.chapterId;
     if (filter.topicId) where.topicId = filter.topicId;
     if (filter.subTopicId) where.subTopicId = filter.subTopicId;
     if (filter.examTargetId) {
-      where.subject = { examTargetId: filter.examTargetId };
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filter.examTargetId);
+      if (isUuid) {
+        where.subject = { examTargetId: filter.examTargetId };
+      } else {
+        where.subject = {
+          examTarget: { name: { contains: filter.examTargetId.trim(), mode: 'insensitive' } },
+        };
+      }
     }
 
     // 2. Metadata filters
@@ -990,8 +1125,11 @@ export class QuestionBankService {
       'status',
       'difficultyLevel',
     ];
-    const sortBy = allowedSortFields.includes(filter.sortBy || '') ? filter.sortBy! : 'createdAt';
-    const sortOrder = filter.sortOrder?.toLowerCase() === 'asc' ? 'asc' : 'desc';
+    const sortBy = allowedSortFields.includes(filter.sortBy || '')
+      ? filter.sortBy!
+      : 'createdAt';
+    const sortOrder =
+      filter.sortOrder?.toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     const [questions, total] = await Promise.all([
       this.prisma.question.findMany({
@@ -1013,7 +1151,9 @@ export class QuestionBankService {
           difficulty: { select: { id: true, name: true } },
           questionType: { select: { id: true, name: true, code: true } },
           defaultLanguage: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, email: true, phone: true, mobileNumber: true } },
+          createdBy: {
+            select: { id: true, email: true, phone: true, mobileNumber: true },
+          },
           submittedBy: { select: { id: true, email: true } },
           approvedBy: { select: { id: true, email: true } },
           translations: {
@@ -1099,7 +1239,8 @@ export class QuestionBankService {
       },
     });
 
-    if (!question) throw new NotFoundException(`Question with ID '${id}' not found.`);
+    if (!question)
+      throw new NotFoundException(`Question with ID '${id}' not found.`);
     return question;
   }
 
@@ -1124,8 +1265,8 @@ export class QuestionBankService {
     const question = await this.findQuestionById(id);
 
     // Find root parent
-    let rootId = question.parentQuestionId || question.id;
-    let root = await this.prisma.question.findUnique({
+    const rootId = question.parentQuestionId || question.id;
+    const root = await this.prisma.question.findUnique({
       where: { id: rootId },
       include: {
         childVersions: {
@@ -1186,9 +1327,18 @@ export class QuestionBankService {
 
     return {
       totalQuestions,
-      byStatus: byStatus.reduce((acc, curr) => ({ ...acc, [curr.status]: curr._count._all }), {}),
-      byDifficulty: byDifficulty.reduce((acc, curr) => ({ ...acc, [curr.difficultyLevel]: curr._count._all }), {}),
-      byType: byType.reduce((acc, curr) => ({ ...acc, [curr.type]: curr._count._all }), {}),
+      byStatus: byStatus.reduce(
+        (acc, curr) => ({ ...acc, [curr.status]: curr._count._all }),
+        {},
+      ),
+      byDifficulty: byDifficulty.reduce(
+        (acc, curr) => ({ ...acc, [curr.difficultyLevel]: curr._count._all }),
+        {},
+      ),
+      byType: byType.reduce(
+        (acc, curr) => ({ ...acc, [curr.type]: curr._count._all }),
+        {},
+      ),
       bySubject: bySubject.map((s) => ({
         subjectId: s.id,
         subjectName: s.name,

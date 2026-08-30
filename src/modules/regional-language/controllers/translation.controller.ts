@@ -69,7 +69,10 @@ export class TranslationController {
     @Param('questionId') questionId: string,
     @Body() dto: UpsertFullQuestionTranslationDto,
   ) {
-    return this.translationService.upsertFullQuestionTranslation(questionId, dto);
+    return this.translationService.upsertFullQuestionTranslation(
+      questionId,
+      dto,
+    );
   }
 
   /**
@@ -82,7 +85,10 @@ export class TranslationController {
     @Param('questionId') questionId: string,
     @Param('languageId') languageId: string,
   ) {
-    return this.translationService.deleteQuestionTranslation(questionId, languageId);
+    return this.translationService.deleteQuestionTranslation(
+      questionId,
+      languageId,
+    );
   }
 
   /**

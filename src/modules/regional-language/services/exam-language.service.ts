@@ -73,7 +73,9 @@ export class ExamLanguageService {
     }
 
     if (!dto.languages || dto.languages.length === 0) {
-      throw new BadRequestException('At least one language must be enabled for an exam.');
+      throw new BadRequestException(
+        'At least one language must be enabled for an exam.',
+      );
     }
 
     // Ensure at least one language is marked as default
@@ -89,13 +91,12 @@ export class ExamLanguageService {
       // 2. Insert new configuration records
       const created: any[] = [];
       for (let i = 0; i < dto.languages.length; i++) {
-
         const item = dto.languages[i];
         const record = await tx.examLanguage.create({
           data: {
             examId,
             languageId: item.languageId,
-            isDefault: item.isDefault ?? (i === 0),
+            isDefault: item.isDefault ?? i === 0,
             displayOrder: item.displayOrder ?? i,
           },
           include: {
@@ -119,7 +120,10 @@ export class ExamLanguageService {
   /**
    * Verify if a language is enabled and allowed for an exam
    */
-  async validateExamLanguageAllowed(examId: string, languageId: string): Promise<boolean> {
+  async validateExamLanguageAllowed(
+    examId: string,
+    languageId: string,
+  ): Promise<boolean> {
     const examLanguage = await this.prisma.examLanguage.findFirst({
       where: { examId, languageId },
       include: { language: true },

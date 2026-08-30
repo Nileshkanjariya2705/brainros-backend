@@ -61,7 +61,11 @@ export class RankGenerationService {
         where: { examId_snapshotVersion: { examId, snapshotVersion } },
       });
 
-      if (existingSnapshot && existingSnapshot.status === 'COMPLETED' && !forceRegenerate) {
+      if (
+        existingSnapshot &&
+        existingSnapshot.status === 'COMPLETED' &&
+        !forceRegenerate
+      ) {
         return {
           snapshotId: existingSnapshot.id,
           status: 'COMPLETED',
@@ -92,7 +96,10 @@ export class RankGenerationService {
       });
 
       // 3. Collect eligible candidate population
-      const candidates = await this.eligibilityService.getEligibleCandidates(examId, examVersionId);
+      const candidates = await this.eligibilityService.getEligibleCandidates(
+        examId,
+        examVersionId,
+      );
 
       if (candidates.length === 0) {
         await this.prisma.rankSnapshot.update({
@@ -117,13 +124,19 @@ export class RankGenerationService {
       const overallRankMap = new Map<string, number>();
 
       const sortedOverall = this.tieBreakService.sortCandidates(candidates);
-      const rankedOverall = this.tieBreakService.assignRanks(sortedOverall, 'COMPETITION');
+      const rankedOverall = this.tieBreakService.assignRanks(
+        sortedOverall,
+        'COMPETITION',
+      );
       const totalOverallCandidates = candidates.length;
 
       for (const item of rankedOverall) {
         const c = item.candidate;
         const rank = item.rank;
-        const percentile = this.percentileService.calculatePercentile(rank, totalOverallCandidates);
+        const percentile = this.percentileService.calculatePercentile(
+          rank,
+          totalOverallCandidates,
+        );
         overallRankMap.set(c.studentId, rank);
 
         const prediction = this.predictionService.predictRankRange({
@@ -154,10 +167,30 @@ export class RankGenerationService {
       }
 
       // 5. Partitioned Scoped Rankings (STATE, DISTRICT, SCHOOL, CATEGORY)
-      this.computePartitionedRanks(candidates, 'STATE', (c) => c.state, allRankRows);
-      this.computePartitionedRanks(candidates, 'DISTRICT', (c) => c.district, allRankRows);
-      this.computePartitionedRanks(candidates, 'SCHOOL', (c) => c.schoolCollege, allRankRows);
-      this.computePartitionedRanks(candidates, 'CATEGORY', (c) => c.category, allRankRows);
+      this.computePartitionedRanks(
+        candidates,
+        'STATE',
+        (c) => c.state,
+        allRankRows,
+      );
+      this.computePartitionedRanks(
+        candidates,
+        'DISTRICT',
+        (c) => c.district,
+        allRankRows,
+      );
+      this.computePartitionedRanks(
+        candidates,
+        'SCHOOL',
+        (c) => c.schoolCollege,
+        allRankRows,
+      );
+      this.computePartitionedRanks(
+        candidates,
+        'CATEGORY',
+        (c) => c.category,
+        allRankRows,
+      );
 
       // 6. Integrity Checks
       this.validateIntegrity(candidates, allRankRows);
@@ -169,7 +202,10 @@ export class RankGenerationService {
       const sumScores = scores.reduce((a, b) => a + b, 0);
       const averageScore = Math.round((sumScores / scores.length) * 100) / 100;
       const mid = Math.floor(scores.length / 2);
-      const medianScore = scores.length % 2 !== 0 ? scores[mid] : Math.round(((scores[mid - 1] + scores[mid]) / 2) * 100) / 100;
+      const medianScore =
+        scores.length % 2 !== 0
+          ? scores[mid]
+          : Math.round(((scores[mid - 1] + scores[mid]) / 2) * 100) / 100;
 
       // 8. Persist in Database (Delete old snapshot rows + Chunked Insert)
       await this.prisma.$transaction(async (tx) => {
@@ -238,7 +274,9 @@ export class RankGenerationService {
         medianScore,
       };
     } catch (err) {
-      this.logger.error(`Failed to generate ranks for exam '${examId}': ${err.message}`);
+      this.logger.error(
+        `Failed to generate ranks for exam '${examId}': ${err.message}`,
+      );
       await this.prisma.rankSnapshot.updateMany({
         where: { examId, snapshotVersion },
         data: { status: 'FAILED' },
@@ -275,7 +313,10 @@ export class RankGenerationService {
       for (const item of ranked) {
         const c = item.candidate;
         const rank = item.rank;
-        const percentile = this.percentileService.calculatePercentile(rank, totalGroup);
+        const percentile = this.percentileService.calculatePercentile(
+          rank,
+          totalGroup,
+        );
 
         outRows.push({
           attemptId: c.attemptId,
@@ -297,23 +338,32 @@ export class RankGenerationService {
   }
 
   // ── Helper: Run 8 Integrity Checks ───────────────────────────
-  private validateIntegrity(candidates: CandidateRankInput[], rankRows: CalculatedRankItem[]) {
+  private validateIntegrity(
+    candidates: CandidateRankInput[],
+    rankRows: CalculatedRankItem[],
+  ) {
     if (candidates.length === 0) return;
 
     // Check 1: Top candidate has rank 1
     const overallRows = rankRows.filter((r) => r.rankType === 'OVERALL');
     const minRank = Math.min(...overallRows.map((r) => r.rank));
     if (minRank !== 1) {
-      throw new Error(`Integrity Check Failed: Minimum overall rank is ${minRank}, expected 1`);
+      throw new Error(
+        `Integrity Check Failed: Minimum overall rank is ${minRank}, expected 1`,
+      );
     }
 
     // Check 2: All ranks >= 1
     for (const r of rankRows) {
       if (r.rank < 1) {
-        throw new Error(`Integrity Check Failed: Invalid rank ${r.rank} for student ${r.studentId}`);
+        throw new Error(
+          `Integrity Check Failed: Invalid rank ${r.rank} for student ${r.studentId}`,
+        );
       }
       if (r.percentile < 0 || r.percentile > 100) {
-        throw new Error(`Integrity Check Failed: Percentile ${r.percentile} out of bounds`);
+        throw new Error(
+          `Integrity Check Failed: Percentile ${r.percentile} out of bounds`,
+        );
       }
     }
 

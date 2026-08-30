@@ -37,8 +37,12 @@ export class AuditLogService {
           action: params.action,
           entityType: params.entityType,
           entityId: params.entityId,
-          beforeState: params.beforeState ? (params.beforeState as any) : undefined,
-          afterState: params.afterState ? (params.afterState as any) : undefined,
+          beforeState: params.beforeState
+            ? (params.beforeState as any)
+            : undefined,
+          afterState: params.afterState
+            ? (params.afterState as any)
+            : undefined,
           reason: params.reason || null,
           metadata: params.metadata ? (params.metadata as any) : undefined,
           ipAddress: params.ipAddress || null,

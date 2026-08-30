@@ -43,7 +43,7 @@ export class ReportService {
       );
     }
 
-    const format = (dto.format?.toUpperCase() === 'PDF' ? 'PDF' : 'XLSX') as 'XLSX' | 'PDF';
+    const format = dto.format?.toUpperCase() === 'PDF' ? 'PDF' : 'XLSX';
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REPORT_RETENTION_DAYS);
@@ -62,8 +62,16 @@ export class ReportService {
     });
 
     // 2. Trigger asynchronous generation in background
-    this.processReportJobAsync(reportJob.id, institutionId, dto.reportType, format, dto.filters || {}).catch(
-      (err) => this.logger.error(`Error in async report background execution: ${err.message}`),
+    this.processReportJobAsync(
+      reportJob.id,
+      institutionId,
+      dto.reportType,
+      format,
+      dto.filters || {},
+    ).catch((err) =>
+      this.logger.error(
+        `Error in async report background execution: ${err.message}`,
+      ),
     );
 
     return reportJob;
@@ -86,12 +94,13 @@ export class ReportService {
       });
 
       // Generate document buffer
-      const { buffer, fileName, contentType } = await this.generator.generateReport(
-        institutionId,
-        reportType,
-        format,
-        filters,
-      );
+      const { buffer, fileName, contentType } =
+        await this.generator.generateReport(
+          institutionId,
+          reportType,
+          format,
+          filters,
+        );
 
       await this.prisma.reportJob.update({
         where: { id: reportJobId },

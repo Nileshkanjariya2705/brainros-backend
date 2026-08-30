@@ -1,10 +1,18 @@
-import { IsNotEmpty, IsString, Matches, IsOptional, IsEmail, IsUUID } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  Matches,
+  IsOptional,
+  IsEmail,
+  IsUUID,
+} from 'class-validator';
 
 export class RegisterStudentDto {
   @IsNotEmpty()
   @IsString()
   @Matches(/^\+?[1-9]\d{1,14}$/, {
-    message: 'Phone number must be a valid E.164 phone number format (e.g. +919876543210 or 9876543210)',
+    message:
+      'Phone number must be a valid E.164 phone number format (e.g. +919876543210 or 9876543210)',
   })
   phone: string;
 

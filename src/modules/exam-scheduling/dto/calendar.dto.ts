@@ -11,7 +11,11 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ExamCycleStatus, CalendarEventStatus, FeatureCode } from '@prisma/client';
+import {
+  ExamCycleStatus,
+  CalendarEventStatus,
+  FeatureCode,
+} from '@prisma/client';
 
 export class CreateExamCycleDto {
   @IsString()

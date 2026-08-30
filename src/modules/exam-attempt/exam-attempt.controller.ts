@@ -70,7 +70,11 @@ export class ExamAttemptController {
 
   @Post('start')
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
-  async startAttempt(@Body() dto: StartAttemptDto, @CurrentUser() user: any, @Req() req: any) {
+  async startAttempt(
+    @Body() dto: StartAttemptDto,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
     const studentId = await this.resolveStudentId(user);
     return this.attemptService.startAttempt(dto, studentId, req.ip);
   }
@@ -110,7 +114,10 @@ export class ExamAttemptController {
 
   @Post(':id/submit')
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
-  async submitAttempt(@Param('id') attemptId: string, @CurrentUser() user: any) {
+  async submitAttempt(
+    @Param('id') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
     const studentId = await this.resolveStudentId(user);
     return this.attemptService.submitAttempt(attemptId, studentId);
   }
@@ -127,7 +134,11 @@ export class ExamAttemptController {
     @CurrentUser() user: any,
   ) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.switchAttemptLanguage(attemptId, languageId, studentId);
+    return this.attemptService.switchAttemptLanguage(
+      attemptId,
+      languageId,
+      studentId,
+    );
   }
 
   @Patch(':id/language')
@@ -138,19 +149,29 @@ export class ExamAttemptController {
     @CurrentUser() user: any,
   ) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.switchAttemptLanguage(attemptId, languageId, studentId);
+    return this.attemptService.switchAttemptLanguage(
+      attemptId,
+      languageId,
+      studentId,
+    );
   }
 
   @Get(':id/status')
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
-  async getAttemptStatus(@Param('id') attemptId: string, @CurrentUser() user: any) {
+  async getAttemptStatus(
+    @Param('id') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
     const studentId = await this.resolveStudentId(user);
     return this.attemptService.getAttemptStatus(attemptId, studentId);
   }
 
   @Get(':id/questions')
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
-  async getAttemptQuestions(@Param('id') attemptId: string, @CurrentUser() user: any) {
+  async getAttemptQuestions(
+    @Param('id') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
     const studentId = await this.resolveStudentId(user);
     return this.attemptService.getAttemptQuestions(attemptId, studentId);
   }

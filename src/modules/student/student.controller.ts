@@ -11,8 +11,14 @@ import {
 } from '@nestjs/common';
 import { StudentService } from './student.service';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
-import { RequestChangeMobileDto, VerifyChangeMobileDto } from './dto/change-mobile.dto';
-import { RequestChangeEmailDto, VerifyChangeEmailDto } from './dto/change-email.dto';
+import {
+  RequestChangeMobileDto,
+  VerifyChangeMobileDto,
+} from './dto/change-mobile.dto';
+import {
+  RequestChangeEmailDto,
+  VerifyChangeEmailDto,
+} from './dto/change-email.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 
@@ -80,7 +86,10 @@ export class StudentController {
   @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('me/mobile/request-otp')
   @HttpCode(HttpStatus.OK)
-  async requestChangeMobile(@Request() req: any, @Body() dto: RequestChangeMobileDto) {
+  async requestChangeMobile(
+    @Request() req: any,
+    @Body() dto: RequestChangeMobileDto,
+  ) {
     return this.studentService.requestChangeMobile(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
@@ -90,7 +99,10 @@ export class StudentController {
   @Throttle({ default: { limit: 5, ttl: 60 } })
   @Patch('me/mobile')
   @HttpCode(HttpStatus.OK)
-  async patchMobileDirect(@Request() req: any, @Body() dto: RequestChangeMobileDto) {
+  async patchMobileDirect(
+    @Request() req: any,
+    @Body() dto: RequestChangeMobileDto,
+  ) {
     return this.studentService.requestChangeMobile(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
@@ -100,7 +112,10 @@ export class StudentController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('me/mobile/verify-otp')
   @HttpCode(HttpStatus.OK)
-  async verifyChangeMobile(@Request() req: any, @Body() dto: VerifyChangeMobileDto) {
+  async verifyChangeMobile(
+    @Request() req: any,
+    @Body() dto: VerifyChangeMobileDto,
+  ) {
     return this.studentService.verifyChangeMobile(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
@@ -110,7 +125,10 @@ export class StudentController {
   @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('me/email/request-otp')
   @HttpCode(HttpStatus.OK)
-  async requestChangeEmail(@Request() req: any, @Body() dto: RequestChangeEmailDto) {
+  async requestChangeEmail(
+    @Request() req: any,
+    @Body() dto: RequestChangeEmailDto,
+  ) {
     return this.studentService.requestChangeEmail(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
@@ -120,7 +138,10 @@ export class StudentController {
   @Throttle({ default: { limit: 5, ttl: 60 } })
   @Patch('me/email')
   @HttpCode(HttpStatus.OK)
-  async patchEmailDirect(@Request() req: any, @Body() dto: RequestChangeEmailDto) {
+  async patchEmailDirect(
+    @Request() req: any,
+    @Body() dto: RequestChangeEmailDto,
+  ) {
     return this.studentService.requestChangeEmail(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
@@ -130,7 +151,10 @@ export class StudentController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('me/email/verify-otp')
   @HttpCode(HttpStatus.OK)
-  async verifyChangeEmail(@Request() req: any, @Body() dto: VerifyChangeEmailDto) {
+  async verifyChangeEmail(
+    @Request() req: any,
+    @Body() dto: VerifyChangeEmailDto,
+  ) {
     return this.studentService.verifyChangeEmail(req.user.userId, dto, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],

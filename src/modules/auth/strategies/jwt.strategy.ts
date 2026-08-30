@@ -1,14 +1,21 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 
 import { ACCESS_COOKIE_NAME } from '../utils/cookie.util';
 
-const cookieExtractor = (req: any): string | null => {
+const cookieExtractor = (req: Request): string | null => {
   if (req && req.cookies) {
-    return req.cookies[ACCESS_COOKIE_NAME] || req.cookies['accessToken'] || req.cookies['access_token'] || null;
+    const cookies = req.cookies as Record<string, string | undefined>;
+    return (
+      cookies[ACCESS_COOKIE_NAME] ||
+      cookies['access_token'] ||
+      cookies['accessToken'] ||
+      null
+    );
   }
   return null;
 };
@@ -21,11 +28,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
         cookieExtractor,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
       ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') || 'super-secret-jwt-key-replace-in-production',
+      secretOrKey:
+        configService.get<string>('JWT_SECRET') ||
+        configService.get<string>('JWT_ACCESS_SECRET') ||
+        'super-secret-jwt-key-replace-in-production',
     });
   }
 
@@ -51,7 +61,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     // Verify user status
     if (user.status !== 'ACTIVE' && user.status !== 'PENDING') {
-      throw new UnauthorizedException(`User account is ${user.status.toLowerCase()}.`);
+      throw new UnauthorizedException(
+        `User account is ${user.status.toLowerCase()}.`,
+      );
     }
 
     if (!user.isActive) {

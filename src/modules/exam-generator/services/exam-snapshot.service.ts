@@ -89,8 +89,9 @@ export class ExamSnapshotService {
 
         // Extract primary translation or default
         const primaryTr =
-          q.translations?.find((t: any) => t.languageId === q.defaultLanguageId) ||
-          q.translations?.[0];
+          q.translations?.find(
+            (t: any) => t.languageId === q.defaultLanguageId,
+          ) || q.translations?.[0];
 
         // Create immutable ExamVersionQuestion
         const evq = await tx.examVersionQuestion.create({
@@ -108,7 +109,8 @@ export class ExamSnapshotService {
             assertion: primaryTr?.assertionText || q.assertion || null,
             reason: primaryTr?.reasonText || q.reason || null,
             questionText: primaryTr?.questionText || 'Question statement',
-            explanation: primaryTr?.explanation || q.explanation?.explanation || null,
+            explanation:
+              primaryTr?.explanation || q.explanation?.explanation || null,
             correctAnswer: q.answer
               ? {
                   answerType: q.answer.answerType,
@@ -148,8 +150,9 @@ export class ExamSnapshotService {
           if (opt.translations && opt.translations.length > 0) {
             for (const ot of opt.translations) {
               const langCode =
-                languages.find((l) => (l.language?.id || l.id) === ot.languageId)?.language?.code ||
-                'en';
+                languages.find(
+                  (l) => (l.language?.id || l.id) === ot.languageId,
+                )?.language?.code || 'en';
 
               await tx.examVersionOptionTranslation.create({
                 data: {
@@ -167,8 +170,8 @@ export class ExamSnapshotService {
         if (q.translations && q.translations.length > 0) {
           for (const qt of q.translations) {
             const langCode =
-              languages.find((l) => (l.language?.id || l.id) === qt.languageId)?.language?.code ||
-              'en';
+              languages.find((l) => (l.language?.id || l.id) === qt.languageId)
+                ?.language?.code || 'en';
 
             await tx.examVersionTranslation.create({
               data: {

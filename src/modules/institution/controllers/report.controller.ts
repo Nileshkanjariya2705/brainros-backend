@@ -32,7 +32,9 @@ export class ReportController {
     @CurrentUser() user: any,
     @Body() dto: CreateReportJobDto,
   ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.reportService.createReportJob(institution.id, user.userId, dto);
   }
 
@@ -42,7 +44,9 @@ export class ReportController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.reportService.listReports(institution.id, page, limit);
   }
 
@@ -68,7 +72,9 @@ export class ReportController {
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader(
       'Content-Type',
-      fileName.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName.endsWith('.pdf')
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
     res.send(buffer);
   }

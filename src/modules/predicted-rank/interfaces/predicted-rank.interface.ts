@@ -1,16 +1,8 @@
 export type PredictionStatusEnum =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'COMPLETED'
-  | 'UNAVAILABLE'
-  | 'FAILED';
+  'PENDING' | 'PROCESSING' | 'COMPLETED' | 'UNAVAILABLE' | 'FAILED';
 
 export type DataQualityStatusEnum =
-  | 'PENDING_VALIDATION'
-  | 'VALID'
-  | 'INVALID'
-  | 'PARTIALLY_VALID'
-  | 'ARCHIVED';
+  'PENDING_VALIDATION' | 'VALID' | 'INVALID' | 'PARTIALLY_VALID' | 'ARCHIVED';
 
 export interface PredictionInput {
   attemptId: string;
@@ -43,7 +35,10 @@ export interface PredictionOutput {
 }
 
 export interface RankPredictionModel {
-  predict(input: PredictionInput, historicalDatasets: SelectedHistoricalDataset[]): PredictionOutput;
+  predict(
+    input: PredictionInput,
+    historicalDatasets: SelectedHistoricalDataset[],
+  ): PredictionOutput;
 }
 
 export interface SelectedHistoricalDataset {

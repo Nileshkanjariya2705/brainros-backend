@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { IApprovalHandler } from '../interfaces/approval-handler.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
 
@@ -19,8 +23,14 @@ export class ExamApprovalHandler implements IApprovalHandler {
       throw new NotFoundException(`Exam '${entityId}' not found.`);
     }
 
-    if (['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED'].includes(exam.status.name)) {
-      throw new BadRequestException(`Exam '${entityId}' is already in status '${exam.status.name}'.`);
+    if (
+      ['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED'].includes(
+        exam.status.name,
+      )
+    ) {
+      throw new BadRequestException(
+        `Exam '${entityId}' is already in status '${exam.status.name}'.`,
+      );
     }
 
     return exam;
@@ -31,7 +41,10 @@ export class ExamApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     comment?: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const exam = await db.exam.findUnique({
       where: { id: request.resourceId },
@@ -44,9 +57,13 @@ export class ExamApprovalHandler implements IApprovalHandler {
 
     const beforeState = { status: exam.status.name, title: exam.title };
 
-    let approvedStatus = await db.examStatus.findUnique({ where: { name: 'APPROVED' } });
+    let approvedStatus = await db.examStatus.findUnique({
+      where: { name: 'APPROVED' },
+    });
     if (!approvedStatus) {
-      approvedStatus = await db.examStatus.create({ data: { name: 'APPROVED' } });
+      approvedStatus = await db.examStatus.create({
+        data: { name: 'APPROVED' },
+      });
     }
 
     const updated = await db.exam.update({
@@ -70,7 +87,11 @@ export class ExamApprovalHandler implements IApprovalHandler {
       },
     });
 
-    const afterState = { status: updated.status.name, approvedById: reviewerId, approvedAt: updated.approvedAt };
+    const afterState = {
+      status: updated.status.name,
+      approvedById: reviewerId,
+      approvedAt: updated.approvedAt,
+    };
     return { beforeState, afterState };
   }
 
@@ -79,7 +100,10 @@ export class ExamApprovalHandler implements IApprovalHandler {
     reviewerId: string,
     reason: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const exam = await db.exam.findUnique({
       where: { id: request.resourceId },
@@ -92,9 +116,13 @@ export class ExamApprovalHandler implements IApprovalHandler {
 
     const beforeState = { status: exam.status.name, title: exam.title };
 
-    let cancelledStatus = await db.examStatus.findUnique({ where: { name: 'CANCELLED' } });
+    let cancelledStatus = await db.examStatus.findUnique({
+      where: { name: 'CANCELLED' },
+    });
     if (!cancelledStatus) {
-      cancelledStatus = await db.examStatus.create({ data: { name: 'CANCELLED' } });
+      cancelledStatus = await db.examStatus.create({
+        data: { name: 'CANCELLED' },
+      });
     }
 
     const updated = await db.exam.update({
@@ -122,15 +150,21 @@ export class ExamApprovalHandler implements IApprovalHandler {
     request: any,
     actorId: string,
     tx?: any,
-  ): Promise<{ beforeState: Record<string, any>; afterState: Record<string, any> }> {
+  ): Promise<{
+    beforeState: Record<string, any>;
+    afterState: Record<string, any>;
+  }> {
     const db = tx || this.prisma;
     const exam = await db.exam.findUnique({
       where: { id: request.resourceId },
       include: { status: true },
     });
-    if (!exam) throw new NotFoundException(`Exam '${request.resourceId}' not found.`);
+    if (!exam)
+      throw new NotFoundException(`Exam '${request.resourceId}' not found.`);
 
-    let draftStatus = await db.examStatus.findUnique({ where: { name: 'DRAFT' } });
+    let draftStatus = await db.examStatus.findUnique({
+      where: { name: 'DRAFT' },
+    });
     if (!draftStatus) {
       draftStatus = await db.examStatus.create({ data: { name: 'DRAFT' } });
     }
@@ -141,6 +175,9 @@ export class ExamApprovalHandler implements IApprovalHandler {
       include: { status: true },
     });
 
-    return { beforeState: { status: exam.status.name }, afterState: { status: updated.status.name } };
+    return {
+      beforeState: { status: exam.status.name },
+      afterState: { status: updated.status.name },
+    };
   }
 }

@@ -104,7 +104,8 @@ export class HistoricalDatasetService {
           historicalExamId: id,
           minScore: r.minScore,
           maxScore: r.maxScore,
-          representativeScore: r.representativeScore ?? (r.minScore + r.maxScore) / 2,
+          representativeScore:
+            r.representativeScore ?? (r.minScore + r.maxScore) / 2,
           minRank: r.minRank,
           maxRank: r.maxRank,
           candidateCount: r.candidateCount,
@@ -177,11 +178,19 @@ export class HistoricalDatasetService {
       const r = ranges[i];
       let rowValid = true;
 
-      if (r.minScore < 0 || r.maxScore > exam.totalMarks || r.minScore > r.maxScore) {
+      if (
+        r.minScore < 0 ||
+        r.maxScore > exam.totalMarks ||
+        r.minScore > r.maxScore
+      ) {
         issues.push(`Range ${r.minScore}-${r.maxScore}: Score bounds invalid`);
         rowValid = false;
       }
-      if (r.minRank < 1 || r.maxRank > exam.totalCandidates || r.minRank > r.maxRank) {
+      if (
+        r.minRank < 1 ||
+        r.maxRank > exam.totalCandidates ||
+        r.minRank > r.maxRank
+      ) {
         issues.push(`Range ${r.minScore}-${r.maxScore}: Rank bounds invalid`);
         rowValid = false;
       }
@@ -206,18 +215,31 @@ export class HistoricalDatasetService {
     const maxObserved = ranges[ranges.length - 1].maxScore;
     const coveredSpan = maxObserved - minObserved;
     const scoreCoveragePercentage =
-      exam.totalMarks > 0 ? Math.min(100, Math.round((coveredSpan / exam.totalMarks) * 10000) / 100) : 0;
+      exam.totalMarks > 0
+        ? Math.min(
+            100,
+            Math.round((coveredSpan / exam.totalMarks) * 10000) / 100,
+          )
+        : 0;
 
     // 4. Compute Quality Score (0 - 100)
     let qualityScore = 100;
     if (!isMonotonic) qualityScore -= 40;
-    if (invalidRecords > 0) qualityScore -= (invalidRecords / ranges.length) * 30;
+    if (invalidRecords > 0)
+      qualityScore -= (invalidRecords / ranges.length) * 30;
     if (scoreCoveragePercentage < 60) qualityScore -= 20;
 
-    qualityScore = Math.max(0, Math.min(100, Math.round(qualityScore * 10) / 10));
+    qualityScore = Math.max(
+      0,
+      Math.min(100, Math.round(qualityScore * 10) / 10),
+    );
 
     const status: DataQualityStatusEnum =
-      qualityScore >= 80 && isMonotonic ? 'VALID' : qualityScore >= 50 ? 'PARTIALLY_VALID' : 'INVALID';
+      qualityScore >= 80 && isMonotonic
+        ? 'VALID'
+        : qualityScore >= 50
+          ? 'PARTIALLY_VALID'
+          : 'INVALID';
 
     await this.prisma.historicalExam.update({
       where: { id },

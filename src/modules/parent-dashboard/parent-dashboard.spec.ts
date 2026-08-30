@@ -48,8 +48,12 @@ describe('Parent Dashboard & Access Security', () => {
       ],
     }).compile();
 
-    accessService = module.get<ParentStudentAccessService>(ParentStudentAccessService);
-    dashboardService = module.get<ParentDashboardService>(ParentDashboardService);
+    accessService = module.get<ParentStudentAccessService>(
+      ParentStudentAccessService,
+    );
+    dashboardService = module.get<ParentDashboardService>(
+      ParentDashboardService,
+    );
     jest.clearAllMocks();
   });
 
@@ -66,7 +70,10 @@ describe('Parent Dashboard & Access Security', () => {
         status: 'ACTIVE',
       });
 
-      const student = await accessService.assertCanAccessStudent('parent-1', 'student-1');
+      const student = await accessService.assertCanAccessStudent(
+        'parent-1',
+        'student-1',
+      );
       expect(student).toBeDefined();
       expect(student.id).toBe('student-1');
     });
@@ -79,9 +86,9 @@ describe('Parent Dashboard & Access Security', () => {
       });
       prismaMock.parentStudentLink.findUnique.mockResolvedValue(null);
 
-      await expect(accessService.assertCanAccessStudent('parent-1', 'student-2')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.assertCanAccessStudent('parent-1', 'student-2'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('denies access when relationship status is REVOKED', async () => {
@@ -96,9 +103,9 @@ describe('Parent Dashboard & Access Security', () => {
         status: 'REVOKED',
       });
 
-      await expect(accessService.assertCanAccessStudent('parent-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.assertCanAccessStudent('parent-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('denies access when relationship status is PENDING', async () => {
@@ -113,9 +120,9 @@ describe('Parent Dashboard & Access Security', () => {
         status: 'PENDING',
       });
 
-      await expect(accessService.assertCanAccessStudent('parent-1', 'student-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        accessService.assertCanAccessStudent('parent-1', 'student-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -141,43 +148,106 @@ describe('Parent Dashboard & Access Security', () => {
           id: 'att-1',
           createdAt: new Date('2026-08-01T10:00:00Z'),
           serverEndTime: new Date('2026-08-01T13:00:00Z'),
-          exam: { title: 'Mock 1', totalMarks: 720, examTarget: { name: 'NEET' } },
+          exam: {
+            title: 'Mock 1',
+            totalMarks: 720,
+            examTarget: { name: 'NEET' },
+          },
           result: {
             totalScore: 480,
             percentage: 66.67,
             accuracy: 72.5,
             subjectResults: [
-              { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 100, maxScore: 180, accuracy: 60.0 },
-              { subjectId: 'sub-2', subject: { name: 'Biology' }, score: 160, maxScore: 180, accuracy: 90.0 },
+              {
+                subjectId: 'sub-1',
+                subject: { name: 'Physics' },
+                score: 100,
+                maxScore: 180,
+                accuracy: 60.0,
+              },
+              {
+                subjectId: 'sub-2',
+                subject: { name: 'Biology' },
+                score: 160,
+                maxScore: 180,
+                accuracy: 90.0,
+              },
             ],
           },
-          candidateRanks: [{ rank: 1240, percentile: 89.67, totalCandidates: 12000 }],
-          timeAnalyses: [{ averageTimePerQuestionSeconds: 58.4, timeUtilizationPercentage: 91.3 }],
-          predictionResults: [{ predictedRankMin: 120, predictedRankMax: 170, confidence: 'MEDIUM', modelVersion: 'v1.0.0' }],
+          candidateRanks: [
+            { rank: 1240, percentile: 89.67, totalCandidates: 12000 },
+          ],
+          timeAnalyses: [
+            {
+              averageTimePerQuestionSeconds: 58.4,
+              timeUtilizationPercentage: 91.3,
+            },
+          ],
+          predictionResults: [
+            {
+              predictedRankMin: 120,
+              predictedRankMax: 170,
+              confidence: 'MEDIUM',
+              modelVersion: 'v1.0.0',
+            },
+          ],
         },
         {
           id: 'att-2',
           createdAt: new Date('2026-08-15T10:00:00Z'),
           serverEndTime: new Date('2026-08-15T13:00:00Z'),
-          exam: { title: 'Mock 2', totalMarks: 720, examTarget: { name: 'NEET' } },
+          exam: {
+            title: 'Mock 2',
+            totalMarks: 720,
+            examTarget: { name: 'NEET' },
+          },
           result: {
             totalScore: 586,
             percentage: 81.38,
             accuracy: 84.1,
             subjectResults: [
-              { subjectId: 'sub-1', subject: { name: 'Physics' }, score: 120, maxScore: 180, accuracy: 67.8 },
-              { subjectId: 'sub-2', subject: { name: 'Biology' }, score: 170, maxScore: 180, accuracy: 94.4 },
+              {
+                subjectId: 'sub-1',
+                subject: { name: 'Physics' },
+                score: 120,
+                maxScore: 180,
+                accuracy: 67.8,
+              },
+              {
+                subjectId: 'sub-2',
+                subject: { name: 'Biology' },
+                score: 170,
+                maxScore: 180,
+                accuracy: 94.4,
+              },
             ],
           },
-          candidateRanks: [{ rank: 145, percentile: 97.8, totalCandidates: 12500 }],
-          timeAnalyses: [{ averageTimePerQuestionSeconds: 54.0, timeUtilizationPercentage: 88.0 }],
-          predictionResults: [{ predictedRankMin: 120, predictedRankMax: 170, confidence: 'MEDIUM', modelVersion: 'v1.0.0' }],
+          candidateRanks: [
+            { rank: 145, percentile: 97.8, totalCandidates: 12500 },
+          ],
+          timeAnalyses: [
+            {
+              averageTimePerQuestionSeconds: 54.0,
+              timeUtilizationPercentage: 88.0,
+            },
+          ],
+          predictionResults: [
+            {
+              predictedRankMin: 120,
+              predictedRankMax: 170,
+              confidence: 'MEDIUM',
+              modelVersion: 'v1.0.0',
+            },
+          ],
         },
       ];
 
       prismaMock.attempt.findMany.mockResolvedValue(mockAttempts);
 
-      const dashboard = await dashboardService.getStudentDashboard('parent-1', 'student-1');
+      const dashboard = await dashboardService.getStudentDashboard(
+        'parent-1',
+        'student-1',
+      );
 
       expect(dashboard.student.name).toBe('Rohan Sharma');
       expect(dashboard.summary.testsAttempted).toBe(2);

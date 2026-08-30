@@ -20,7 +20,9 @@ export class StrategyRuleAdminService {
       where: { code: dto.code },
     });
     if (existing) {
-      throw new ConflictException(`Strategy rule with code '${dto.code}' already exists`);
+      throw new ConflictException(
+        `Strategy rule with code '${dto.code}' already exists`,
+      );
     }
 
     return this.prisma.strategyRule.create({

@@ -8,7 +8,11 @@ import { SessionService } from './services/session.service';
 import { OAuthService } from './services/oauth.service';
 import { SecurityEventService } from './services/security-event.service';
 import { RedisService } from '../redis/redis.service';
-import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 describe('AuthService (Passwordless & OTP Registration)', () => {
   let authService: AuthService;
@@ -27,7 +31,11 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
     mockRedisStorage.clear();
 
     redisServiceMock = {
-      get: jest.fn().mockImplementation(async (key: string) => mockRedisStorage.get(key) || null),
+      get: jest
+        .fn()
+        .mockImplementation(
+          async (key: string) => mockRedisStorage.get(key) || null,
+        ),
       set: jest.fn().mockImplementation(async (key: string, val: string) => {
         mockRedisStorage.set(key, val);
       }),
@@ -72,7 +80,9 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
     };
 
     oauthServiceMock = {
-      verifyGoogleIdToken: jest.fn().mockResolvedValue({ email: 'google@test.com' }),
+      verifyGoogleIdToken: jest
+        .fn()
+        .mockResolvedValue({ email: 'google@test.com' }),
     };
 
     securityEventServiceMock = {
@@ -93,26 +103,42 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
         count: jest.fn().mockResolvedValue(42),
       },
       role: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'role-student-id', name: 'STUDENT' }),
-        create: jest.fn().mockResolvedValue({ id: 'role-student-id', name: 'STUDENT' }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'role-student-id', name: 'STUDENT' }),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'role-student-id', name: 'STUDENT' }),
       },
       userRole: {
         create: jest.fn().mockResolvedValue({}),
       },
       studentClass: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'class-1', name: 'Class 12' }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'class-1', name: 'Class 12' }),
       },
       preferredLanguage: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'lang-1', name: 'English', isActive: true }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'lang-1', name: 'English', isActive: true }),
       },
       examTarget: {
         findUnique: jest.fn().mockResolvedValue({ id: 'exam-1', name: 'NEET' }),
       },
       state: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'state-1', name: 'Karnataka', isActive: true }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'state-1',
+          name: 'Karnataka',
+          isActive: true,
+        }),
       },
       district: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'dist-1', name: 'Bengaluru', stateId: 'state-1' }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'dist-1',
+          name: 'Bengaluru',
+          stateId: 'state-1',
+        }),
       },
       $transaction: jest.fn().mockImplementation(async (callback) => {
         return callback(prismaMock);
@@ -153,13 +179,17 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       prismaMock.user.findFirst.mockResolvedValue(null);
       prismaMock.user.findUnique.mockResolvedValue(null);
 
-      const res = await authService.registerStudent(validDto as any);
+      const res = await authService.registerStudent(validDto);
 
       expect(res.data.requiresOtp).toBe(true);
       expect(res.data.purpose).toBe('REGISTER');
       expect(res.data.registrationId).toMatch(/^REG-/);
       expect(res.data.mobileMasked).toBe('******3210');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919876543210', 'REGISTER', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919876543210',
+        'REGISTER',
+        expect.any(Object),
+      );
       expect(prismaMock.user.create).not.toHaveBeenCalled();
       expect(prismaMock.student.create).not.toHaveBeenCalled();
     });
@@ -167,18 +197,18 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
     it('should reject registration if mobile number already exists', async () => {
       prismaMock.user.findFirst.mockResolvedValue({ id: 'existing-user-id' });
 
-      await expect(authService.registerStudent(validDto as any)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        authService.registerStudent(validDto as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should reject registration if email already exists', async () => {
       prismaMock.user.findFirst.mockResolvedValue(null);
       prismaMock.user.findUnique.mockResolvedValue({ id: 'existing-email-id' });
 
-      await expect(authService.registerStudent(validDto as any)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        authService.registerStudent(validDto as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should verify registration OTP, atomically create User and Student, and generate Student ID', async () => {
@@ -238,7 +268,12 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
         otp: '12345',
       });
 
-      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith('+919876543210', '12345', 'REGISTER', expect.any(Object));
+      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith(
+        '+919876543210',
+        '12345',
+        'REGISTER',
+        expect.any(Object),
+      );
       expect(prismaMock.user.create).toHaveBeenCalled();
       expect(prismaMock.student.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -250,12 +285,17 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       );
       expect(res.data.accessToken).toBe('mock-access-token');
       expect(res.data.student.studentCode).toBe('BRN-2026-000043');
-      expect(mockRedisStorage.has(`registration:${registrationId}`)).toBe(false);
+      expect(mockRedisStorage.has(`registration:${registrationId}`)).toBe(
+        false,
+      );
     });
 
     it('should reject verify registration if registrationId is expired or invalid', async () => {
       await expect(
-        authService.verifyRegistrationOtp({ registrationId: 'INVALID-ID', otp: '12345' }),
+        authService.verifyRegistrationOtp({
+          registrationId: 'INVALID-ID',
+          otp: '12345',
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -288,7 +328,11 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       expect(res.data.purpose).toBe('LOGIN');
       expect(res.data.loginRequestId).toMatch(/^LOGIN-/);
       expect(res.data.mobileMasked).toBe('******0001');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919000000001', 'LOGIN', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        'LOGIN',
+        expect.any(Object),
+      );
     });
 
     it('should request login OTP using Student ID (BRN-2026-000001) and send OTP to verified mobile', async () => {
@@ -305,7 +349,11 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
 
       expect(res.data.requiresOtp).toBe(true);
       expect(res.data.loginRequestId).toMatch(/^LOGIN-/);
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919000000001', 'LOGIN', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        'LOGIN',
+        expect.any(Object),
+      );
     });
 
     it('should request login OTP using Mobile number (+919000000001)', async () => {
@@ -318,7 +366,11 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       });
 
       expect(res.data.requiresOtp).toBe(true);
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919000000001', 'LOGIN', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        'LOGIN',
+        expect.any(Object),
+      );
     });
 
     it('should reject login request for non-existent identifier', async () => {
@@ -327,7 +379,9 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       prismaMock.user.findFirst.mockResolvedValue(null);
 
       await expect(
-        authService.requestPasswordlessLoginOtp({ identifier: 'unknown@test.com' }),
+        authService.requestPasswordlessLoginOtp({
+          identifier: 'unknown@test.com',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -338,7 +392,9 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       });
 
       await expect(
-        authService.requestPasswordlessLoginOtp({ identifier: 'student@brainros.test' }),
+        authService.requestPasswordlessLoginOtp({
+          identifier: 'student@brainros.test',
+        }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -363,7 +419,12 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
         otp: '12345',
       });
 
-      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith('+919000000001', '12345', 'LOGIN', expect.any(Object));
+      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        '12345',
+        'LOGIN',
+        expect.any(Object),
+      );
       expect(res.message).toBe('Login successful');
       expect(res.data.accessToken).toBe('mock-access-token');
       expect(res.data.refreshToken).toBe('mock-refresh-token');
@@ -381,19 +442,31 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
       const res = await authService.resendOtp({ registrationId: 'REG-999' });
 
       expect(res.message).toContain('resent successfully');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919876543210', 'REGISTER', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919876543210',
+        'REGISTER',
+        expect.any(Object),
+      );
     });
 
     it('should resend OTP for active login request', async () => {
       mockRedisStorage.set(
         'login:LOGIN-999',
-        JSON.stringify({ mobile: '+919000000001', userId: 'u-1', status: 'PENDING_OTP' }),
+        JSON.stringify({
+          mobile: '+919000000001',
+          userId: 'u-1',
+          status: 'PENDING_OTP',
+        }),
       );
 
       const res = await authService.resendOtp({ loginRequestId: 'LOGIN-999' });
 
       expect(res.message).toContain('resent successfully');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919000000001', 'LOGIN', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        'LOGIN',
+        expect.any(Object),
+      );
     });
   });
 });

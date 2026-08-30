@@ -41,7 +41,9 @@ export class LanguageService implements OnModuleInit {
             isActive: true,
           },
         });
-        this.logger.log(`Seeded regional language: ${lang.name} (${lang.code})`);
+        this.logger.log(
+          `Seeded regional language: ${lang.name} (${lang.code})`,
+        );
       } else if (!existing.code || !existing.nativeName) {
         await this.prisma.preferredLanguage.update({
           where: { id: existing.id },
@@ -52,7 +54,9 @@ export class LanguageService implements OnModuleInit {
             displayOrder: existing.displayOrder || lang.displayOrder,
           },
         });
-        this.logger.log(`Updated regional language metadata: ${lang.name} (${lang.code})`);
+        this.logger.log(
+          `Updated regional language metadata: ${lang.name} (${lang.code})`,
+        );
       }
     }
   }
@@ -109,7 +113,9 @@ export class LanguageService implements OnModuleInit {
       where: { name: dto.name.trim() },
     });
     if (existingName) {
-      throw new BadRequestException(`Language name '${dto.name}' already exists.`);
+      throw new BadRequestException(
+        `Language name '${dto.name}' already exists.`,
+      );
     }
 
     return this.prisma.preferredLanguage.create({
@@ -134,10 +140,13 @@ export class LanguageService implements OnModuleInit {
       where: { id },
       data: {
         name: dto.name !== undefined ? dto.name.trim() : undefined,
-        nativeName: dto.nativeName !== undefined ? dto.nativeName.trim() : undefined,
-        description: dto.description !== undefined ? dto.description.trim() : undefined,
+        nativeName:
+          dto.nativeName !== undefined ? dto.nativeName.trim() : undefined,
+        description:
+          dto.description !== undefined ? dto.description.trim() : undefined,
         isActive: dto.isActive !== undefined ? dto.isActive : undefined,
-        displayOrder: dto.displayOrder !== undefined ? dto.displayOrder : undefined,
+        displayOrder:
+          dto.displayOrder !== undefined ? dto.displayOrder : undefined,
       },
     });
   }

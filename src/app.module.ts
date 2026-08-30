@@ -22,12 +22,20 @@ import { PredictedRankModule } from './modules/predicted-rank/predicted-rank.mod
 import { PerformanceTrendModule } from './modules/performance-trend/performance-trend.module';
 import { ParentDashboardModule } from './modules/parent-dashboard/parent-dashboard.module';
 import { RegionalLanguageModule } from './modules/regional-language/regional-language.module';
+import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+    }),
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD || undefined,
+      },
     }),
     ThrottlerModule.forRoot([
       {

@@ -191,7 +191,11 @@ export class AuthController {
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    const result = await this.authService.loginWithEmail(dto.email, dto.password, req);
+    const result = await this.authService.loginWithEmail(
+      dto.email,
+      dto.password,
+      req,
+    );
     setAuthCookies(res, this.configService, {
       accessToken: result.data?.accessToken,
       refreshToken: result.data?.refreshToken,
@@ -251,7 +255,9 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const cookieToken =
-      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken || req.cookies?.refresh_token;
+      req.cookies?.[REFRESH_COOKIE_NAME] ||
+      req.cookies?.refreshToken ||
+      req.cookies?.refresh_token;
     const refreshToken = cookieToken || headerToken || bodyToken;
 
     if (!refreshToken) {
@@ -271,7 +277,6 @@ export class AuthController {
    * Revoke current session and clear HttpOnly cookies.
    * POST /auth/logout
    */
-  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(
@@ -281,7 +286,9 @@ export class AuthController {
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
     const cookieToken =
-      req.cookies?.[REFRESH_COOKIE_NAME] || req.cookies?.refreshToken || req.cookies?.refresh_token;
+      req.cookies?.[REFRESH_COOKIE_NAME] ||
+      req.cookies?.['refresh_token'] ||
+      req.cookies?.['refreshToken'];
     const refreshToken = cookieToken || headerToken || bodyToken;
 
     if (refreshToken) {

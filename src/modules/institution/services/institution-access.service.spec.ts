@@ -73,7 +73,10 @@ describe('InstitutionAccessService (Tenant Isolation & Anti-IDOR)', () => {
     it('should allow access to matching institution', async () => {
       prisma.institutionAdmin.findFirst.mockResolvedValue(mockAdminUser);
 
-      const result = await service.assertCanAccessInstitution('user-admin-1', 'inst-1');
+      const result = await service.assertCanAccessInstitution(
+        'user-admin-1',
+        'inst-1',
+      );
       expect(result.institution.id).toBe('inst-1');
     });
 
@@ -95,7 +98,10 @@ describe('InstitutionAccessService (Tenant Isolation & Anti-IDOR)', () => {
         name: 'NEET 2027',
       });
 
-      const result = await service.assertCanAccessBatch('user-admin-1', 'batch-1');
+      const result = await service.assertCanAccessBatch(
+        'user-admin-1',
+        'batch-1',
+      );
       expect(result.batch.name).toBe('NEET 2027');
     });
 
@@ -123,7 +129,10 @@ describe('InstitutionAccessService (Tenant Isolation & Anti-IDOR)', () => {
         student: { id: 'student-1', name: 'John Doe' },
       });
 
-      const result = await service.assertCanAccessStudent('user-admin-1', 'student-1');
+      const result = await service.assertCanAccessStudent(
+        'user-admin-1',
+        'student-1',
+      );
       expect(result.student.name).toBe('John Doe');
     });
 

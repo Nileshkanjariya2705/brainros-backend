@@ -19,7 +19,8 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
   const { prisma } = ctx;
   const adminUser = ctx.users.get('admin.neet@brainros.test') || ctx.users.get('superadmin@brainros.test')!;
   const neetTarget = ctx.examTargets.get('NEET')!;
-  const jeeTarget = ctx.examTargets.get('JEE_MAIN')!;
+  const jeeTarget = ctx.examTargets.get('JEE') || ctx.examTargets.get('JEE_MAIN')!;
+  const catTarget = ctx.examTargets.get('CAT')!;
 
   const statusActive = ctx.examStatuses.get('ACTIVE')!;
   const statusCompleted = ctx.examStatuses.get('COMPLETED')!;
@@ -49,6 +50,42 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
   // 2. Exam Definitions
   const examsData = [
     {
+      code: 'TEMPLATE_JEE',
+      title: 'JEE Main Exam Template',
+      description: 'System template for JEE Main blueprint generation.',
+      target: jeeTarget,
+      totalQuestions: 75,
+      totalMarks: 300,
+      durationMinutes: 180,
+      status: statusCompleted,
+      isSystem: true,
+      subjects: ['Physics (JEE)', 'Chemistry (JEE)', 'Mathematics'],
+    },
+    {
+      code: 'TEMPLATE_NEET',
+      title: 'NEET UG Exam Template',
+      description: 'System template for NEET UG blueprint generation.',
+      target: neetTarget,
+      totalQuestions: 180,
+      totalMarks: 720,
+      durationMinutes: 200,
+      status: statusCompleted,
+      isSystem: true,
+      subjects: ['Physics (NEET)', 'Chemistry (NEET)', 'Botany', 'Zoology'],
+    },
+    {
+      code: 'TEMPLATE_CAT',
+      title: 'CAT Exam Template',
+      description: 'System template for CAT blueprint generation.',
+      target: catTarget,
+      totalQuestions: 68,
+      totalMarks: 204,
+      durationMinutes: 120,
+      status: statusCompleted,
+      isSystem: true,
+      subjects: ['Physics (CAT)', 'Chemistry (CAT)', 'Mathematics (CAT)'],
+    },
+    {
       code: 'EXAM_NEET_MOCK_01',
       title: 'Brainros NEET All-India Grand Mock Test 01',
       description: 'Full syllabus NEET mock test matching NTA pattern with standard difficulty distribution.',
@@ -57,6 +94,7 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
       totalMarks: 80,
       durationMinutes: 60,
       status: statusCompleted, // Completed historical exam for trend testing
+      isSystem: false,
       subjects: ['Physics (NEET)', 'Chemistry (NEET)', 'Botany', 'Zoology'],
     },
     {
@@ -68,6 +106,7 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
       totalMarks: 80,
       durationMinutes: 60,
       status: statusActive, // Active exam currently in progress
+      isSystem: false,
       subjects: ['Physics (NEET)', 'Chemistry (NEET)', 'Botany', 'Zoology'],
     },
     {
@@ -79,6 +118,7 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
       totalMarks: 60,
       durationMinutes: 60,
       status: statusCompleted,
+      isSystem: false,
       subjects: ['Physics (JEE)', 'Chemistry (JEE)', 'Mathematics'],
     },
   ];
@@ -247,75 +287,122 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
           totalQuestions: eData.totalQuestions,
           version: 1,
           isActive: true,
+          isSystem: eData.isSystem || false,
           createdById: adminUser.id,
         },
       });
       inc('exam_blueprints', true);
-    }
 
-    let examVersion = await prisma.examVersion.findUnique({
-      where: { examId_versionNumber: { examId: exam.id, versionNumber: 1 } },
-    });
-
-    if (!examVersion) {
-      examVersion = await prisma.examVersion.create({
-        data: {
-          examId: exam.id,
-          blueprintId: blueprint.id,
-          versionNumber: 1,
-          status: ExamVersionStatus.PUBLISHED,
-          totalQuestions: eData.totalQuestions,
-          durationMinutes: eData.durationMinutes,
-          totalMarks: eData.totalMarks,
-          generatedById: adminUser.id,
-          publishedAt: new Date('2026-04-06'),
-        },
-      });
-      inc('exam_versions', true);
-
-      // Create immutable snapshots of questions inside the ExamVersion
-      for (let seq = 0; seq < examQuestionsList.length; seq++) {
-        const eq = examQuestionsList[seq];
-        const origQ = await prisma.question.findUnique({
-          where: { id: eq.questionId },
-          include: { options: true },
-        });
-        if (!origQ) continue;
-
-        const evQ = await prisma.examVersionQuestion.create({
-          data: {
-            examVersionId: examVersion.id,
-            sourceQuestionId: origQ.id,
-            sequenceNumber: seq + 1,
-            type: origQ.type,
-            difficultyLevel: origQ.difficultyLevel,
-            marks: eq.marks || 4,
-            negativeMarks: eq.negativeMarks || 1,
-            questionText: `Snapshot: Question #${seq + 1} for ${eData.title}`,
-            explanation: 'Official verified explanation snapshot.',
-          },
-        });
-        inc('exam_version_questions', true);
-
-        for (let oIdx = 0; oIdx < origQ.options.length; oIdx++) {
-          const origOpt = origQ.options[oIdx];
-          await prisma.examVersionOption.create({
-            data: {
-              examVersionQuestionId: evQ.id,
-              sourceOptionId: origOpt.id,
-              displayOrder: origOpt.displayOrder,
-              optionKey: origOpt.optionKey,
-              optionText: origOpt.optionText || `Option ${origOpt.optionKey}`,
-              isCorrect: origOpt.isCorrect,
-            },
+      // Seed rules for system blueprints
+      if (eData.isSystem) {
+        let priority = 1;
+        if (eData.code === 'TEMPLATE_JEE') {
+          const phy = ctx.subjects.get('Physics (JEE)')!;
+          const chem = ctx.subjects.get('Chemistry (JEE)')!;
+          const math = ctx.subjects.get('Mathematics')!;
+          await prisma.blueprintRule.createMany({
+            data: [
+              { blueprintId: blueprint.id, subjectId: phy.id, type: 'SINGLE_CORRECT', selectionCount: 20, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: phy.id, type: 'NUMERICAL', selectionCount: 5, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: chem.id, type: 'SINGLE_CORRECT', selectionCount: 20, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: chem.id, type: 'NUMERICAL', selectionCount: 5, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: math.id, type: 'SINGLE_CORRECT', selectionCount: 20, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: math.id, type: 'NUMERICAL', selectionCount: 5, priority: priority++ },
+            ],
           });
-          inc('exam_version_options', true);
+        } else if (eData.code === 'TEMPLATE_NEET') {
+          const phy = ctx.subjects.get('Physics (NEET)')!;
+          const chem = ctx.subjects.get('Chemistry (NEET)')!;
+          const bot = ctx.subjects.get('Botany')!;
+          const zoo = ctx.subjects.get('Zoology')!;
+          await prisma.blueprintRule.createMany({
+            data: [
+              { blueprintId: blueprint.id, subjectId: phy.id, selectionCount: 45, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: chem.id, selectionCount: 45, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: bot.id, selectionCount: 45, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: zoo.id, selectionCount: 45, priority: priority++ },
+            ],
+          });
+        } else if (eData.code === 'TEMPLATE_CAT') {
+          const varc = ctx.subjects.get('Physics (CAT)')!;
+          const dilr = ctx.subjects.get('Chemistry (CAT)')!;
+          const qa = ctx.subjects.get('Mathematics (CAT)')!;
+          await prisma.blueprintRule.createMany({
+            data: [
+              { blueprintId: blueprint.id, subjectId: varc.id, selectionCount: 24, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: dilr.id, selectionCount: 22, priority: priority++ },
+              { blueprintId: blueprint.id, subjectId: qa.id, selectionCount: 22, priority: priority++ },
+            ],
+          });
         }
       }
-    } else {
-      inc('exam_versions', false);
     }
-    ctx.examVersions.set(`${eData.code}:1`, examVersion);
+
+    if (!eData.isSystem) {
+      let examVersion = await prisma.examVersion.findUnique({
+        where: { examId_versionNumber: { examId: exam.id, versionNumber: 1 } },
+      });
+
+      if (!examVersion) {
+        examVersion = await prisma.examVersion.create({
+          data: {
+            examId: exam.id,
+            blueprintId: blueprint.id,
+            versionNumber: 1,
+            status: ExamVersionStatus.PUBLISHED,
+            totalQuestions: eData.totalQuestions,
+            durationMinutes: eData.durationMinutes,
+            totalMarks: eData.totalMarks,
+            generatedById: adminUser.id,
+            publishedAt: new Date('2026-04-06'),
+          },
+        });
+        inc('exam_versions', true);
+
+        // Create immutable snapshots of questions inside the ExamVersion
+        for (let seq = 0; seq < examQuestionsList.length; seq++) {
+          const eq = examQuestionsList[seq];
+          const origQ = await prisma.question.findUnique({
+            where: { id: eq.questionId },
+            include: { options: true },
+          });
+          if (!origQ) continue;
+
+          const evQ = await prisma.examVersionQuestion.create({
+            data: {
+              examVersionId: examVersion.id,
+              sourceQuestionId: origQ.id,
+              sequenceNumber: seq + 1,
+              type: origQ.type,
+              difficultyLevel: origQ.difficultyLevel,
+              marks: eq.marks || 4,
+              negativeMarks: eq.negativeMarks || 1,
+              questionText: `Snapshot: Question #${seq + 1} for ${eData.title}`,
+              explanation: 'Official verified explanation snapshot.',
+            },
+          });
+          inc('exam_version_questions', true);
+
+          for (let oIdx = 0; oIdx < origQ.options.length; oIdx++) {
+            const origOpt = origQ.options[oIdx];
+            await prisma.examVersionOption.create({
+              data: {
+                examVersionQuestionId: evQ.id,
+                sourceOptionId: origOpt.id,
+                displayOrder: origOpt.displayOrder,
+                optionKey: origOpt.optionKey,
+                optionText: origOpt.optionText || `Option ${origOpt.optionKey}`,
+                isCorrect: origOpt.isCorrect,
+              },
+            });
+            inc('exam_version_options', true);
+          }
+        }
+      } else {
+        inc('exam_versions', false);
+      }
+      ctx.examVersions.set(`${eData.code}:1`, examVersion);
+    }
   }
 
   return {

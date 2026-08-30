@@ -62,18 +62,64 @@ describe('Rank & Percentile Engine', () => {
     tieBreakService = module.get<TieBreakService>(TieBreakService);
     percentileService = module.get<PercentileService>(PercentileService);
     predictionService = module.get<PredictionService>(PredictionService);
-    rankGenerationService = module.get<RankGenerationService>(RankGenerationService);
+    rankGenerationService = module.get<RankGenerationService>(
+      RankGenerationService,
+    );
     rankQueryService = module.get<RankQueryService>(RankQueryService);
-    eligibilityService = module.get<RankingCandidateEligibilityService>(RankingCandidateEligibilityService);
+    eligibilityService = module.get<RankingCandidateEligibilityService>(
+      RankingCandidateEligibilityService,
+    );
     jest.clearAllMocks();
   });
 
   describe('TieBreakService', () => {
     it('ranks distinct scores in descending order (1, 2, 3)', () => {
       const candidates: CandidateRankInput[] = [
-        { attemptId: 'a3', studentId: 's3', studentName: 'Charlie', studentCode: 'S3', score: 650, maxScore: 720, percentage: 90.28, accuracy: 90, correctCount: 165, wrongCount: 15, unattemptedCount: 0, negativeMarksLost: 15, timeUsedSeconds: 3000 },
-        { attemptId: 'a1', studentId: 's1', studentName: 'Alice', studentCode: 'S1', score: 720, maxScore: 720, percentage: 100, accuracy: 100, correctCount: 180, wrongCount: 0, unattemptedCount: 0, negativeMarksLost: 0, timeUsedSeconds: 2800 },
-        { attemptId: 'a2', studentId: 's2', studentName: 'Bob', studentCode: 'S2', score: 700, maxScore: 720, percentage: 97.22, accuracy: 95, correctCount: 176, wrongCount: 4, unattemptedCount: 0, negativeMarksLost: 4, timeUsedSeconds: 2900 },
+        {
+          attemptId: 'a3',
+          studentId: 's3',
+          studentName: 'Charlie',
+          studentCode: 'S3',
+          score: 650,
+          maxScore: 720,
+          percentage: 90.28,
+          accuracy: 90,
+          correctCount: 165,
+          wrongCount: 15,
+          unattemptedCount: 0,
+          negativeMarksLost: 15,
+          timeUsedSeconds: 3000,
+        },
+        {
+          attemptId: 'a1',
+          studentId: 's1',
+          studentName: 'Alice',
+          studentCode: 'S1',
+          score: 720,
+          maxScore: 720,
+          percentage: 100,
+          accuracy: 100,
+          correctCount: 180,
+          wrongCount: 0,
+          unattemptedCount: 0,
+          negativeMarksLost: 0,
+          timeUsedSeconds: 2800,
+        },
+        {
+          attemptId: 'a2',
+          studentId: 's2',
+          studentName: 'Bob',
+          studentCode: 'S2',
+          score: 700,
+          maxScore: 720,
+          percentage: 97.22,
+          accuracy: 95,
+          correctCount: 176,
+          wrongCount: 4,
+          unattemptedCount: 0,
+          negativeMarksLost: 4,
+          timeUsedSeconds: 2900,
+        },
       ];
 
       const sorted = tieBreakService.sortCandidates(candidates);
@@ -89,9 +135,51 @@ describe('Rank & Percentile Engine', () => {
 
     it('assigns competition rank ties (1, 1, 3)', () => {
       const tiedCandidates: CandidateRankInput[] = [
-        { attemptId: 'a1', studentId: 's1', studentName: 'Alice', studentCode: 'S1', score: 720, maxScore: 720, percentage: 100, accuracy: 100, correctCount: 180, wrongCount: 0, unattemptedCount: 0, negativeMarksLost: 0, timeUsedSeconds: 2800 },
-        { attemptId: 'a2', studentId: 's2', studentName: 'Bob', studentCode: 'S2', score: 720, maxScore: 720, percentage: 100, accuracy: 100, correctCount: 180, wrongCount: 0, unattemptedCount: 0, negativeMarksLost: 0, timeUsedSeconds: 2800 },
-        { attemptId: 'a3', studentId: 's3', studentName: 'Charlie', studentCode: 'S3', score: 700, maxScore: 720, percentage: 97.22, accuracy: 95, correctCount: 176, wrongCount: 4, unattemptedCount: 0, negativeMarksLost: 4, timeUsedSeconds: 2900 },
+        {
+          attemptId: 'a1',
+          studentId: 's1',
+          studentName: 'Alice',
+          studentCode: 'S1',
+          score: 720,
+          maxScore: 720,
+          percentage: 100,
+          accuracy: 100,
+          correctCount: 180,
+          wrongCount: 0,
+          unattemptedCount: 0,
+          negativeMarksLost: 0,
+          timeUsedSeconds: 2800,
+        },
+        {
+          attemptId: 'a2',
+          studentId: 's2',
+          studentName: 'Bob',
+          studentCode: 'S2',
+          score: 720,
+          maxScore: 720,
+          percentage: 100,
+          accuracy: 100,
+          correctCount: 180,
+          wrongCount: 0,
+          unattemptedCount: 0,
+          negativeMarksLost: 0,
+          timeUsedSeconds: 2800,
+        },
+        {
+          attemptId: 'a3',
+          studentId: 's3',
+          studentName: 'Charlie',
+          studentCode: 'S3',
+          score: 700,
+          maxScore: 720,
+          percentage: 97.22,
+          accuracy: 95,
+          correctCount: 176,
+          wrongCount: 4,
+          unattemptedCount: 0,
+          negativeMarksLost: 4,
+          timeUsedSeconds: 2900,
+        },
       ];
 
       const sorted = tieBreakService.sortCandidates(tiedCandidates);
@@ -105,9 +193,37 @@ describe('Rank & Percentile Engine', () => {
     it('breaks ties using accuracy, negative marks, and completion time', () => {
       const candidates: CandidateRankInput[] = [
         // Candidate A: same score (500), but higher accuracy (90% vs 80%)
-        { attemptId: 'a1', studentId: 's1', studentName: 'A', studentCode: 'S1', score: 500, maxScore: 720, percentage: 69.4, accuracy: 90, correctCount: 130, wrongCount: 20, unattemptedCount: 30, negativeMarksLost: 20, timeUsedSeconds: 3000 },
+        {
+          attemptId: 'a1',
+          studentId: 's1',
+          studentName: 'A',
+          studentCode: 'S1',
+          score: 500,
+          maxScore: 720,
+          percentage: 69.4,
+          accuracy: 90,
+          correctCount: 130,
+          wrongCount: 20,
+          unattemptedCount: 30,
+          negativeMarksLost: 20,
+          timeUsedSeconds: 3000,
+        },
         // Candidate B: same score (500), lower accuracy (80%)
-        { attemptId: 'a2', studentId: 's2', studentName: 'B', studentCode: 'S2', score: 500, maxScore: 720, percentage: 69.4, accuracy: 80, correctCount: 140, wrongCount: 60, unattemptedCount: 0, negativeMarksLost: 60, timeUsedSeconds: 3200 },
+        {
+          attemptId: 'a2',
+          studentId: 's2',
+          studentName: 'B',
+          studentCode: 'S2',
+          score: 500,
+          maxScore: 720,
+          percentage: 69.4,
+          accuracy: 80,
+          correctCount: 140,
+          wrongCount: 60,
+          unattemptedCount: 0,
+          negativeMarksLost: 60,
+          timeUsedSeconds: 3200,
+        },
       ];
 
       const sorted = tieBreakService.sortCandidates(candidates);
@@ -146,7 +262,11 @@ describe('Rank & Percentile Engine', () => {
   describe('RankGenerationService & Partitioning', () => {
     it('generates overall and scoped ranks (State, District, School, Category)', async () => {
       const examId = 'exam-101';
-      const mockExam = { id: examId, title: 'JEE Main Full Mock', totalMarks: 300 };
+      const mockExam = {
+        id: examId,
+        title: 'JEE Main Full Mock',
+        totalMarks: 300,
+      };
 
       const mockCandidates: CandidateRankInput[] = [
         {
@@ -210,10 +330,18 @@ describe('Rank & Percentile Engine', () => {
 
       prismaMock.exam.findUnique.mockResolvedValue(mockExam);
       prismaMock.rankSnapshot.findUnique.mockResolvedValue(null);
-      prismaMock.rankSnapshot.upsert.mockResolvedValue({ id: 'snap-1', snapshotVersion: 1 });
-      jest.spyOn(eligibilityService, 'getEligibleCandidates').mockResolvedValue(mockCandidates);
+      prismaMock.rankSnapshot.upsert.mockResolvedValue({
+        id: 'snap-1',
+        snapshotVersion: 1,
+      });
+      jest
+        .spyOn(eligibilityService, 'getEligibleCandidates')
+        .mockResolvedValue(mockCandidates);
 
-      const result = await rankGenerationService.generateRanks({ examId, snapshotVersion: 1 });
+      const result = await rankGenerationService.generateRanks({
+        examId,
+        snapshotVersion: 1,
+      });
 
       expect(result.status).toBe('COMPLETED');
       expect(result.totalCandidates).toBe(3);
@@ -226,10 +354,29 @@ describe('Rank & Percentile Engine', () => {
       expect(prismaMock.candidateRank.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.arrayContaining([
-            expect.objectContaining({ studentId: 'st-1', rankType: 'OVERALL', rank: 1 }),
-            expect.objectContaining({ studentId: 'st-1', rankType: 'STATE', scopeName: 'Gujarat', rank: 1 }),
-            expect.objectContaining({ studentId: 'st-1', rankType: 'DISTRICT', scopeName: 'Ahmedabad', rank: 1 }),
-            expect.objectContaining({ studentId: 'st-1', rankType: 'SCHOOL', scopeName: 'DPS Ahmedabad', rank: 1 }),
+            expect.objectContaining({
+              studentId: 'st-1',
+              rankType: 'OVERALL',
+              rank: 1,
+            }),
+            expect.objectContaining({
+              studentId: 'st-1',
+              rankType: 'STATE',
+              scopeName: 'Gujarat',
+              rank: 1,
+            }),
+            expect.objectContaining({
+              studentId: 'st-1',
+              rankType: 'DISTRICT',
+              scopeName: 'Ahmedabad',
+              rank: 1,
+            }),
+            expect.objectContaining({
+              studentId: 'st-1',
+              rankType: 'SCHOOL',
+              scopeName: 'DPS Ahmedabad',
+              rank: 1,
+            }),
           ]),
         }),
       );
@@ -258,9 +405,35 @@ describe('Rank & Percentile Engine', () => {
       });
 
       prismaMock.candidateRank.findMany.mockResolvedValue([
-        { rankType: 'OVERALL', rank: 12, totalCandidates: 1000, percentile: 98.9, score: 280, accuracy: 95, predictedRankMin: 10, predictedRankMax: 15, predictionConfidence: 'HIGH' },
-        { rankType: 'STATE', scopeName: 'Gujarat', rank: 2, totalCandidates: 250, percentile: 99.6, score: 280, accuracy: 95 },
-        { rankType: 'DISTRICT', scopeName: 'Ahmedabad', rank: 1, totalCandidates: 80, percentile: 100.0, score: 280, accuracy: 95 },
+        {
+          rankType: 'OVERALL',
+          rank: 12,
+          totalCandidates: 1000,
+          percentile: 98.9,
+          score: 280,
+          accuracy: 95,
+          predictedRankMin: 10,
+          predictedRankMax: 15,
+          predictionConfidence: 'HIGH',
+        },
+        {
+          rankType: 'STATE',
+          scopeName: 'Gujarat',
+          rank: 2,
+          totalCandidates: 250,
+          percentile: 99.6,
+          score: 280,
+          accuracy: 95,
+        },
+        {
+          rankType: 'DISTRICT',
+          scopeName: 'Ahmedabad',
+          rank: 1,
+          totalCandidates: 80,
+          percentile: 100.0,
+          score: 280,
+          accuracy: 95,
+        },
       ]);
 
       const res = await rankQueryService.getMyRanks(attemptId, studentId);

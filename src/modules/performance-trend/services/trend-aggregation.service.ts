@@ -58,7 +58,10 @@ export class TrendAggregationService {
     const rankTrend: RankTrendPoint[] = [];
     const percentileTrend: PercentileTrendPoint[] = [];
     const timeTrend: TimeTrendPoint[] = [];
-    const subjectMap = new Map<string, { subjectId: string; subjectName: string; points: any[] }>();
+    const subjectMap = new Map<
+      string,
+      { subjectId: string; subjectName: string; points: any[] }
+    >();
 
     rawAttempts.forEach((att, idx) => {
       const mockNumber = idx + 1;
@@ -79,9 +82,15 @@ export class TrendAggregationService {
       const percentile = rankRecord ? rankRecord.percentile : null;
 
       const timeRecord = att.timeAnalyses?.[0];
-      const timeUsedSeconds = timeRecord ? timeRecord.totalTimeUsedSeconds : res.timeUsedSeconds ?? null;
-      const timeUtilizationPercentage = timeRecord ? timeRecord.timeUtilizationPercentage : null;
-      const averageTimePerQuestion = timeRecord ? timeRecord.averageTimePerQuestionSeconds : res.averageTimePerQuestion ?? null;
+      const timeUsedSeconds = timeRecord
+        ? timeRecord.totalTimeUsedSeconds
+        : (res.timeUsedSeconds ?? null);
+      const timeUtilizationPercentage = timeRecord
+        ? timeRecord.timeUtilizationPercentage
+        : null;
+      const averageTimePerQuestion = timeRecord
+        ? timeRecord.averageTimePerQuestionSeconds
+        : (res.averageTimePerQuestion ?? null);
 
       const mockPoint: MockDataPoint = {
         attemptId: att.id,
@@ -157,7 +166,11 @@ export class TrendAggregationService {
         const sName = sRes.subject?.name || 'Unknown Subject';
 
         if (!subjectMap.has(sId)) {
-          subjectMap.set(sId, { subjectId: sId, subjectName: sName, points: [] });
+          subjectMap.set(sId, {
+            subjectId: sId,
+            subjectName: sName,
+            points: [],
+          });
         }
 
         subjectMap.get(sId)!.points.push({
@@ -165,7 +178,9 @@ export class TrendAggregationService {
           label,
           date,
           accuracy: sRes.accuracy ?? 0,
-          percentage: sRes.percentage ?? (sRes.maxScore > 0 ? (sRes.score / sRes.maxScore) * 100 : 0),
+          percentage:
+            sRes.percentage ??
+            (sRes.maxScore > 0 ? (sRes.score / sRes.maxScore) * 100 : 0),
           score: sRes.score ?? 0,
           maxScore: sRes.maxScore ?? 0,
         });
@@ -179,16 +194,23 @@ export class TrendAggregationService {
     const latestMock = mocks[mocks.length - 1];
 
     // Find Best & Worst Mocks (by percentage)
-    const sortedByScore = [...mocks].sort((a, b) => b.percentage - a.percentage);
+    const sortedByScore = [...mocks].sort(
+      (a, b) => b.percentage - a.percentage,
+    );
     const bestMock = sortedByScore[0];
     const worstMock = sortedByScore[sortedByScore.length - 1];
 
-    const scoreDelta = Math.round((latestMock.score - firstMock.score) * 100) / 100;
-    const percentageDelta = Math.round((latestMock.percentage - firstMock.percentage) * 100) / 100;
-    const accuracyDelta = Math.round((latestMock.accuracy - firstMock.accuracy) * 100) / 100;
+    const scoreDelta =
+      Math.round((latestMock.score - firstMock.score) * 100) / 100;
+    const percentageDelta =
+      Math.round((latestMock.percentage - firstMock.percentage) * 100) / 100;
+    const accuracyDelta =
+      Math.round((latestMock.accuracy - firstMock.accuracy) * 100) / 100;
 
     const rankDelta =
-      latestMock.rank !== null && firstMock.rank !== null ? latestMock.rank - firstMock.rank : null;
+      latestMock.rank !== null && firstMock.rank !== null
+        ? latestMock.rank - firstMock.rank
+        : null;
     const rankImprovement = rankDelta !== null ? -rankDelta : null; // Positive when rank number improved
 
     const percentileDelta =
@@ -205,8 +227,17 @@ export class TrendAggregationService {
     const scoreTrendDir = this.classifyDirection(scoreDelta, 2.0);
     const accuracyTrendDir = this.classifyDirection(accuracyDelta, 1.5);
     const rankTrendDir: TrendDirection =
-      rankImprovement === null ? 'INSUFFICIENT_DATA' : rankImprovement > 0 ? 'IMPROVING' : rankImprovement < 0 ? 'DECLINING' : 'STABLE';
-    const percentileTrendDir = percentileDelta === null ? 'INSUFFICIENT_DATA' : this.classifyDirection(percentileDelta, 0.5);
+      rankImprovement === null
+        ? 'INSUFFICIENT_DATA'
+        : rankImprovement > 0
+          ? 'IMPROVING'
+          : rankImprovement < 0
+            ? 'DECLINING'
+            : 'STABLE';
+    const percentileTrendDir =
+      percentileDelta === null
+        ? 'INSUFFICIENT_DATA'
+        : this.classifyDirection(percentileDelta, 0.5);
 
     // Subject Improvements
     let mostImprovedSubject: TrendSummary['mostImprovedSubject'] = null;
@@ -222,10 +253,15 @@ export class TrendAggregationService {
         if (s.points.length >= 2) {
           const firstPoint = s.points[0];
           const lastPoint = s.points[s.points.length - 1];
-          const delta = Math.round((lastPoint.accuracy - firstPoint.accuracy) * 10) / 10;
+          const delta =
+            Math.round((lastPoint.accuracy - firstPoint.accuracy) * 10) / 10;
           if (delta > maxAccDelta) {
             maxAccDelta = delta;
-            mostImprovedSubject = { subjectId: s.subjectId, subjectName: s.subjectName, accuracyDelta: delta };
+            mostImprovedSubject = {
+              subjectId: s.subjectId,
+              subjectName: s.subjectName,
+              accuracyDelta: delta,
+            };
           }
         }
 
@@ -233,11 +269,19 @@ export class TrendAggregationService {
         if (latestPoint) {
           if (latestPoint.accuracy > maxLatestAcc) {
             maxLatestAcc = latestPoint.accuracy;
-            strongestCurrentSubject = { subjectId: s.subjectId, subjectName: s.subjectName, latestAccuracy: latestPoint.accuracy };
+            strongestCurrentSubject = {
+              subjectId: s.subjectId,
+              subjectName: s.subjectName,
+              latestAccuracy: latestPoint.accuracy,
+            };
           }
           if (latestPoint.accuracy < minLatestAcc) {
             minLatestAcc = latestPoint.accuracy;
-            weakestCurrentSubject = { subjectId: s.subjectId, subjectName: s.subjectName, latestAccuracy: latestPoint.accuracy };
+            weakestCurrentSubject = {
+              subjectId: s.subjectId,
+              subjectName: s.subjectName,
+              latestAccuracy: latestPoint.accuracy,
+            };
           }
         }
       }

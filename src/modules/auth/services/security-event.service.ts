@@ -28,7 +28,9 @@ export class SecurityEventService {
           userId: context.userId || null,
           eventType,
           ipAddress: context.ipAddress || null,
-          userAgent: context.userAgent ? context.userAgent.substring(0, 500) : null,
+          userAgent: context.userAgent
+            ? context.userAgent.substring(0, 500)
+            : null,
           metadata: context.metadata ? (context.metadata as any) : null,
         },
       });
@@ -43,7 +45,9 @@ export class SecurityEventService {
   /**
    * Extract request context for security logging
    */
-  static extractRequestContext(req: any): Pick<SecurityEventContext, 'ipAddress' | 'userAgent'> {
+  static extractRequestContext(
+    req: any,
+  ): Pick<SecurityEventContext, 'ipAddress' | 'userAgent'> {
     return {
       ipAddress: req?.ip || req?.connection?.remoteAddress || null,
       userAgent: req?.headers?.['user-agent'] || null,

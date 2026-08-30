@@ -51,7 +51,8 @@ export class StrategyRuleEngineService {
       case 'EQ':
         return Math.abs(value - threshold) < 0.0001;
       case 'BETWEEN':
-        if (comparisonValue === null || comparisonValue === undefined) return false;
+        if (comparisonValue === null || comparisonValue === undefined)
+          return false;
         return value >= threshold && value <= comparisonValue;
       case 'PERCENT_GT':
         return value > threshold;
@@ -92,7 +93,10 @@ export class StrategyRuleEngineService {
     const classifications = new Set<StrategyClassificationCode>();
     const recMap = new Map<string, StrategyRecommendationItem>();
 
-    const activeRules = rules.length > 0 ? rules.filter((r) => r.isActive) : this.getDefaultSeedRules();
+    const activeRules =
+      rules.length > 0
+        ? rules.filter((r) => r.isActive)
+        : this.getDefaultSeedRules();
 
     for (const rule of activeRules) {
       const metricItem = metricMap.get(rule.metric);
@@ -100,7 +104,7 @@ export class StrategyRuleEngineService {
 
       const isMatch = this.evaluateOperator(
         metricItem.value,
-        rule.operator as StrategyOperator,
+        rule.operator,
         rule.threshold,
         rule.comparisonValue,
       );
@@ -121,11 +125,16 @@ export class StrategyRuleEngineService {
         };
 
         const title = this.interpolateTemplate(rule.titleTemplate, evidence);
-        const message = this.interpolateTemplate(rule.recommendationTemplate, evidence);
+        const message = this.interpolateTemplate(
+          rule.recommendationTemplate,
+          evidence,
+        );
 
-        const estimatedImpactMarks = rule.code === 'HIGH_RISK_ATTEMPTING' || rule.code === 'NEGATIVE_MARKING_HEAVY'
-          ? metrics.avoidableNegativeMarks
-          : 0;
+        const estimatedImpactMarks =
+          rule.code === 'HIGH_RISK_ATTEMPTING' ||
+          rule.code === 'NEGATIVE_MARKING_HEAVY'
+            ? metrics.avoidableNegativeMarks
+            : 0;
 
         recMap.set(rule.code, {
           id: rule.id,
@@ -160,11 +169,16 @@ export class StrategyRuleEngineService {
     // Rank recommendations by Priority (ascending), then Severity (Critical > High > Medium > Low), then Impact (descending)
     const severityScore = (s: StrategySeverity) => {
       switch (s) {
-        case 'CRITICAL': return 5;
-        case 'HIGH': return 4;
-        case 'MEDIUM': return 3;
-        case 'LOW': return 2;
-        default: return 1;
+        case 'CRITICAL':
+          return 5;
+        case 'HIGH':
+          return 4;
+        case 'MEDIUM':
+          return 3;
+        case 'LOW':
+          return 2;
+        default:
+          return 1;
       }
     };
 
@@ -194,7 +208,9 @@ export class StrategyRuleEngineService {
     };
   }
 
-  private mapRuleToClassification(code: string): StrategyClassificationCode | null {
+  private mapRuleToClassification(
+    code: string,
+  ): StrategyClassificationCode | null {
     if (code.includes('HIGH_RISK')) return 'HIGH_RISK_ATTEMPTING';
     if (code.includes('NEGATIVE')) return 'NEGATIVE_MARKING_HEAVY';
     if (code.includes('OVER_ATTEMPT')) return 'OVER_ATTEMPTING';

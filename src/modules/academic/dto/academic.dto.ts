@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsString, IsUUID, IsOptional, IsInt, IsBoolean, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+  IsOptional,
+  IsInt,
+  IsBoolean,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ─── Subjects ──────────────────────────────────────────────────

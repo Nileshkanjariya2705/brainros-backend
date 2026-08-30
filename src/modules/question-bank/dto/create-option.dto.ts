@@ -1,4 +1,13 @@
-import { IsNotEmpty, IsString, IsUUID, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateOptionTranslationDto {

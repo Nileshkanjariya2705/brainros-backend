@@ -10,15 +10,7 @@ import { TimeAnalysisController } from './controllers/time-analysis.controller';
 @Module({
   imports: [PrismaModule, RedisModule],
   controllers: [QuestionTimingController, TimeAnalysisController],
-  providers: [
-    RedisTimingStore,
-    QuestionTimingService,
-    TimeAnalysisService,
-  ],
-  exports: [
-    QuestionTimingService,
-    TimeAnalysisService,
-    RedisTimingStore,
-  ],
+  providers: [RedisTimingStore, QuestionTimingService, TimeAnalysisService],
+  exports: [QuestionTimingService, TimeAnalysisService, RedisTimingStore],
 })
 export class TimeAnalysisModule {}

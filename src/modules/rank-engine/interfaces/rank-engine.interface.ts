@@ -8,11 +8,7 @@ export type RankTypeEnum =
   | 'CATEGORY';
 
 export type RankSnapshotStatusEnum =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'VALIDATING'
-  | 'COMPLETED'
-  | 'FAILED';
+  'PENDING' | 'PROCESSING' | 'VALIDATING' | 'COMPLETED' | 'FAILED';
 
 export interface CandidateRankInput {
   attemptId: string;

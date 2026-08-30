@@ -31,14 +31,19 @@ export class PredictionService {
     }
 
     // Variance buffer based on candidate population size
-    const variancePercent = totalCandidates > 500 ? 0.05 : totalCandidates > 50 ? 0.1 : 0.15;
+    const variancePercent =
+      totalCandidates > 500 ? 0.05 : totalCandidates > 50 ? 0.1 : 0.15;
     const spread = Math.max(2, Math.round(actualRank * variancePercent));
 
     const min = Math.max(1, actualRank - Math.floor(spread / 2));
     const max = Math.min(totalCandidates, actualRank + Math.ceil(spread / 2));
 
     const confidence: 'HIGH' | 'MEDIUM' | 'LOW' =
-      totalCandidates >= 100 ? 'HIGH' : totalCandidates >= 20 ? 'MEDIUM' : 'LOW';
+      totalCandidates >= 100
+        ? 'HIGH'
+        : totalCandidates >= 20
+          ? 'MEDIUM'
+          : 'LOW';
 
     return {
       min,

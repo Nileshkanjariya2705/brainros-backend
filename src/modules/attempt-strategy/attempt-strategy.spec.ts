@@ -34,9 +34,15 @@ describe('Attempt Strategy Analysis Subsystem', () => {
       ],
     }).compile();
 
-    ruleEngine = module.get<StrategyRuleEngineService>(StrategyRuleEngineService);
-    metricCalculator = module.get<StrategyMetricCalculatorService>(StrategyMetricCalculatorService);
-    analyzerService = module.get<StrategyAnalyzerService>(StrategyAnalyzerService);
+    ruleEngine = module.get<StrategyRuleEngineService>(
+      StrategyRuleEngineService,
+    );
+    metricCalculator = module.get<StrategyMetricCalculatorService>(
+      StrategyMetricCalculatorService,
+    );
+    analyzerService = module.get<StrategyAnalyzerService>(
+      StrategyAnalyzerService,
+    );
     jest.clearAllMocks();
   });
 
@@ -60,7 +66,8 @@ describe('Attempt Strategy Analysis Subsystem', () => {
 
     describe('interpolateTemplate', () => {
       it('replaces placeholders with matching evidence values without executing code', () => {
-        const template = 'You attempted {highRiskAttemptCount} questions and {highRiskWrongCount} were wrong.';
+        const template =
+          'You attempted {highRiskAttemptCount} questions and {highRiskWrongCount} were wrong.';
         const result = ruleEngine.interpolateTemplate(template, {
           highRiskAttemptCount: 12,
           highRiskWrongCount: 7,
@@ -94,7 +101,10 @@ describe('Attempt Strategy Analysis Subsystem', () => {
           id: 'q-1',
           difficultyLevel: 'HARD',
           questionType: { code: 'SCQ' },
-          options: [{ id: 'opt-1', isCorrect: true }, { id: 'opt-2', isCorrect: false }],
+          options: [
+            { id: 'opt-1', isCorrect: true },
+            { id: 'opt-2', isCorrect: false },
+          ],
         },
       },
       {
@@ -104,7 +114,10 @@ describe('Attempt Strategy Analysis Subsystem', () => {
           id: 'q-2',
           difficultyLevel: 'HARD',
           questionType: { code: 'SCQ' },
-          options: [{ id: 'opt-3', isCorrect: true }, { id: 'opt-4', isCorrect: false }],
+          options: [
+            { id: 'opt-3', isCorrect: true },
+            { id: 'opt-4', isCorrect: false },
+          ],
         },
       },
       {
@@ -173,33 +186,50 @@ describe('Attempt Strategy Analysis Subsystem', () => {
         },
         answers: [
           // 12 hard questions attempted, 7 wrong (28 marks lost)
-          ...Array(7).fill(null).map((_, i) => ({ examQuestionId: `eq-h-w-${i}`, selectedOptionId: 'wrong' })),
-          ...Array(5).fill(null).map((_, i) => ({ examQuestionId: `eq-h-c-${i}`, selectedOptionId: 'correct' })),
+          ...Array(7)
+            .fill(null)
+            .map((_, i) => ({
+              examQuestionId: `eq-h-w-${i}`,
+              selectedOptionId: 'wrong',
+            })),
+          ...Array(5)
+            .fill(null)
+            .map((_, i) => ({
+              examQuestionId: `eq-h-c-${i}`,
+              selectedOptionId: 'correct',
+            })),
         ],
         timeLogs: [],
       };
 
       const mockExamQuestions = [
-        ...Array(7).fill(null).map((_, i) => ({
-          id: `eq-h-w-${i}`,
-          negativeMarks: 4,
-          question: {
-            id: `q-h-w-${i}`,
-            difficultyLevel: 'HARD',
-            questionType: { code: 'SCQ' },
-            options: [{ id: 'correct', isCorrect: true }, { id: 'wrong', isCorrect: false }],
-          },
-        })),
-        ...Array(5).fill(null).map((_, i) => ({
-          id: `eq-h-c-${i}`,
-          negativeMarks: 4,
-          question: {
-            id: `q-h-c-${i}`,
-            difficultyLevel: 'HARD',
-            questionType: { code: 'SCQ' },
-            options: [{ id: 'correct', isCorrect: true }],
-          },
-        })),
+        ...Array(7)
+          .fill(null)
+          .map((_, i) => ({
+            id: `eq-h-w-${i}`,
+            negativeMarks: 4,
+            question: {
+              id: `q-h-w-${i}`,
+              difficultyLevel: 'HARD',
+              questionType: { code: 'SCQ' },
+              options: [
+                { id: 'correct', isCorrect: true },
+                { id: 'wrong', isCorrect: false },
+              ],
+            },
+          })),
+        ...Array(5)
+          .fill(null)
+          .map((_, i) => ({
+            id: `eq-h-c-${i}`,
+            negativeMarks: 4,
+            question: {
+              id: `q-h-c-${i}`,
+              difficultyLevel: 'HARD',
+              questionType: { code: 'SCQ' },
+              options: [{ id: 'correct', isCorrect: true }],
+            },
+          })),
       ];
 
       prismaMock.attempt.findUnique.mockResolvedValue(mockAttempt);
@@ -208,7 +238,10 @@ describe('Attempt Strategy Analysis Subsystem', () => {
       prismaMock.strategyAnalysis.upsert.mockResolvedValue({});
       redisMock.set.mockResolvedValue(undefined);
 
-      const result = await analyzerService.generateStrategyAnalysis(attemptId, 1);
+      const result = await analyzerService.generateStrategyAnalysis(
+        attemptId,
+        1,
+      );
 
       expect(result.attemptId).toBe(attemptId);
       expect(result.metrics.highRiskAttemptCount).toBe(12);
@@ -223,7 +256,9 @@ describe('Attempt Strategy Analysis Subsystem', () => {
       expect(result.recommendations.length).toBeGreaterThan(0);
 
       const rec = result.recommendations[0];
-      expect(rec.message).toContain('You attempted 12 high-risk questions and 7 were incorrect');
+      expect(rec.message).toContain(
+        'You attempted 12 high-risk questions and 7 were incorrect',
+      );
       expect(rec.message).toContain('Estimated avoidable loss: 28 marks');
 
       // Persistence & Cache verified
@@ -281,7 +316,10 @@ describe('Attempt Strategy Analysis Subsystem', () => {
       prismaMock.strategyRule.findMany.mockResolvedValue([]);
       prismaMock.strategyAnalysis.upsert.mockResolvedValue({});
 
-      const result = await analyzerService.generateStrategyAnalysis('attempt-balanced', 1);
+      const result = await analyzerService.generateStrategyAnalysis(
+        'attempt-balanced',
+        1,
+      );
 
       expect(result.primaryClassification).toBe('BALANCED');
       expect(result.classifications).toEqual(['BALANCED']);

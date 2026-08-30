@@ -57,7 +57,11 @@ export class AdminHighRiskService {
 
     return this.prisma.$transaction(async (tx) => {
       // Call domain lifecycle service
-      const activatedExam = await this.lifecycleService.activateExam(examId, actorUserId, tx);
+      const activatedExam = await this.lifecycleService.activateExam(
+        examId,
+        actorUserId,
+        tx,
+      );
 
       await this.auditService.logAction({
         actorUserId,
@@ -93,7 +97,9 @@ export class AdminHighRiskService {
     userAgent?: string,
   ) {
     if (!reason || !reason.trim()) {
-      throw new BadRequestException('Deactivation reason is mandatory for high-risk operations.');
+      throw new BadRequestException(
+        'Deactivation reason is mandatory for high-risk operations.',
+      );
     }
 
     const exam = await this.prisma.exam.findUnique({
@@ -114,7 +120,9 @@ export class AdminHighRiskService {
     const beforeState = { status: exam.status.name, title: exam.title };
 
     return this.prisma.$transaction(async (tx) => {
-      let endedStatus = await tx.examStatus.findUnique({ where: { name: 'ENDED' } });
+      let endedStatus = await tx.examStatus.findUnique({
+        where: { name: 'ENDED' },
+      });
       if (!endedStatus) {
         endedStatus = await tx.examStatus.create({ data: { name: 'ENDED' } });
       }
@@ -166,11 +174,21 @@ export class AdminHighRiskService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const results: Array<{ examId: string; status: 'ACTIVATED' | 'FAILED'; reason?: string }> = [];
+    const results: Array<{
+      examId: string;
+      status: 'ACTIVATED' | 'FAILED';
+      reason?: string;
+    }> = [];
 
     for (const id of examIds) {
       try {
-        await this.activateExam(id, actorUserId, idempotencyKey, ipAddress, userAgent);
+        await this.activateExam(
+          id,
+          actorUserId,
+          idempotencyKey,
+          ipAddress,
+          userAgent,
+        );
         results.push({ examId: id, status: 'ACTIVATED' });
       } catch (err: any) {
         results.push({ examId: id, status: 'FAILED', reason: err.message });

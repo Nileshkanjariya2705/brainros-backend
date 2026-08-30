@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  CreateSubjectDto, UpdateSubjectDto,
-  CreateChapterDto, UpdateChapterDto,
-  CreateTopicDto, UpdateTopicDto,
-  CreateSubTopicDto, UpdateSubTopicDto,
+  CreateSubjectDto,
+  UpdateSubjectDto,
+  CreateChapterDto,
+  UpdateChapterDto,
+  CreateTopicDto,
+  UpdateTopicDto,
+  CreateSubTopicDto,
+  UpdateSubTopicDto,
 } from './dto/academic.dto';
 
 @Injectable()
@@ -226,7 +230,9 @@ export class AcademicService {
   // ═══════════════════════════════════════════════════════════════
 
   async getDifficultyLevels() {
-    return this.prisma.difficultyLevel.findMany({ orderBy: { displayOrder: 'asc' } });
+    return this.prisma.difficultyLevel.findMany({
+      orderBy: { displayOrder: 'asc' },
+    });
   }
 
   async getQuestionTypes() {

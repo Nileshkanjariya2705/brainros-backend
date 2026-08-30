@@ -13,7 +13,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BulkUploadService } from '../services/bulk-upload.service';
 import { InstitutionAccessService } from '../services/institution-access.service';
-import { SubmitBulkUploadDto, ReviewBulkUploadDto } from '../dto/institution.dto';
+import {
+  SubmitBulkUploadDto,
+  ReviewBulkUploadDto,
+} from '../dto/institution.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -37,7 +40,9 @@ export class BulkUploadController {
       throw new BadRequestException('Please provide a valid CSV or XLSX file.');
     }
 
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.bulkUploadService.uploadFile(
       institution.id,
       batchId || null,
@@ -52,7 +57,9 @@ export class BulkUploadController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    const { institution } = await this.accessService.getMyInstitution(user.userId);
+    const { institution } = await this.accessService.getMyInstitution(
+      user.userId,
+    );
     return this.bulkUploadService.listUploads(institution.id, page, limit);
   }
 
@@ -92,7 +99,11 @@ export class BulkUploadController {
     @Body() dto: SubmitBulkUploadDto,
   ) {
     await this.accessService.assertCanAccessUpload(user.userId, uploadId);
-    return this.bulkUploadService.submitForApproval(uploadId, user.userId, dto.notes);
+    return this.bulkUploadService.submitForApproval(
+      uploadId,
+      user.userId,
+      dto.notes,
+    );
   }
 
   @Post(':uploadId/review')

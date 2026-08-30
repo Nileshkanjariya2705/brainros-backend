@@ -65,7 +65,10 @@ export class QuestionPoolService {
       });
     }
 
-    const totalRequired = resolvedRules.reduce((sum, r) => sum + r.requiredCount, 0);
+    const totalRequired = resolvedRules.reduce(
+      (sum, r) => sum + r.requiredCount,
+      0,
+    );
     const totalAvailableEligible = await this.prisma.question.count({
       where: {
         status: 'APPROVED',
@@ -119,7 +122,9 @@ export class QuestionPoolService {
       });
 
       if (eligibleQuestions.length < rule.requiredCount) {
-        const diffText = rule.difficultyLevel ? ` [Difficulty: ${rule.difficultyLevel}]` : '';
+        const diffText = rule.difficultyLevel
+          ? ` [Difficulty: ${rule.difficultyLevel}]`
+          : '';
         const typeText = rule.type ? ` [Type: ${rule.type}]` : '';
         throw new BadRequestException(
           `Insufficient question pool for rule #${i + 1}${diffText}${typeText}. Required: ${rule.requiredCount}, Available eligible: ${eligibleQuestions.length}.`,
@@ -128,7 +133,10 @@ export class QuestionPoolService {
 
       // Deterministically shuffle candidate pool using generation seed + rule index
       const ruleSeed = `${generationSeed}_rule_${i}`;
-      const shuffledCandidates = this.randomizationService.shuffleArray(eligibleQuestions, ruleSeed);
+      const shuffledCandidates = this.randomizationService.shuffleArray(
+        eligibleQuestions,
+        ruleSeed,
+      );
       const chosenForThisRule = shuffledCandidates.slice(0, rule.requiredCount);
 
       for (const q of chosenForThisRule) {

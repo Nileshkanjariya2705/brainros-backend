@@ -48,7 +48,10 @@ export class ExamRandomizationService {
   /**
    * Shuffles options for a question and assigns randomized 0-indexed displayOrder
    */
-  shuffleOptions<T extends Record<string, any>>(options: T[], seed: string): (T & { displayOrder: number })[] {
+  shuffleOptions<T extends Record<string, any>>(
+    options: T[],
+    seed: string,
+  ): (T & { displayOrder: number })[] {
     const shuffled = this.shuffleArray(options, seed);
     return shuffled.map((opt, idx) => ({
       ...opt,

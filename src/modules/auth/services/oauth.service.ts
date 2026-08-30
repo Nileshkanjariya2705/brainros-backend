@@ -1,11 +1,16 @@
-import { Injectable, BadRequestException, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SecurityEventService } from './security-event.service';
 import { OAuth2Client } from 'google-auth-library';
 
 export interface GoogleUserInfo {
-  sub: string;           // Google unique user ID
+  sub: string; // Google unique user ID
   email: string;
   emailVerified: boolean;
   name?: string;
@@ -23,7 +28,8 @@ export class OAuthService {
     private readonly prisma: PrismaService,
     private readonly securityEventService: SecurityEventService,
   ) {
-    this.googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID') || '';
+    this.googleClientId =
+      this.configService.get<string>('GOOGLE_CLIENT_ID') || '';
     this.googleClient = new OAuth2Client(this.googleClientId);
   }
 
@@ -48,7 +54,9 @@ export class OAuthService {
       }
 
       if (!payload.sub) {
-        throw new UnauthorizedException('Invalid Google ID token: missing subject.');
+        throw new UnauthorizedException(
+          'Invalid Google ID token: missing subject.',
+        );
       }
 
       return {
@@ -59,10 +67,15 @@ export class OAuthService {
         picture: payload.picture,
       };
     } catch (error) {
-      if (error instanceof UnauthorizedException || error instanceof BadRequestException) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      this.logger.warn(`Google ID token verification failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(
+        `Google ID token verification failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
       throw new UnauthorizedException('Invalid or expired Google ID token.');
     }
   }
@@ -127,7 +140,10 @@ export class OAuthService {
             userId: existingEmailUser.id,
             ipAddress: requestContext?.ipAddress,
             userAgent: requestContext?.userAgent,
-            metadata: { providerSubject: googleInfo.sub, email: googleInfo.email },
+            metadata: {
+              providerSubject: googleInfo.sub,
+              email: googleInfo.email,
+            },
           });
 
           return { user: existingEmailUser, isNewUser: false };
@@ -139,7 +155,9 @@ export class OAuthService {
     const result = await this.prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
-          email: googleInfo.email ? googleInfo.email.toLowerCase().trim() : null,
+          email: googleInfo.email
+            ? googleInfo.email.toLowerCase().trim()
+            : null,
           status: 'ACTIVE',
           isActive: true,
           isVerified: true,
@@ -153,12 +171,16 @@ export class OAuthService {
           userId: newUser.id,
           provider: 'GOOGLE',
           providerSubject: googleInfo.sub,
-          email: googleInfo.email ? googleInfo.email.toLowerCase().trim() : null,
+          email: googleInfo.email
+            ? googleInfo.email.toLowerCase().trim()
+            : null,
         },
       });
 
       // Assign STUDENT role by default
-      let studentRole = await tx.role.findUnique({ where: { name: 'STUDENT' } });
+      let studentRole = await tx.role.findUnique({
+        where: { name: 'STUDENT' },
+      });
       if (!studentRole) {
         studentRole = await tx.role.create({ data: { name: 'STUDENT' } });
       }
@@ -181,7 +203,11 @@ export class OAuthService {
       userId: result?.id,
       ipAddress: requestContext?.ipAddress,
       userAgent: requestContext?.userAgent,
-      metadata: { providerSubject: googleInfo.sub, email: googleInfo.email, newUser: true },
+      metadata: {
+        providerSubject: googleInfo.sub,
+        email: googleInfo.email,
+        newUser: true,
+      },
     });
 
     return { user: result, isNewUser: true };

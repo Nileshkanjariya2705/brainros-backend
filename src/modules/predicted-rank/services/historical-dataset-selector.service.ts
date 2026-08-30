@@ -40,7 +40,10 @@ export class HistoricalDatasetSelectorService {
     }
 
     // Score relevance for each exam
-    const scoredList: { exam: typeof historicalExams[0]; relevance: number }[] = [];
+    const scoredList: {
+      exam: (typeof historicalExams)[0];
+      relevance: number;
+    }[] = [];
 
     for (const hExam of historicalExams) {
       let score = 10; // baseline
@@ -76,11 +79,17 @@ export class HistoricalDatasetSelectorService {
     scoredList.sort((a, b) => b.relevance - a.relevance);
     const topSelected = scoredList.slice(0, limit);
 
-    const sumRelevance = topSelected.reduce((sum, item) => sum + item.relevance, 0);
+    const sumRelevance = topSelected.reduce(
+      (sum, item) => sum + item.relevance,
+      0,
+    );
 
     return topSelected.map((item) => {
       const hExam = item.exam;
-      const weight = sumRelevance > 0 ? Math.round((item.relevance / sumRelevance) * 10000) / 10000 : 1 / topSelected.length;
+      const weight =
+        sumRelevance > 0
+          ? Math.round((item.relevance / sumRelevance) * 10000) / 10000
+          : 1 / topSelected.length;
 
       return {
         historicalExamId: hExam.id,

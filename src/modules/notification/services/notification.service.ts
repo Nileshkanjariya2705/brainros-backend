@@ -57,7 +57,10 @@ export class NotificationService {
         : JSON.stringify(options.variables);
 
       const renderedSubject = template?.subject
-        ? this.templateService.renderTemplate(template.subject, options.variables)
+        ? this.templateService.renderTemplate(
+            template.subject,
+            options.variables,
+          )
         : undefined;
 
       // 3. Idempotency & Deduplication Check
@@ -66,7 +69,9 @@ export class NotificationService {
           where: { idempotencyKey: options.idempotencyKey },
         });
         if (existing) {
-          this.logger.debug(`Duplicate notification detected for key '${options.idempotencyKey}'. Reusing.`);
+          this.logger.debug(
+            `Duplicate notification detected for key '${options.idempotencyKey}'. Reusing.`,
+          );
           return existing;
         }
       }
@@ -96,7 +101,7 @@ export class NotificationService {
         this.processNotification(notification.id, {
           notificationId: notification.id,
           recipientUserId: notification.recipientUserId,
-          recipientAddress: notification.recipientAddress,
+          recipientAddress: notification.recipientAddress || '',
           channel: notification.channel,
           type: notification.type,
           subject: renderedSubject,
@@ -107,14 +112,18 @@ export class NotificationService {
           idempotencyKey: notification.idempotencyKey || undefined,
           scheduleVersion: notification.scheduleVersion,
         }).catch((err) => {
-          this.logger.error(`Failed processing notification '${notification.id}': ${err.message}`);
+          this.logger.error(
+            `Failed processing notification '${notification.id}': ${err.message}`,
+          );
         });
       });
 
       return notification;
     } catch (err: any) {
       // Failure Isolation: Never crash caller on communication failure
-      this.logger.error(`Zero-impact notification dispatch failure: ${err.message}`);
+      this.logger.error(
+        `Zero-impact notification dispatch failure: ${err.message}`,
+      );
       return { status: 'FAILED_TO_DISPATCH', error: err.message };
     }
   }
@@ -122,7 +131,10 @@ export class NotificationService {
   /**
    * Process individual notification with provider execution, retry, and log generation.
    */
-  async processNotification(notificationId: string, payload: NotificationPayload) {
+  async processNotification(
+    notificationId: string,
+    payload: NotificationPayload,
+  ) {
     const provider = this.providerRegistry.getProvider(payload.channel);
     const requestTime = new Date();
 
@@ -163,7 +175,9 @@ export class NotificationService {
         await this.prisma.notification.update({
           where: { id: notificationId },
           data: {
-            status: result.isRetryable ? NotificationStatus.RETRYING : NotificationStatus.FAILED,
+            status: result.isRetryable
+              ? NotificationStatus.RETRYING
+              : NotificationStatus.FAILED,
             lastError: result.errorMessage,
           },
         });
@@ -211,7 +225,12 @@ export class NotificationService {
   // CONVENIENCE BUSINESS EVENT DISPATCHERS
   // ═══════════════════════════════════════════════════════════════════
 
-  async sendOtp(phone: string, otp: string, validMinutes = 10, userId?: string) {
+  async sendOtp(
+    phone: string,
+    otp: string,
+    validMinutes = 10,
+    userId?: string,
+  ) {
     return this.sendNotification({
       recipientUserId: userId,
       recipientAddress: phone,
@@ -223,7 +242,12 @@ export class NotificationService {
     });
   }
 
-  async sendRegistrationConfirmation(user: { id: string; email?: string; phone?: string; name?: string }) {
+  async sendRegistrationConfirmation(user: {
+    id: string;
+    email?: string;
+    phone?: string;
+    name?: string;
+  }) {
     if (user.email) {
       return this.sendNotification({
         recipientUserId: user.id,
@@ -263,7 +287,9 @@ export class NotificationService {
     return this.sendNotification({
       recipientUserId: student.userId,
       recipientAddress: student.deviceToken || student.email || 'device-token',
-      channel: student.deviceToken ? NotificationChannel.PUSH : NotificationChannel.EMAIL,
+      channel: student.deviceToken
+        ? NotificationChannel.PUSH
+        : NotificationChannel.EMAIL,
       type: NotificationType.EXAM_REMINDER,
       priority: NotificationPriority.HIGH,
       variables: {
@@ -341,4 +367,157 @@ export class NotificationService {
       },
     };
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STUDENT / USER IN-APP NOTIFICATION METHODS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Get paginated notifications for the authenticated user
+   */
+  async getUserNotifications(
+    userId: string,
+    query: { page?: number; limit?: number; unreadOnly?: boolean },
+  ) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [{ userId }, { recipientUserId: userId }],
+    };
+
+    if (query.unreadOnly) {
+      where.isRead = false;
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          title: true,
+          message: true,
+          data: true,
+          isRead: true,
+          readAt: true,
+          priority: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.notification.count({ where }),
+    ]);
+
+    return {
+      data: items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  /**
+   * Get live unread notification count for the authenticated user
+   */
+  async getUnreadCount(userId: string): Promise<{ count: number }> {
+    const count = await this.prisma.notification.count({
+      where: {
+        OR: [{ userId }, { recipientUserId: userId }],
+        isRead: false,
+      },
+    });
+
+    return { count };
+  }
+
+  /**
+   * Mark a single notification as read (idempotent, ownership validated)
+   */
+  async markAsRead(id: string, userId: string) {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id },
+    });
+
+    if (!notification) {
+      return { success: false, message: 'Notification not found' };
+    }
+
+    if (
+      notification.userId !== userId &&
+      notification.recipientUserId !== userId
+    ) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    if (notification.isRead) {
+      return { success: true, notification };
+    }
+
+    const updated = await this.prisma.notification.update({
+      where: { id },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return { success: true, notification: updated };
+  }
+
+  /**
+   * Mark all unread notifications as read for the authenticated user
+   */
+  async markAllAsRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        OR: [{ userId }, { recipientUserId: userId }],
+        isRead: false,
+      },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      updatedCount: result.count,
+    };
+  }
+
+  /**
+   * Delete a notification (ownership validated)
+   */
+  async deleteNotification(id: string, userId: string) {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id },
+    });
+
+    if (!notification) {
+      return { success: false, message: 'Notification not found' };
+    }
+
+    if (
+      notification.userId !== userId &&
+      notification.recipientUserId !== userId
+    ) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    await this.prisma.notification.delete({
+      where: { id },
+    });
+
+    return { success: true };
+  }
 }
+

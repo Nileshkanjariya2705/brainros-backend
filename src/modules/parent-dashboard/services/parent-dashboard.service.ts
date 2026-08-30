@@ -26,7 +26,9 @@ export class ParentDashboardService {
   /**
    * Multi-Student Overview for parent's home screen
    */
-  async getMultiStudentOverview(parentId: string): Promise<ParentStudentOverviewItem[]> {
+  async getMultiStudentOverview(
+    parentId: string,
+  ): Promise<ParentStudentOverviewItem[]> {
     const students = await this.accessService.getAuthorizedStudents(parentId);
     if (students.length === 0) return [];
 
@@ -37,7 +39,9 @@ export class ParentDashboardService {
         where: {
           studentId: st.id,
           result: { isNot: null },
-          status: { name: { in: ['EVALUATED', 'SUBMITTED', 'AUTO_SUBMITTED'] } },
+          status: {
+            name: { in: ['EVALUATED', 'SUBMITTED', 'AUTO_SUBMITTED'] },
+          },
         },
         include: {
           result: true,
@@ -60,7 +64,9 @@ export class ParentDashboardService {
         where: { status: { in: ['SCHEDULED', 'ACTIVE'] } },
       });
       const attendancePercentage =
-        totalSchedules > 0 ? Math.min(100, Math.round((testsAttempted / totalSchedules) * 100)) : 100;
+        totalSchedules > 0
+          ? Math.min(100, Math.round((testsAttempted / totalSchedules) * 100))
+          : 100;
 
       overviewList.push({
         studentId: st.id,
@@ -86,15 +92,23 @@ export class ParentDashboardService {
   /**
    * Detailed Student Dashboard for parent
    */
-  async getStudentDashboard(parentId: string, studentId: string): Promise<ParentDashboardResponse> {
+  async getStudentDashboard(
+    parentId: string,
+    studentId: string,
+  ): Promise<ParentDashboardResponse> {
     // 1. Enforce strict authorization
-    const student = await this.accessService.assertCanAccessStudent(parentId, studentId);
+    const student = await this.accessService.assertCanAccessStudent(
+      parentId,
+      studentId,
+    );
 
     // 2. Check Redis Cache
     const cacheKey = `parent:${parentId}:student:${student.id}:dashboard`;
     const cached = await this.redisService.get(cacheKey);
     if (cached) {
-      this.logger.debug(`Cache hit for parent '${parentId}' student '${student.id}' dashboard`);
+      this.logger.debug(
+        `Cache hit for parent '${parentId}' student '${student.id}' dashboard`,
+      );
       return JSON.parse(cached);
     }
 
@@ -149,16 +163,21 @@ export class ParentDashboardService {
       if (score > bestScore) bestScore = score;
     });
 
-    const averageScore = testsAttempted > 0 ? Math.round(totalScoreSum / testsAttempted) : 0;
+    const averageScore =
+      testsAttempted > 0 ? Math.round(totalScoreSum / testsAttempted) : 0;
     const averageAccuracy =
-      testsAttempted > 0 ? Math.round((totalAccuracySum / testsAttempted) * 10) / 10 : 0;
+      testsAttempted > 0
+        ? Math.round((totalAccuracySum / testsAttempted) * 10) / 10
+        : 0;
 
     const firstAttempt = attempts[0];
     const latestAttempt = attempts[attempts.length - 1];
 
     const latestScore = latestAttempt?.result?.totalScore ?? 0;
     const latestAccuracy = latestAttempt?.result?.accuracy ?? 0;
-    const scoreImprovement = firstAttempt ? latestScore - (firstAttempt.result?.totalScore ?? 0) : 0;
+    const scoreImprovement = firstAttempt
+      ? latestScore - (firstAttempt.result?.totalScore ?? 0)
+      : 0;
 
     const latestRankRecord = latestAttempt?.candidateRanks?.[0];
     const latestRank = latestRankRecord?.rank ?? null;
@@ -170,7 +189,9 @@ export class ParentDashboardService {
       where: { status: { in: ['SCHEDULED', 'ACTIVE'] } },
     });
     const attendancePercentage =
-      totalSchedules > 0 ? Math.min(100, Math.round((testsAttempted / totalSchedules) * 100)) : 100;
+      totalSchedules > 0
+        ? Math.min(100, Math.round((testsAttempted / totalSchedules) * 100))
+        : 100;
 
     // Subjects from latest attempt
     const subjectList: ParentSubjectSummaryItem[] = [];
@@ -191,14 +212,22 @@ export class ParentDashboardService {
         score: sub.score ?? 0,
         maxScore: sub.maxScore ?? 0,
         accuracy: acc,
-        percentage: sub.percentage ?? (sub.maxScore > 0 ? Math.round((sub.score / sub.maxScore) * 100) : 0),
+        percentage:
+          sub.percentage ??
+          (sub.maxScore > 0 ? Math.round((sub.score / sub.maxScore) * 100) : 0),
         status,
       });
     }
 
-    const sortedByAcc = [...subjectList].sort((a, b) => b.accuracy - a.accuracy);
+    const sortedByAcc = [...subjectList].sort(
+      (a, b) => b.accuracy - a.accuracy,
+    );
     const strongestSubject = sortedByAcc[0]
-      ? { subjectId: sortedByAcc[0].subjectId, name: sortedByAcc[0].name, accuracy: sortedByAcc[0].accuracy }
+      ? {
+          subjectId: sortedByAcc[0].subjectId,
+          name: sortedByAcc[0].name,
+          accuracy: sortedByAcc[0].accuracy,
+        }
       : null;
     const weakestSubject = sortedByAcc[sortedByAcc.length - 1]
       ? {
@@ -210,12 +239,15 @@ export class ParentDashboardService {
 
     // Time Management from latest attempt
     const latestTime = latestAttempt?.timeAnalyses?.[0];
-    const avgTimePerQuestion = latestTime?.averageTimePerQuestionSeconds ?? 60.0;
+    const avgTimePerQuestion =
+      latestTime?.averageTimePerQuestionSeconds ?? 60.0;
     const timeUtil = latestTime?.timeUtilizationPercentage ?? 85.0;
-    const highTimeWrong = (latestTime?.data as any)?.paceBreakdown?.timeWastedQuestions ?? 0;
+    const highTimeWrong =
+      latestTime?.data?.paceBreakdown?.timeWastedQuestions ?? 0;
 
     let timeStatus: 'EXCELLENT' | 'GOOD' | 'NEEDS_IMPROVEMENT' = 'GOOD';
-    let timeObservation = 'Time utilization and pacing are well-managed across test sections.';
+    let timeObservation =
+      'Time utilization and pacing are well-managed across test sections.';
 
     if (timeUtil > 95 && avgTimePerQuestion > 80) {
       timeStatus = 'NEEDS_IMPROVEMENT';
@@ -223,7 +255,8 @@ export class ParentDashboardService {
         'Recent tests indicate that the student spent extended time on challenging questions, leading to a hurried finish.';
     } else if (timeUtil >= 80 && avgTimePerQuestion <= 65) {
       timeStatus = 'EXCELLENT';
-      timeObservation = 'Excellent pacing with balanced question coverage and time preservation for review.';
+      timeObservation =
+        'Excellent pacing with balanced question coverage and time preservation for review.';
     }
 
     // Predicted Rank
@@ -269,6 +302,114 @@ export class ParentDashboardService {
         message: `Your child has achieved a +${scoreImprovement} score increase since their first mock exam. Consistent practice is showing clear results.`,
       });
     }
+
+    // Recommended Revisions based on subject accuracy
+    const recommendedRevisions: any[] = [];
+
+    const defaultRevisionTopics: Record<
+      string,
+      { topic: string; actions: string[]; hours: number }
+    > = {
+      Physics: {
+        topic: 'Mechanics, Rotational Motion & Electromagnetism',
+        actions: [
+          'Review fundamental Newton laws & vector diagrams',
+          'Solve 25 targeted numerical problems from previous year questions',
+          'Take a 30-minute timed section test',
+        ],
+        hours: 4,
+      },
+      Chemistry: {
+        topic: 'Organic Reaction Mechanisms & Chemical Equilibrium',
+        actions: [
+          'Memorize named reaction flowcharts and reagents',
+          'Practice NCERT exemplar conversion problems',
+          'Review equilibrium constant formulas and Le Chatelier principle',
+        ],
+        hours: 3,
+      },
+      Biology: {
+        topic: 'Human Physiology, Genetics & Molecular Biology',
+        actions: [
+          'Re-read NCERT biology diagrams and summary points',
+          'Practice statement-assertion questions',
+          'Flashcard review of biological terminology and pathways',
+        ],
+        hours: 3,
+      },
+      Mathematics: {
+        topic: 'Calculus, Vectors & 3D Geometry',
+        actions: [
+          'Solve standard integration and differential equation drills',
+          'Practice formula applications for plane and straight-line intersections',
+          'Review short-cut techniques for matrix determinants',
+        ],
+        hours: 5,
+      },
+    };
+
+    for (const sub of subjectList) {
+      if (
+        sub.accuracy < 75 ||
+        sub.status === 'WEAK' ||
+        sub.status === 'CRITICAL'
+      ) {
+        const fallback = defaultRevisionTopics[sub.name] || {
+          topic: `${sub.name} Core High-Yield Chapters`,
+          actions: [
+            'Revise key concepts and formulas from class notes',
+            'Attempt 20 level-1 and level-2 practice problems',
+            'Review error notebook from previous mock tests',
+          ],
+          hours: 3,
+        };
+
+        recommendedRevisions.push({
+          subjectName: sub.name,
+          topicName: fallback.topic,
+          reason: `Accuracy in ${sub.name} is ${sub.accuracy}%, below target threshold of 75%.`,
+          priority: sub.accuracy < 50 ? 'HIGH' : 'MEDIUM',
+          recommendedActions: fallback.actions,
+          estimatedHours: fallback.hours,
+        });
+      }
+    }
+
+    if (recommendedRevisions.length === 0 && subjectList.length > 0) {
+      const topWeak = sortedByAcc[sortedByAcc.length - 1];
+      if (topWeak) {
+        recommendedRevisions.push({
+          subjectName: topWeak.name,
+          topicName: `${topWeak.name} High-Yield Advanced Drills`,
+          reason: 'Maintain competitive edge with advanced speed drills.',
+          priority: 'LOW',
+          recommendedActions: [
+            'Attempt speed-accuracy challenge tests',
+            'Review tricky edge cases from national rank test series',
+          ],
+          estimatedHours: 2,
+        });
+      }
+    }
+
+    // Chronological Trend Points
+    const trendHistory = attempts.map((att) => {
+      const res = att.result || {};
+      const rk = att.candidateRanks?.[0];
+      return {
+        attemptId: att.id,
+        examName: att.exam.title,
+        date: att.serverEndTime
+          ? new Date(att.serverEndTime).toISOString().split('T')[0]
+          : new Date(att.createdAt).toISOString().split('T')[0],
+        score: res.totalScore ?? 0,
+        maxScore: res.maxScore ?? att.exam.totalMarks ?? 720,
+        percentage: res.percentage ?? 0,
+        accuracy: res.accuracy ?? 0,
+        rank: rk?.rank ?? null,
+        percentile: rk?.percentile ?? null,
+      };
+    });
 
     // Recent 5 Tests
     const recentAttempts = [...attempts].reverse().slice(0, 5);
@@ -341,6 +482,8 @@ export class ParentDashboardService {
         predicted: predictedRank,
       },
       recommendations,
+      recommendedRevisions,
+      trendHistory,
       recentTests,
     };
 
@@ -353,8 +496,15 @@ export class ParentDashboardService {
   /**
    * Get Student Trends for Parent View
    */
-  async getStudentTrends(parentId: string, studentId: string, filters: GetTrendsQueryDto) {
-    const student = await this.accessService.assertCanAccessStudent(parentId, studentId);
+  async getStudentTrends(
+    parentId: string,
+    studentId: string,
+    filters: GetTrendsQueryDto,
+  ) {
+    const student = await this.accessService.assertCanAccessStudent(
+      parentId,
+      studentId,
+    );
     return this.trendService.getStudentTrends(student.id, filters);
   }
 

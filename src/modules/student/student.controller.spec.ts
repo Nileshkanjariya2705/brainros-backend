@@ -9,7 +9,9 @@ describe('StudentController', () => {
   beforeEach(async () => {
     studentServiceMock = {
       getProfile: jest.fn().mockResolvedValue({ id: 's-1', name: 'Student 1' }),
-      updateProfile: jest.fn().mockResolvedValue({ id: 's-1', name: 'Updated Student' }),
+      updateProfile: jest
+        .fn()
+        .mockResolvedValue({ id: 's-1', name: 'Updated Student' }),
       requestChangeMobile: jest.fn().mockResolvedValue({ requiresOtp: true }),
       verifyChangeMobile: jest.fn().mockResolvedValue({ success: true }),
       requestChangeEmail: jest.fn().mockResolvedValue({ requiresOtp: true }),

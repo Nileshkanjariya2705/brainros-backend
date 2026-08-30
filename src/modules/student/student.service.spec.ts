@@ -19,7 +19,11 @@ describe('StudentService (Profile & Contact Management)', () => {
     mockRedisStorage.clear();
 
     redisServiceMock = {
-      get: jest.fn().mockImplementation(async (key: string) => mockRedisStorage.get(key) || null),
+      get: jest
+        .fn()
+        .mockImplementation(
+          async (key: string) => mockRedisStorage.get(key) || null,
+        ),
       set: jest.fn().mockImplementation(async (key: string, val: string) => {
         mockRedisStorage.set(key, val);
       }),
@@ -52,19 +56,31 @@ describe('StudentService (Profile & Contact Management)', () => {
         update: jest.fn(),
       },
       studentClass: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'class-1', name: 'Class 12' }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'class-1', name: 'Class 12' }),
       },
       examTarget: {
         findUnique: jest.fn().mockResolvedValue({ id: 'exam-1', name: 'NEET' }),
       },
       preferredLanguage: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'lang-1', name: 'English', isActive: true }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'lang-1', name: 'English', isActive: true }),
       },
       state: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'state-1', name: 'Karnataka', isActive: true }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'state-1',
+          name: 'Karnataka',
+          isActive: true,
+        }),
       },
       district: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'dist-1', name: 'Bengaluru', stateId: 'state-1' }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'dist-1',
+          name: 'Bengaluru',
+          stateId: 'state-1',
+        }),
       },
       loginSession: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -99,7 +115,9 @@ describe('StudentService (Profile & Contact Management)', () => {
 
     it('should throw NotFoundException if profile does not exist', async () => {
       prismaMock.student.findUnique.mockResolvedValue(null);
-      await expect(studentService.getProfile('non-existent')).rejects.toThrow(NotFoundException);
+      await expect(studentService.getProfile('non-existent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should update permitted fields and validate master records', async () => {
@@ -165,7 +183,11 @@ describe('StudentService (Profile & Contact Management)', () => {
 
       expect(res.data.requiresOtp).toBe(true);
       expect(res.data.purpose).toBe('CHANGE_MOBILE');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919999988888', 'CHANGE_MOBILE', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919999988888',
+        'CHANGE_MOBILE',
+        expect.any(Object),
+      );
       expect(mockRedisStorage.has('mobile-change:user-id-1')).toBe(true);
     });
 
@@ -195,7 +217,12 @@ describe('StudentService (Profile & Contact Management)', () => {
         otp: '12345',
       });
 
-      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith('+919999988888', '12345', 'CHANGE_MOBILE', expect.any(Object));
+      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith(
+        '+919999988888',
+        '12345',
+        'CHANGE_MOBILE',
+        expect.any(Object),
+      );
       expect(prismaMock.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'user-id-1' },
@@ -221,7 +248,11 @@ describe('StudentService (Profile & Contact Management)', () => {
 
       expect(res.data.requiresOtp).toBe(true);
       expect(res.data.purpose).toBe('VERIFY_EMAIL');
-      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith('+919000000001', 'VERIFY_EMAIL', expect.any(Object));
+      expect(otpServiceMock.sendOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        'VERIFY_EMAIL',
+        expect.any(Object),
+      );
       expect(mockRedisStorage.has('email-change:user-id-1')).toBe(true);
     });
 
@@ -244,7 +275,12 @@ describe('StudentService (Profile & Contact Management)', () => {
         otp: '12345',
       });
 
-      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith('+919000000001', '12345', 'VERIFY_EMAIL', expect.any(Object));
+      expect(otpServiceMock.verifyOtp).toHaveBeenCalledWith(
+        '+919000000001',
+        '12345',
+        'VERIFY_EMAIL',
+        expect.any(Object),
+      );
       expect(prismaMock.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'user-id-1' },

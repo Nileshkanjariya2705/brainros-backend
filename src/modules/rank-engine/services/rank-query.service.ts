@@ -22,7 +22,10 @@ export class RankQueryService {
   /**
    * Fast indexed read of a student's calculated ranks across all scopes
    */
-  async getMyRanks(attemptId: string, studentId: string): Promise<MyRanksResponse> {
+  async getMyRanks(
+    attemptId: string,
+    studentId: string,
+  ): Promise<MyRanksResponse> {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
       include: {
@@ -74,17 +77,19 @@ export class RankQueryService {
       },
     });
 
-    const rankMap = new Map<string, typeof ranks[0]>();
+    const rankMap = new Map<string, (typeof ranks)[0]>();
     for (const r of ranks) {
       rankMap.set(r.rankType, r);
     }
 
     const overallRow = rankMap.get('OVERALL');
 
-    const toSummary = (row?: typeof ranks[0]): ScopedRankSummary | undefined => {
+    const toSummary = (
+      row?: (typeof ranks)[0],
+    ): ScopedRankSummary | undefined => {
       if (!row) return undefined;
       return {
-        type: row.rankType as any,
+        type: row.rankType,
         scopeName: row.scopeName || undefined,
         rank: row.rank,
         totalCandidates: row.totalCandidates,
@@ -106,7 +111,8 @@ export class RankQueryService {
     const predicted = overallRow?.predictedRankMin
       ? {
           predictedRankMin: overallRow.predictedRankMin,
-          predictedRankMax: overallRow.predictedRankMax || overallRow.predictedRankMin,
+          predictedRankMax:
+            overallRow.predictedRankMax || overallRow.predictedRankMin,
           confidence: (overallRow.predictionConfidence as any) || 'MEDIUM',
           modelVersion: overallRow.predictionModelVersion || 'v1.0.0',
           disclaimer:
@@ -120,7 +126,9 @@ export class RankQueryService {
       examTitle: attempt.exam.title,
       status: 'RANK_READY',
       snapshotVersion: snapshot.snapshotVersion,
-      generatedAt: snapshot.completedAt ? snapshot.completedAt.toISOString() : undefined,
+      generatedAt: snapshot.completedAt
+        ? snapshot.completedAt.toISOString()
+        : undefined,
       overall: overallSummary,
       state: toSummary(rankMap.get('STATE')),
       district: toSummary(rankMap.get('DISTRICT')),
@@ -134,7 +142,10 @@ export class RankQueryService {
   /**
    * Fast indexed read of Admin Leaderboard with pagination and scope filters
    */
-  async getAdminLeaderboard(examId: string, query: QueryLeaderboardDto): Promise<AdminLeaderboardResponse> {
+  async getAdminLeaderboard(
+    examId: string,
+    query: QueryLeaderboardDto,
+  ): Promise<AdminLeaderboardResponse> {
     const exam = await this.prisma.exam.findUnique({
       where: { id: examId },
     });

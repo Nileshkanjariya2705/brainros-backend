@@ -21,11 +21,7 @@ import { ExamCalendarController } from './controllers/exam-calendar.controller';
 import { FeatureActivationController } from './controllers/feature-activation.controller';
 
 @Module({
-  imports: [
-    PrismaModule,
-    NotificationModule,
-    forwardRef(() => AdminModule),
-  ],
+  imports: [PrismaModule, NotificationModule, forwardRef(() => AdminModule)],
   controllers: [
     ExamSchedulingController,
     ExamCycleController,

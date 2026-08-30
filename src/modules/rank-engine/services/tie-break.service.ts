@@ -22,13 +22,16 @@ export class TieBreakService {
       if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
 
       // 3. Negative marks lost (ASC - lower penalty is better)
-      if (a.negativeMarksLost !== b.negativeMarksLost) return a.negativeMarksLost - b.negativeMarksLost;
+      if (a.negativeMarksLost !== b.negativeMarksLost)
+        return a.negativeMarksLost - b.negativeMarksLost;
 
       // 4. Time used (ASC - faster completion is better)
-      if (a.timeUsedSeconds !== b.timeUsedSeconds) return a.timeUsedSeconds - b.timeUsedSeconds;
+      if (a.timeUsedSeconds !== b.timeUsedSeconds)
+        return a.timeUsedSeconds - b.timeUsedSeconds;
 
       // 5. Correct count (DESC)
-      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      if (b.correctCount !== a.correctCount)
+        return b.correctCount - a.correctCount;
 
       // 6. Wrong count (ASC)
       if (a.wrongCount !== b.wrongCount) return a.wrongCount - b.wrongCount;

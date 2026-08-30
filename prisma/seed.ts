@@ -8,6 +8,7 @@ import { seedExamsAndBlueprints } from './seeders/05-exams-and-blueprints.seeder
 import { seedSchedulesAndAttempts } from './seeders/06-schedules-and-attempts.seeder';
 import { seedResultsAndAnalytics } from './seeders/07-results-and-analytics.seeder';
 import { seedNotificationsAndAudit } from './seeders/08-notifications-and-audit.seeder';
+import { seedOrdersAndRevenue } from './seeders/09-orders-and-revenue.seeder';
 
 const prisma = new PrismaClient();
 
@@ -62,6 +63,7 @@ async function main() {
     { step: 6, name: 'Schedules, Lifecycle & Student Attempts', fn: seedSchedulesAndAttempts },
     { step: 7, name: 'Results, Analytics, Rankings & Predictions', fn: seedResultsAndAnalytics },
     { step: 8, name: 'Notifications, Reports, Audits & Feature Gates', fn: seedNotificationsAndAudit },
+    { step: 9, name: 'Orders, Payments, Revenue & Sales Pipeline', fn: seedOrdersAndRevenue },
   ];
 
   const results: SeederResult[] = [];

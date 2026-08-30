@@ -1,4 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -6,7 +11,7 @@ import Redis from 'ioredis';
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private redisClient: Redis | null = null;
-  
+
   // In-memory database fallback to handle offline development environment
   private memoryDb = new Map<string, { value: string; expiresAt: number }>();
   private useMemoryFallback = false;
@@ -16,7 +21,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     const host = this.configService.get<string>('REDIS_HOST') || 'localhost';
     const port = this.configService.get<number>('REDIS_PORT') || 6379;
-    const password = this.configService.get<string>('REDIS_PASSWORD') || undefined;
+    const password =
+      this.configService.get<string>('REDIS_PASSWORD') || undefined;
 
     this.redisClient = new Redis({
       host,
@@ -36,14 +42,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     // Handle connection failures gracefully
     this.redisClient.on('error', (err) => {
       if (!this.useMemoryFallback) {
-        this.logger.warn(`Redis connection failed: ${err.message}. Falling back to in-memory store.`);
+        this.logger.warn(
+          `Redis connection failed: ${err.message}. Falling back to in-memory store.`,
+        );
         this.useMemoryFallback = true;
       }
     });
 
     this.redisClient.connect().catch((err) => {
       if (!this.useMemoryFallback) {
-        this.logger.warn(`Redis connection failed: ${err.message}. Falling back to in-memory store.`);
+        this.logger.warn(
+          `Redis connection failed: ${err.message}. Falling back to in-memory store.`,
+        );
         this.useMemoryFallback = true;
       }
     });
@@ -74,7 +84,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
     if (this.useMemoryFallback) {
-      const expiresAt = ttlSeconds ? Date.now() + (ttlSeconds * 1000) : Infinity;
+      const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : Infinity;
       this.memoryDb.set(key, { value, expiresAt });
       return;
     }
@@ -85,9 +95,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         await this.redisClient!.set(key, value);
       }
     } catch (err) {
-      this.logger.warn(`Redis set failed: ${err.message}. Saving in-memory instead.`);
+      this.logger.warn(
+        `Redis set failed: ${err.message}. Saving in-memory instead.`,
+      );
       this.useMemoryFallback = true;
-      const expiresAt = ttlSeconds ? Date.now() + (ttlSeconds * 1000) : Infinity;
+      const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : Infinity;
       this.memoryDb.set(key, { value, expiresAt });
     }
   }
@@ -100,7 +112,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.redisClient!.del(key);
     } catch (err) {
-      this.logger.warn(`Redis del failed: ${err.message}. Deleting from memory instead.`);
+      this.logger.warn(
+        `Redis del failed: ${err.message}. Deleting from memory instead.`,
+      );
       this.useMemoryFallback = true;
       this.memoryDb.delete(key);
     }

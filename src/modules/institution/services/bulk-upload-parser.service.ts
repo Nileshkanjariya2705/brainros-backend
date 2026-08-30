@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
@@ -13,8 +9,14 @@ const MAX_ROW_COUNT = 50000;
 
 const REQUIRED_COLUMNS = ['name', 'mobile'];
 const OPTIONAL_COLUMNS = [
-  'email', 'studentId', 'state', 'district',
-  'schoolCollege', 'class', 'examTarget', 'preferredLanguage',
+  'email',
+  'studentId',
+  'state',
+  'district',
+  'schoolCollege',
+  'class',
+  'examTarget',
+  'preferredLanguage',
 ];
 
 @Injectable()
@@ -45,7 +47,11 @@ export class BulkUploadParserService {
    * Parse uploaded Excel/CSV file and create staging rows.
    * Returns parsed row count.
    */
-  async parseAndStage(uploadId: string, fileBuffer: Buffer, fileName: string): Promise<number> {
+  async parseAndStage(
+    uploadId: string,
+    fileBuffer: Buffer,
+    fileName: string,
+  ): Promise<number> {
     const ext = path.extname(fileName).toLowerCase();
 
     let rows: Record<string, any>[];
@@ -115,7 +121,11 @@ export class BulkUploadParserService {
       if (rowNumber === 1) {
         // Header row
         row.eachCell((cell) => {
-          headers.push(String(cell.value || '').trim().toLowerCase());
+          headers.push(
+            String(cell.value || '')
+              .trim()
+              .toLowerCase(),
+          );
         });
         return;
       }
@@ -145,10 +155,14 @@ export class BulkUploadParserService {
     const lines = content.split(/\r?\n/).filter((l) => l.trim() !== '');
 
     if (lines.length < 2) {
-      throw new BadRequestException('CSV file must have a header row and at least one data row.');
+      throw new BadRequestException(
+        'CSV file must have a header row and at least one data row.',
+      );
     }
 
-    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/['"]/g, ''));
+    const headers = lines[0]
+      .split(',')
+      .map((h) => h.trim().toLowerCase().replace(/['"]/g, ''));
     const rows: Record<string, any>[] = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -195,15 +209,34 @@ export class BulkUploadParserService {
   private normalizeRow(raw: Record<string, any>): Record<string, any> {
     return {
       name: raw.name || raw['student name'] || raw['full name'] || '',
-      mobile: raw.mobile || raw.phone || raw['mobile number'] || raw['phone number'] || '',
+      mobile:
+        raw.mobile ||
+        raw.phone ||
+        raw['mobile number'] ||
+        raw['phone number'] ||
+        '',
       email: raw.email || raw['email address'] || '',
-      studentId: raw.studentid || raw['student id'] || raw['roll number'] || raw['roll no'] || '',
+      studentId:
+        raw.studentid ||
+        raw['student id'] ||
+        raw['roll number'] ||
+        raw['roll no'] ||
+        '',
       state: raw.state || '',
       district: raw.district || raw.city || '',
-      schoolCollege: raw.schoolcollege || raw.school || raw.college || raw['school/college'] || '',
+      schoolCollege:
+        raw.schoolcollege ||
+        raw.school ||
+        raw.college ||
+        raw['school/college'] ||
+        '',
       class: raw.class || raw.grade || '',
       examTarget: raw.examtarget || raw['exam target'] || raw.target || '',
-      preferredLanguage: raw.preferredlanguage || raw.language || raw['preferred language'] || '',
+      preferredLanguage:
+        raw.preferredlanguage ||
+        raw.language ||
+        raw['preferred language'] ||
+        '',
     };
   }
 }

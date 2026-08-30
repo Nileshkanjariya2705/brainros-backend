@@ -29,8 +29,12 @@ export class ParentStudentAccessService {
     });
 
     if (!student) {
-      this.logger.warn(`Parent '${parentId}' attempted to access non-existent student '${studentId}'`);
-      throw new ForbiddenException('Access denied. Student record not found or unauthorized.');
+      this.logger.warn(
+        `Parent '${parentId}' attempted to access non-existent student '${studentId}'`,
+      );
+      throw new ForbiddenException(
+        'Access denied. Student record not found or unauthorized.',
+      );
     }
 
     // 2. Validate ACTIVE ParentStudentLink
@@ -58,7 +62,10 @@ export class ParentStudentAccessService {
   /**
    * Check if parent can access student without throwing
    */
-  async canAccessStudent(parentId: string, studentId: string): Promise<boolean> {
+  async canAccessStudent(
+    parentId: string,
+    studentId: string,
+  ): Promise<boolean> {
     try {
       await this.assertCanAccessStudent(parentId, studentId);
       return true;

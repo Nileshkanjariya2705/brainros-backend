@@ -44,7 +44,10 @@ export class AdminRankController {
     @Param('examId') examId: string,
     @Query('version') version?: number,
   ) {
-    return this.rankQueryService.getSnapshotStatus(examId, version ? Number(version) : undefined);
+    return this.rankQueryService.getSnapshotStatus(
+      examId,
+      version ? Number(version) : undefined,
+    );
   }
 
   /**

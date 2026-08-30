@@ -16,7 +16,11 @@ export class InstitutionBatchService {
   /**
    * Create a batch within an institution.
    */
-  async create(institutionId: string, dto: CreateBatchDto, createdById: string) {
+  async create(
+    institutionId: string,
+    dto: CreateBatchDto,
+    createdById: string,
+  ) {
     // Institution must be ACTIVE
     const institution = await this.prisma.institution.findUnique({
       where: { id: institutionId },

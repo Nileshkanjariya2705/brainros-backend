@@ -8,14 +8,7 @@ export type StrategyCategory =
   | 'SCORE_IMPROVEMENT';
 
 export type StrategyOperator =
-  | 'GT'
-  | 'GTE'
-  | 'LT'
-  | 'LTE'
-  | 'EQ'
-  | 'BETWEEN'
-  | 'PERCENT_GT'
-  | 'PERCENT_LT';
+  'GT' | 'GTE' | 'LT' | 'LTE' | 'EQ' | 'BETWEEN' | 'PERCENT_GT' | 'PERCENT_LT';
 
 export type StrategySeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 

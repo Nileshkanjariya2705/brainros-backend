@@ -10,7 +10,10 @@ import { BlueprintValidationService } from './blueprint-validation.service';
 import { QuestionPoolService } from './question-pool.service';
 import { ExamRandomizationService } from './exam-randomization.service';
 import { ExamSnapshotService } from './exam-snapshot.service';
-import { GenerateExamDto, ValidateBlueprintDto } from '../dto/generate-exam.dto';
+import {
+  GenerateExamDto,
+  ValidateBlueprintDto,
+} from '../dto/generate-exam.dto';
 
 @Injectable()
 export class ExamGenerationService {
@@ -47,7 +50,9 @@ export class ExamGenerationService {
     });
 
     if (!blueprint) {
-      throw new NotFoundException(`Blueprint with ID '${blueprintId}' not found`);
+      throw new NotFoundException(
+        `Blueprint with ID '${blueprintId}' not found`,
+      );
     }
 
     // 1. Resolve exact counts
@@ -84,7 +89,8 @@ export class ExamGenerationService {
       }
       if (rule.difficultyLevel) {
         difficultyDistribution[rule.difficultyLevel] =
-          (difficultyDistribution[rule.difficultyLevel] || 0) + rule.requiredCount;
+          (difficultyDistribution[rule.difficultyLevel] || 0) +
+          rule.requiredCount;
       }
     }
 
@@ -135,7 +141,9 @@ export class ExamGenerationService {
       });
 
       if (!blueprint) {
-        throw new NotFoundException(`Blueprint with ID '${blueprintId}' not found`);
+        throw new NotFoundException(
+          `Blueprint with ID '${blueprintId}' not found`,
+        );
       }
 
       // 1. Resolve exact counts
@@ -145,28 +153,31 @@ export class ExamGenerationService {
       );
 
       // 2. Determine generation seed
-      const generationSeed = dto.generationSeed || this.randomizationService.generateSeed();
+      const generationSeed =
+        dto.generationSeed || this.randomizationService.generateSeed();
 
       // 3. Extract exam regional languages
       const languages = blueprint.exam.languages || [];
       const requiredLangIds = languages.map((l) => l.languageId);
 
       // 4. Select candidate questions according to blueprint rules
-      const selectedQuestions = await this.poolService.selectQuestionsForBlueprint(
-        resolvedRules,
-        generationSeed,
-        requiredLangIds.length > 0 ? requiredLangIds : undefined,
-      );
+      const selectedQuestions =
+        await this.poolService.selectQuestionsForBlueprint(
+          resolvedRules,
+          generationSeed,
+          requiredLangIds.length > 0 ? requiredLangIds : undefined,
+        );
 
       // 5. Persist normalized immutable snapshot
-      const examVersion = await this.snapshotService.persistImmutableExamVersionSnapshot({
-        exam: blueprint.exam,
-        blueprint,
-        selectedQuestions,
-        generationSeed,
-        generatedById,
-        languages,
-      });
+      const examVersion =
+        await this.snapshotService.persistImmutableExamVersionSnapshot({
+          exam: blueprint.exam,
+          blueprint,
+          selectedQuestions,
+          generationSeed,
+          generatedById,
+          languages,
+        });
 
       return {
         examId: examVersion.examId,
@@ -214,7 +225,9 @@ export class ExamGenerationService {
     });
 
     if (!version) {
-      throw new NotFoundException(`Exam version with ID '${versionId}' not found`);
+      throw new NotFoundException(
+        `Exam version with ID '${versionId}' not found`,
+      );
     }
 
     return version;

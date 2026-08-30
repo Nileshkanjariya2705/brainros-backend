@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { RankQueryService } from '../services/rank-query.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -27,7 +22,10 @@ export class RankController {
    * Get student's predicted rank range
    */
   @Get('rank-prediction')
-  getRankPrediction(@Param('attemptId') attemptId: string, @CurrentUser() user: any) {
+  getRankPrediction(
+    @Param('attemptId') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
     return this.rankQueryService.getRankPrediction(attemptId, user.userId);
   }
 }

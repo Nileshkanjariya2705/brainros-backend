@@ -22,19 +22,32 @@ export class ReportGeneratorService {
       where: { id: institutionId },
     });
 
-    const instNameSafe = (institution?.name || 'Institution').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const instNameSafe = (institution?.name || 'Institution').replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
     const dateStr = new Date().toISOString().split('T')[0];
     const fileName = `${instNameSafe}_${reportType}_${dateStr}.${format.toLowerCase()}`;
 
     if (format === 'XLSX') {
-      const buffer = await this.generateXlsx(institutionId, reportType, filters);
+      const buffer = await this.generateXlsx(
+        institutionId,
+        reportType,
+        filters,
+      );
       return {
         buffer,
         fileName,
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       };
     } else {
-      const buffer = await this.generatePdf(institutionId, reportType, filters, institution?.name || '');
+      const buffer = await this.generatePdf(
+        institutionId,
+        reportType,
+        filters,
+        institution?.name || '',
+      );
       return {
         buffer,
         fileName,
@@ -75,7 +88,10 @@ export class ReportGeneratorService {
           where: {
             batchMemberships: {
               some: {
-                batch: { institutionId, ...(filters.batchId && { id: filters.batchId }) },
+                batch: {
+                  institutionId,
+                  ...(filters.batchId && { id: filters.batchId }),
+                },
                 status: 'ACTIVE',
               },
             },
@@ -110,7 +126,9 @@ export class ReportGeneratorService {
           }
 
           const count = attempts.length || 1;
-          const activeBatch = s.batchMemberships.find((bm) => bm.status === 'ACTIVE')?.batch;
+          const activeBatch = s.batchMemberships.find(
+            (bm) => bm.status === 'ACTIVE',
+          )?.batch;
 
           sheet.addRow({
             studentId: s.studentId,
@@ -150,7 +168,8 @@ export class ReportGeneratorService {
             name: b.name,
             academicYear: b.academicYear || 'N/A',
             totalStudents: b.students.length,
-            activeStudents: b.students.filter((s) => s.status === 'ACTIVE').length,
+            activeStudents: b.students.filter((s) => s.status === 'ACTIVE')
+              .length,
             status: b.status,
           });
         }
@@ -232,17 +251,39 @@ export class ReportGeneratorService {
       doc.on('error', (err) => reject(err));
 
       // Header
-      doc.fontSize(20).fillColor('#4F46E5').text(institutionName || 'Institution Report', { align: 'center' });
+      doc
+        .fontSize(20)
+        .fillColor('#4F46E5')
+        .text(institutionName || 'Institution Report', { align: 'center' });
       doc.moveDown(0.5);
-      doc.fontSize(14).fillColor('#1F2937').text(`${reportType.replace(/_/g, ' ')} Summary`, { align: 'center' });
-      doc.fontSize(9).fillColor('#6B7280').text(`Generated on ${new Date().toLocaleDateString()}`, { align: 'center' });
+      doc
+        .fontSize(14)
+        .fillColor('#1F2937')
+        .text(`${reportType.replace(/_/g, ' ')} Summary`, { align: 'center' });
+      doc
+        .fontSize(9)
+        .fillColor('#6B7280')
+        .text(`Generated on ${new Date().toLocaleDateString()}`, {
+          align: 'center',
+        });
       doc.moveDown(1.5);
 
       // Divider
-      doc.strokeColor('#E5E7EB').lineWidth(1).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+      doc
+        .strokeColor('#E5E7EB')
+        .lineWidth(1)
+        .moveTo(40, doc.y)
+        .lineTo(555, doc.y)
+        .stroke();
       doc.moveDown(1);
 
-      doc.fontSize(11).fillColor('#374151').text(`This document contains authoritative analytical snapshots compiled for ${institutionName}.`, { lineGap: 4 });
+      doc
+        .fontSize(11)
+        .fillColor('#374151')
+        .text(
+          `This document contains authoritative analytical snapshots compiled for ${institutionName}.`,
+          { lineGap: 4 },
+        );
       doc.moveDown(1);
 
       doc.fontSize(10).fillColor('#4B5563');
@@ -251,11 +292,17 @@ export class ReportGeneratorService {
       doc.text(`• Security Validation: PASS`);
       doc.moveDown(1.5);
 
-      doc.fontSize(12).fillColor('#111827').text('Executive Notice:', { underline: true });
-      doc.fontSize(10).fillColor('#4B5563').text(
-        'For high-density tabular records (such as 10,000+ student line items), please export in XLSX format for best viewing and spreadsheet manipulation.',
-        { lineGap: 3 },
-      );
+      doc
+        .fontSize(12)
+        .fillColor('#111827')
+        .text('Executive Notice:', { underline: true });
+      doc
+        .fontSize(10)
+        .fillColor('#4B5563')
+        .text(
+          'For high-density tabular records (such as 10,000+ student line items), please export in XLSX format for best viewing and spreadsheet manipulation.',
+          { lineGap: 3 },
+        );
 
       doc.end();
     });

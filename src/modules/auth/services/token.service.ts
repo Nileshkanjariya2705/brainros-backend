@@ -34,7 +34,8 @@ export class TokenService {
     this.refreshExpiryDays = this.parseExpiryDays(
       this.configService.get('JWT_REFRESH_EXPIRATION') || '7d',
     );
-    this.accessExpiresIn = this.configService.get('JWT_ACCESS_EXPIRATION') || '15m';
+    this.accessExpiresIn =
+      this.configService.get('JWT_ACCESS_EXPIRATION') || '15m';
   }
 
   /**
@@ -53,10 +54,14 @@ export class TokenService {
     if (!match) return 900; // default 15 min
     const value = parseInt(match[1], 10);
     switch (match[2]) {
-      case 's': return value;
-      case 'm': return value * 60;
-      case 'h': return value * 3600;
-      default: return 900;
+      case 's':
+        return value;
+      case 'm':
+        return value * 60;
+      case 'h':
+        return value * 3600;
+      default:
+        return 900;
     }
   }
 
@@ -118,7 +123,10 @@ export class TokenService {
    * Rotates refresh token: revokes old, issues new pair.
    * Implements reuse detection.
    */
-  async refreshAccessTokens(rawRefreshToken: string, requestContext?: { ipAddress?: string; userAgent?: string }): Promise<TokenPair> {
+  async refreshAccessTokens(
+    rawRefreshToken: string,
+    requestContext?: { ipAddress?: string; userAgent?: string },
+  ): Promise<TokenPair> {
     const tokenHash = this.hashToken(rawRefreshToken);
 
     // 1. Retrieve refresh token from database
@@ -168,7 +176,9 @@ export class TokenService {
         metadata: { sessionId: dbToken.sessionId, tokenId: dbToken.id },
       });
 
-      throw new UnauthorizedException('Refresh token has been revoked. Please login again.');
+      throw new UnauthorizedException(
+        'Refresh token has been revoked. Please login again.',
+      );
     }
 
     // 3. Check if token is expired
@@ -182,11 +192,15 @@ export class TokenService {
 
     // 4. Verify session is still active
     if (dbToken.session && dbToken.session.revokedAt) {
-      throw new UnauthorizedException('Session has been revoked. Please login again.');
+      throw new UnauthorizedException(
+        'Session has been revoked. Please login again.',
+      );
     }
 
     if (dbToken.session && new Date() > dbToken.session.expiresAt) {
-      throw new UnauthorizedException('Session has expired. Please login again.');
+      throw new UnauthorizedException(
+        'Session has expired. Please login again.',
+      );
     }
 
     // 5. Check user status
@@ -214,7 +228,9 @@ export class TokenService {
       });
 
       if (updateResult.count === 0) {
-        throw new UnauthorizedException('Refresh token was already used or revoked.');
+        throw new UnauthorizedException(
+          'Refresh token was already used or revoked.',
+        );
       }
 
       // Create new refresh token
@@ -235,10 +251,12 @@ export class TokenService {
 
       // Update session activity
       if (sessionId) {
-        await tx.loginSession.update({
-          where: { id: sessionId },
-          data: { lastActivityAt: new Date() },
-        }).catch(() => {});
+        await tx.loginSession
+          .update({
+            where: { id: sessionId },
+            data: { lastActivityAt: new Date() },
+          })
+          .catch(() => {});
       }
 
       return created;

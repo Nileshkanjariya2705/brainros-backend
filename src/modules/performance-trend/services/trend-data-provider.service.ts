@@ -11,7 +11,10 @@ export class TrendDataProviderService {
   /**
    * Load all completed/evaluated mock attempts for a student matching filters in a single query
    */
-  async loadStudentMockAttempts(studentIdOrUserId: string, filters: GetTrendsQueryDto) {
+  async loadStudentMockAttempts(
+    studentIdOrUserId: string,
+    filters: GetTrendsQueryDto,
+  ) {
     const student = await this.prisma.student?.findFirst?.({
       where: { OR: [{ id: studentIdOrUserId }, { userId: studentIdOrUserId }] },
     });
@@ -71,7 +74,9 @@ export class TrendDataProviderService {
       take: filters.limit || 10,
     });
 
-    this.logger.debug(`Loaded ${attempts.length} evaluated mock attempts for student '${studentIdOrUserId}'`);
+    this.logger.debug(
+      `Loaded ${attempts.length} evaluated mock attempts for student '${studentIdOrUserId}'`,
+    );
     return attempts;
   }
 }

@@ -192,6 +192,7 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
 
   // 8. Exam Statuses
   const examStatusesList = [
+    'GENERATING',
     'DRAFT',
     'SUBMITTED',
     'APPROVED',

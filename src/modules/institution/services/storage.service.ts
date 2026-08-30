@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,7 +18,8 @@ export class StorageService {
   private useLocalFallback = false;
 
   constructor(private readonly config: ConfigService) {
-    this.bucketName = this.config.get<string>('S3_BUCKET') || 'brainros-reports';
+    this.bucketName =
+      this.config.get<string>('S3_BUCKET') || 'brainros-reports';
     const s3Endpoint = this.config.get<string>('S3_ENDPOINT');
     const accessKey = this.config.get<string>('S3_ACCESS_KEY');
     const secretKey = this.config.get<string>('S3_SECRET_KEY');
@@ -34,11 +39,15 @@ export class StorageService {
           forcePathStyle: true,
         });
       } catch (err) {
-        this.logger.warn(`Failed to initialize S3 client: ${err.message}. Using local storage fallback.`);
+        this.logger.warn(
+          `Failed to initialize S3 client: ${err.message}. Using local storage fallback.`,
+        );
         this.useLocalFallback = true;
       }
     } else {
-      this.logger.log('S3 credentials not configured. Using local filesystem storage fallback.');
+      this.logger.log(
+        'S3 credentials not configured. Using local filesystem storage fallback.',
+      );
       this.useLocalFallback = true;
     }
 
@@ -51,7 +60,11 @@ export class StorageService {
    * Upload a file buffer to storage.
    * Returns storage key.
    */
-  async uploadFile(key: string, buffer: Buffer, contentType: string): Promise<string> {
+  async uploadFile(
+    key: string,
+    buffer: Buffer,
+    contentType: string,
+  ): Promise<string> {
     if (!this.useLocalFallback && this.s3Client) {
       try {
         await this.s3Client.send(
@@ -64,7 +77,9 @@ export class StorageService {
         );
         return key;
       } catch (err) {
-        this.logger.warn(`S3 upload failed: ${err.message}. Falling back to local storage.`);
+        this.logger.warn(
+          `S3 upload failed: ${err.message}. Falling back to local storage.`,
+        );
         this.useLocalFallback = true;
       }
     }
@@ -85,14 +100,17 @@ export class StorageService {
           Bucket: this.bucketName,
           Key: key,
         });
-        return await getSignedUrl(this.s3Client, command, { expiresIn: expiresInSeconds });
+        return await getSignedUrl(this.s3Client, command, {
+          expiresIn: expiresInSeconds,
+        });
       } catch (err) {
         this.logger.warn(`Failed to generate S3 presigned URL: ${err.message}`);
       }
     }
 
     // Local fallback download endpoint URL
-    const appUrl = this.config.get<string>('APP_URL') || 'http://localhost:3000';
+    const appUrl =
+      this.config.get<string>('APP_URL') || 'http://localhost:3000';
     return `${appUrl}/api/v1/institutions/me/reports/download-local/${encodeURIComponent(path.basename(key))}`;
   }
 

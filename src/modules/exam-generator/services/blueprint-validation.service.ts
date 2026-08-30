@@ -40,7 +40,9 @@ export class BlueprintValidationService {
     }
 
     // 2. Separate fixed-count rules and percentage-based rules
-    const fixedRules = rules.filter((r) => r.selectionCount && r.selectionCount > 0);
+    const fixedRules = rules.filter(
+      (r) => r.selectionCount && r.selectionCount > 0,
+    );
     const percentageRules = rules.filter(
       (r) =>
         (!r.selectionCount || r.selectionCount === 0) &&
@@ -77,7 +79,9 @@ export class BlueprintValidationService {
 
       // Apportionment
       const exactAllocations = percentageRules.map((r) => {
-        const exact = (r.selectionPercentage! / 100) * (fixedRules.length > 0 ? remainingForPercentages : totalQuestions);
+        const exact =
+          (r.selectionPercentage! / 100) *
+          (fixedRules.length > 0 ? remainingForPercentages : totalQuestions);
         const floor = Math.floor(exact);
         const remainder = exact - floor;
         return {
@@ -87,8 +91,13 @@ export class BlueprintValidationService {
         };
       });
 
-      let currentAllocated = exactAllocations.reduce((sum, a) => sum + a.floor, 0);
-      const neededRemainder = (fixedRules.length > 0 ? remainingForPercentages : totalQuestions) - currentAllocated;
+      const currentAllocated = exactAllocations.reduce(
+        (sum, a) => sum + a.floor,
+        0,
+      );
+      const neededRemainder =
+        (fixedRules.length > 0 ? remainingForPercentages : totalQuestions) -
+        currentAllocated;
 
       // Sort by descending remainder and distribute left-over units
       exactAllocations.sort((a, b) => b.remainder - a.remainder);

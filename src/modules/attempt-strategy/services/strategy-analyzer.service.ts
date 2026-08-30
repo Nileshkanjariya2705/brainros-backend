@@ -1,12 +1,11 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { StrategyMetricCalculatorService } from './strategy-metric-calculator.service';
-import { StrategyRuleEngineService, StrategyRuleEntity } from './strategy-rule-engine.service';
+import {
+  StrategyRuleEngineService,
+  StrategyRuleEntity,
+} from './strategy-rule-engine.service';
 import {
   DetailedStrategyAnalysis,
   StrategySummaryMetrics,
@@ -38,7 +37,9 @@ export class StrategyAnalyzerService {
   ): Promise<DetailedStrategyAnalysis> {
     // 1. Check Redis cache
     try {
-      const cached = await this.redisService.get(this.getCacheKey(attemptId, strategyVersion));
+      const cached = await this.redisService.get(
+        this.getCacheKey(attemptId, strategyVersion),
+      );
       if (cached) {
         return JSON.parse(cached) as DetailedStrategyAnalysis;
       }
@@ -51,7 +52,11 @@ export class StrategyAnalyzerService {
     if (existing) {
       const parsed = existing.data as unknown as DetailedStrategyAnalysis;
       try {
-        await this.redisService.set(this.getCacheKey(attemptId, strategyVersion), JSON.stringify(parsed), 86400 * 7);
+        await this.redisService.set(
+          this.getCacheKey(attemptId, strategyVersion),
+          JSON.stringify(parsed),
+          86400 * 7,
+        );
       } catch (e) {}
       return parsed;
     }
@@ -132,11 +137,12 @@ export class StrategyAnalyzerService {
     }));
 
     // 6. Evaluate rules
-    const { classifications, recommendations, primaryClassification } = this.ruleEngine.evaluateRules({
-      rules: mappedRules,
-      metrics: summary,
-      metricMap,
-    });
+    const { classifications, recommendations, primaryClassification } =
+      this.ruleEngine.evaluateRules({
+        rules: mappedRules,
+        metrics: summary,
+        metricMap,
+      });
 
     const report: DetailedStrategyAnalysis = {
       attemptId,
@@ -187,7 +193,11 @@ export class StrategyAnalyzerService {
     });
 
     try {
-      await this.redisService.set(this.getCacheKey(attemptId, strategyVersion), JSON.stringify(report), 86400 * 7);
+      await this.redisService.set(
+        this.getCacheKey(attemptId, strategyVersion),
+        JSON.stringify(report),
+        86400 * 7,
+      );
     } catch (e) {}
 
     return report;
@@ -196,7 +206,10 @@ export class StrategyAnalyzerService {
   /**
    * Recalculate strategy analysis
    */
-  async recalculateStrategyAnalysis(attemptId: string, version: number = 1): Promise<DetailedStrategyAnalysis> {
+  async recalculateStrategyAnalysis(
+    attemptId: string,
+    version: number = 1,
+  ): Promise<DetailedStrategyAnalysis> {
     try {
       await this.redisService.del(this.getCacheKey(attemptId, version));
     } catch (e) {}
@@ -211,7 +224,9 @@ export class StrategyAnalyzerService {
     return full.metrics;
   }
 
-  async getRecommendations(attemptId: string): Promise<StrategyRecommendationItem[]> {
+  async getRecommendations(
+    attemptId: string,
+  ): Promise<StrategyRecommendationItem[]> {
     const full = await this.generateStrategyAnalysis(attemptId);
     return full.recommendations;
   }

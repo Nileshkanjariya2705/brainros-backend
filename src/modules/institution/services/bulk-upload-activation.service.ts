@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
@@ -17,7 +14,9 @@ export class BulkUploadActivationService {
    * Activate approved upload: create/match students and assign batch memberships.
    * Processes in chunks for database safety.
    */
-  async activateUpload(uploadId: string): Promise<{ activated: number; failed: number }> {
+  async activateUpload(
+    uploadId: string,
+  ): Promise<{ activated: number; failed: number }> {
     const upload = await this.prisma.bulkUpload.findUnique({
       where: { id: uploadId },
     });
@@ -37,7 +36,9 @@ export class BulkUploadActivationService {
         uploadId,
         validationStatus: 'VALID',
         activationStatus: 'PENDING',
-        deduplicationStatus: { notIn: ['DUPLICATE_IN_FILE', 'ALREADY_IN_BATCH'] },
+        deduplicationStatus: {
+          notIn: ['DUPLICATE_IN_FILE', 'ALREADY_IN_BATCH'],
+        },
       },
       orderBy: { rowNumber: 'asc' },
     });
@@ -85,11 +86,12 @@ export class BulkUploadActivationService {
     }
 
     // Final status
-    const finalStatus = failed > 0 && activated > 0
-      ? 'PARTIALLY_ACTIVATED'
-      : failed > 0
-        ? 'FAILED'
-        : 'ACTIVATED';
+    const finalStatus =
+      failed > 0 && activated > 0
+        ? 'PARTIALLY_ACTIVATED'
+        : failed > 0
+          ? 'FAILED'
+          : 'ACTIVATED';
 
     await this.prisma.bulkUpload.update({
       where: { id: uploadId },
@@ -116,7 +118,7 @@ export class BulkUploadActivationService {
     batchId: string | null,
     institutionId: string,
   ): Promise<void> {
-    const data = row.normalizedData as any;
+    const data = row.normalizedData;
 
     if (row.matchedStudentId) {
       // ── Existing student: just assign batch membership ──
@@ -126,7 +128,11 @@ export class BulkUploadActivationService {
             batchId_studentId: { batchId, studentId: row.matchedStudentId },
           },
           update: { status: 'ACTIVE', joinedAt: new Date(), leftAt: null },
-          create: { batchId, studentId: row.matchedStudentId, status: 'ACTIVE' },
+          create: {
+            batchId,
+            studentId: row.matchedStudentId,
+            status: 'ACTIVE',
+          },
         });
       }
       return;
@@ -165,8 +171,12 @@ export class BulkUploadActivationService {
         ? await tx.preferredLanguage.findFirst({
             where: {
               OR: [
-                { name: { equals: data.preferredLanguage, mode: 'insensitive' } },
-                { code: { equals: data.preferredLanguage, mode: 'insensitive' } },
+                {
+                  name: { equals: data.preferredLanguage, mode: 'insensitive' },
+                },
+                {
+                  code: { equals: data.preferredLanguage, mode: 'insensitive' },
+                },
               ],
             },
           })
