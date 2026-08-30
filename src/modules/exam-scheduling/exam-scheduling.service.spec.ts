@@ -7,6 +7,7 @@ import {
 import { ExamLifecycleService } from './services/exam-lifecycle.service';
 import { ExamScheduleService } from './services/exam-schedule.service';
 import { ExamAccessService } from './services/exam-access.service';
+import { NotificationQueueService } from '../notification/queues/notification-queue.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('Exam Scheduling & Activation Engine', () => {
@@ -51,6 +52,13 @@ describe('Exam Scheduling & Activation Engine', () => {
         ExamScheduleService,
         ExamAccessService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: NotificationQueueService,
+          useValue: {
+            queueExamPublishedNotification: jest.fn().mockResolvedValue(true),
+            dispatchExamNotificationJob: jest.fn().mockResolvedValue(true),
+          },
+        },
       ],
     }).compile();
 

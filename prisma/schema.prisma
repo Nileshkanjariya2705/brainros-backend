@@ -162,6 +162,8 @@ model User {
   salesOrders        Order[]                 @relation("SalesAgentOrders")
   salesLeads         SalesLead[]             @relation("SalesAgentLeads")
   createdQuestionImports QuestionImport[]    @relation("QuestionImportCreatedBy")
+  createdTranslationImports TranslationImport[] @relation("TranslationImportCreatedBy")
+  createdExamImports ExamImport[]              @relation("ExamImportCreatedBy")
 
   @@index([status])
   @@index([email])
@@ -2391,6 +2393,134 @@ model QuestionImportRow {
   @@index([action])
   @@map("question_import_rows")
 }
+
+model TranslationImport {
+  id                String                 @id @default(uuid()) @db.Uuid
+  fileName          String                 @map("file_name")
+  fileType          String                 @map("file_type")
+  storageKey        String?                @map("storage_key")
+  fileSize          Int?                   @map("file_size")
+  checksum          String?
+  status            QuestionImportStatus   @default(UPLOADED)
+  totalRows         Int                    @default(0) @map("total_rows")
+  validRows         Int                    @default(0) @map("valid_row_count")
+  invalidRows       Int                    @default(0) @map("invalid_row_count")
+  duplicateRows     Int                    @default(0) @map("duplicate_row_count")
+  updateRows        Int                    @default(0) @map("update_row_count")
+  createRows        Int                    @default(0) @map("create_row_count")
+  processedRows     Int                    @default(0) @map("processed_row_count")
+  createdCount      Int                    @default(0) @map("created_count")
+  updatedCount      Int                    @default(0) @map("updated_count")
+  failedCount       Int                    @default(0) @map("failed_count")
+  errorSummary      String?                @map("error_summary") @db.Text
+  createdById       String                 @map("created_by_id") @db.Uuid
+  startedAt         DateTime?              @map("started_at")
+  completedAt       DateTime?              @map("completed_at")
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  createdBy         User                   @relation("TranslationImportCreatedBy", fields: [createdById], references: [id])
+  rows              TranslationImportRow[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("translation_imports")
+}
+
+model TranslationImportRow {
+  id                String                  @id @default(uuid()) @db.Uuid
+  importId          String                  @map("import_id") @db.Uuid
+  rowNumber         Int                     @map("row_number")
+  status            QuestionImportRowStatus @default(PENDING)
+  action            QuestionImportRowAction @default(CREATE)
+  targetQuestionId  String?                 @map("target_question_id") @db.Uuid
+  targetLanguageId  String?                 @map("target_language_id") @db.Uuid
+  languageCode      String?                 @map("language_code")
+  rawData           Json                    @map("raw_data")
+  normalizedData    Json?                   @map("normalized_data")
+  dtoData           Json?                   @map("dto_data")
+  errors            Json?                   @map("errors")
+  warnings          Json?                   @map("warnings")
+  importStatus      String?                 @default("PENDING") @map("import_status")
+  importError       String?                 @map("import_error") @db.Text
+  resultTranslationId String?               @map("result_translation_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  import            TranslationImport       @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, rowNumber])
+  @@index([importId])
+  @@index([status])
+  @@index([action])
+  @@map("translation_import_rows")
+}
+
+model ExamImport {
+  id                String                 @id @default(uuid()) @db.Uuid
+  fileName          String                 @map("file_name")
+  fileType          String                 @map("file_type")
+  storageKey        String?                @map("storage_key")
+  fileSize          Int?                   @map("file_size")
+  checksum          String?
+  status            QuestionImportStatus   @default(UPLOADED)
+  totalRows         Int                    @default(0) @map("total_rows")
+  validRows         Int                    @default(0) @map("valid_row_count")
+  invalidRows       Int                    @default(0) @map("invalid_row_count")
+  examCount         Int                    @default(0) @map("exam_count")
+  questionsCreated  Int                    @default(0) @map("questions_created")
+  sectionsCreated   Int                    @default(0) @map("sections_created")
+  createdExamId     String?                @map("created_exam_id") @db.Uuid
+  createdExamCode   String?                @map("created_exam_code")
+  createdExamTitle  String?                @map("created_exam_title")
+  errorSummary      String?                @map("error_summary") @db.Text
+  createdById       String                 @map("created_by_id") @db.Uuid
+  startedAt         DateTime?              @map("started_at")
+  completedAt       DateTime?              @map("completed_at")
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  createdBy         User                   @relation("ExamImportCreatedBy", fields: [createdById], references: [id])
+  rows              ExamImportRow[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("exam_imports")
+}
+
+model ExamImportRow {
+  id                String                  @id @default(uuid()) @db.Uuid
+  importId          String                  @map("import_id") @db.Uuid
+  rowNumber         Int                     @map("row_number")
+  status            QuestionImportRowStatus @default(PENDING)
+  examCode          String?                 @map("exam_code")
+  examTitle         String?                 @map("exam_title")
+  subjectName       String?                 @map("subject_name")
+  sectionName       String?                 @map("section_name")
+  questionNumber    Int?                    @map("question_number")
+  rawData           Json                    @map("raw_data")
+  normalizedData    Json?                   @map("normalized_data")
+  dtoData           Json?                   @map("dto_data")
+  errors            Json?                   @map("errors")
+  warnings          Json?                   @map("warnings")
+  importStatus      String?                 @default("PENDING") @map("import_status")
+  importError       String?                 @map("import_error") @db.Text
+  resultQuestionId  String?                 @map("result_question_id") @db.Uuid
+  resultExamId      String?                 @map("result_exam_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  import            ExamImport              @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, rowNumber])
+  @@index([importId])
+  @@index([status])
+  @@map("exam_import_rows")
+}
+
+
 
 
 

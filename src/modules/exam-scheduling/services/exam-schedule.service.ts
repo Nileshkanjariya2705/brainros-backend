@@ -39,9 +39,15 @@ export class ExamScheduleService {
       throw new NotFoundException(`Exam with ID '${examId}' not found`);
     }
 
-    if (exam.status.name === 'CANCELLED' || exam.status.name === 'ENDED' || exam.status.name === 'COMPLETED') {
+    if (
+      exam.status.name === 'CANCELLED' ||
+      exam.status.name === 'ENDED' ||
+      exam.status.name === 'COMPLETED' ||
+      exam.status.name === 'DRAFT' ||
+      exam.status.name === 'SUBMITTED'
+    ) {
       throw new BadRequestException(
-        `Cannot schedule exam with status '${exam.status.name}'.`,
+        `Cannot schedule exam with status '${exam.status.name}'. Exam must be APPROVED or PUBLISHED first.`,
       );
     }
 

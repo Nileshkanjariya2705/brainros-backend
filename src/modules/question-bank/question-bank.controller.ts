@@ -92,40 +92,11 @@ export class QuestionBankController {
       user.userId,
     );
 
-    // Enqueue background validation job
-    try {
-      if (this.importQueue) {
-        await this.importQueue.add('validate-import', {
-          importId: session.id,
-          userId: user.userId,
-          action: 'VALIDATE',
-        });
-      } else {
-        // Fallback: run async without waiting
-        this.questionImportService
-          .parseAndValidateImport(session.id)
-          .catch((err) =>
-            this.logger.error(`Async validation fallback error: ${err.message}`),
-          );
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        `Failed to enqueue BullMQ job: ${err.message}. Falling back to in-process async processing.`,
-      );
-      this.questionImportService
-        .parseAndValidateImport(session.id)
-        .catch((e) =>
-          this.logger.error(`Async validation fallback error: ${e.message}`),
-        );
-    }
+    // Parse & validate spreadsheet immediately
+    const validatedSession =
+      await this.questionImportService.parseAndValidateImport(session.id);
 
-    return {
-      id: session.id,
-      fileName: session.fileName,
-      fileType: session.fileType,
-      status: session.status,
-      message: 'File uploaded successfully. Validation is running in background.',
-    };
+    return validatedSession;
   }
 
   /**
@@ -176,36 +147,12 @@ export class QuestionBankController {
     @Param('importId') importId: string,
     @CurrentUser() user: { userId: string },
   ) {
-    try {
-      if (this.importQueue) {
-        await this.importQueue.add('execute-import', {
-          importId,
-          userId: user.userId,
-          action: 'EXECUTE',
-        });
-      } else {
-        this.questionImportService
-          .executeImport(importId, user.userId)
-          .catch((err) =>
-            this.logger.error(`Async execution fallback error: ${err.message}`),
-          );
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        `Failed to enqueue execution job: ${err.message}. Falling back to in-process execution.`,
-      );
-      this.questionImportService
-        .executeImport(importId, user.userId)
-        .catch((e) =>
-          this.logger.error(`Async execution fallback error: ${e.message}`),
-        );
-    }
-
-    return {
+    const result = await this.questionImportService.executeImport(
       importId,
-      status: 'IMPORTING',
-      message: 'Batch import started. Processing questions in background.',
-    };
+      user.userId,
+    );
+
+    return result;
   }
 
   /**

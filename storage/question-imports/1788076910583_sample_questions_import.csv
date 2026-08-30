@@ -1,0 +1,2 @@
+question_id,subject,chapter,topic,question_type,difficulty,marks,negative_marks,question_text,option_a,option_b,option_c,option_d,correct_answer,numerical_answer,numerical_tolerance,assertion,reason,passage,explanation
+,Physics (NEET),Laws of Motion & Mechanics,Newton Laws of Motion,SINGLE_CORRECT,MEDIUM,4,1,What is the SI unit of electric flux through a Gaussian surface in electrostatics?,Volt-meter (V m),Newton / Coulomb (N/C),Joule / meter (J/m),Farad / meter (F/m),A,,,,,,Electric flux is phi = E . A = (V/m) * m^2 = V m.
