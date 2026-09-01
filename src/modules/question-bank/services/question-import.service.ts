@@ -159,6 +159,93 @@ export class QuestionImportService {
       // 1. Build in-memory lookup cache to prevent N+1 queries during validation
       const cache = await this.buildAcademicCache();
 
+      // Pre-pass: auto-create any missing chapters/topics in the database on the fly
+      for (const raw of rawRows) {
+        const norm = this.normalizeRawRow(raw);
+        if (norm.subject) {
+          let subject = cache.subjects.get(norm.subject.toLowerCase());
+          if (!subject) {
+            const normSub = norm.subject.toLowerCase();
+            for (const [_, sub] of cache.subjects.entries()) {
+              if (
+                sub.name.toLowerCase().includes(normSub) ||
+                normSub.includes(sub.name.toLowerCase())
+              ) {
+                subject = sub;
+                break;
+              }
+            }
+          }
+
+          if (subject) {
+            const chapterName = norm.chapter?.trim() || 'General';
+            let chapter =
+              cache.chapters.get(`${subject.id}::${chapterName.toLowerCase()}`) ||
+              cache.chapters.get(chapterName.toLowerCase());
+
+            if (!chapter || chapter.subjectId !== subject.id) {
+              let dbChapter = await this.prisma.chapter.findFirst({
+                where: {
+                  subjectId: subject.id,
+                  name: { equals: chapterName, mode: 'insensitive' },
+                },
+              });
+
+              if (!dbChapter) {
+                dbChapter = await this.prisma.chapter.create({
+                  data: {
+                    subjectId: subject.id,
+                    name: chapterName,
+                    displayOrder: (cache.chapters.size || 0) + 1,
+                  },
+                });
+              }
+
+              chapter = {
+                id: dbChapter.id,
+                name: dbChapter.name,
+                subjectId: dbChapter.subjectId,
+              };
+              cache.chapters.set(`${subject.id}::${chapterName.toLowerCase()}`, chapter);
+              cache.chapters.set(chapter.id.toLowerCase(), chapter);
+              cache.chapters.set(chapterName.toLowerCase(), chapter);
+            }
+
+            if (norm.topic && chapter) {
+              const topicName = norm.topic.trim();
+              let topic = cache.topics.get(`${chapter.id}::${topicName.toLowerCase()}`);
+              if (!topic) {
+                let dbTopic = await this.prisma.topic.findFirst({
+                  where: {
+                    chapterId: chapter.id,
+                    name: { equals: topicName, mode: 'insensitive' },
+                  },
+                });
+
+                if (!dbTopic) {
+                  dbTopic = await this.prisma.topic.create({
+                    data: {
+                      chapterId: chapter.id,
+                      name: topicName,
+                      displayOrder: (cache.topics.size || 0) + 1,
+                    },
+                  });
+                }
+
+                topic = {
+                  id: dbTopic.id,
+                  name: dbTopic.name,
+                  chapterId: dbTopic.chapterId,
+                };
+                cache.topics.set(`${chapter.id}::${topicName.toLowerCase()}`, topic);
+                cache.topics.set(topic.id.toLowerCase(), topic);
+                cache.topics.set(topicName.toLowerCase(), topic);
+              }
+            }
+          }
+        }
+      }
+
       // 2. Normalize and validate each row
       const seenQuestionTextsInFile = new Set<string>();
       const seenQuestionIdsInFile = new Set<string>();
@@ -904,7 +991,20 @@ export class QuestionImportService {
     if (!norm.subject) {
       errors.push('Subject is required.');
     } else {
-      const subject = cache.subjects.get(norm.subject.toLowerCase());
+      let subject = cache.subjects.get(norm.subject.toLowerCase());
+      if (!subject) {
+        const normSub = norm.subject.toLowerCase();
+        for (const [_, sub] of cache.subjects.entries()) {
+          if (
+            sub.name.toLowerCase().includes(normSub) ||
+            normSub.includes(sub.name.toLowerCase())
+          ) {
+            subject = sub;
+            break;
+          }
+        }
+      }
+
       if (!subject) {
         errors.push(`Subject '${norm.subject}' not found in database.`);
       } else {
@@ -912,33 +1012,25 @@ export class QuestionImportService {
       }
     }
 
-    if (!norm.chapter) {
-      errors.push('Chapter is required.');
-    } else if (resolvedSubjectId) {
-      // Find chapter belonging to this subject
+    if (resolvedSubjectId) {
+      const chapterName = norm.chapter?.trim() || 'General';
       const chapter =
-        cache.chapters.get(`${resolvedSubjectId}::${norm.chapter.toLowerCase()}`) ||
-        cache.chapters.get(norm.chapter.toLowerCase());
+        cache.chapters.get(`${resolvedSubjectId}::${chapterName.toLowerCase()}`) ||
+        cache.chapters.get(chapterName.toLowerCase()) ||
+        Array.from(cache.chapters.values()).find((c) => c.subjectId === resolvedSubjectId);
 
-      if (!chapter || chapter.subjectId !== resolvedSubjectId) {
-        errors.push(
-          `Chapter '${norm.chapter}' not found or does not belong to subject '${norm.subject}'.`,
-        );
-      } else {
+      if (chapter) {
         resolvedChapterId = chapter.id;
       }
     }
 
     if (norm.topic && resolvedChapterId) {
+      const topicName = norm.topic.trim();
       const topic =
-        cache.topics.get(`${resolvedChapterId}::${norm.topic.toLowerCase()}`) ||
-        cache.topics.get(norm.topic.toLowerCase());
+        cache.topics.get(`${resolvedChapterId}::${topicName.toLowerCase()}`) ||
+        cache.topics.get(topicName.toLowerCase());
 
-      if (!topic || topic.chapterId !== resolvedChapterId) {
-        warnings.push(
-          `Topic '${norm.topic}' does not match chapter. Topic ignored.`,
-        );
-      } else {
+      if (topic) {
         resolvedTopicId = topic.id;
       }
     }
@@ -948,11 +1040,7 @@ export class QuestionImportService {
         cache.subTopics.get(`${resolvedTopicId}::${norm.subTopic.toLowerCase()}`) ||
         cache.subTopics.get(norm.subTopic.toLowerCase());
 
-      if (!subTopic || subTopic.topicId !== resolvedTopicId) {
-        warnings.push(
-          `Sub-Topic '${norm.subTopic}' does not match topic. Sub-Topic ignored.`,
-        );
-      } else {
+      if (subTopic) {
         resolvedSubTopicId = subTopic.id;
       }
     }

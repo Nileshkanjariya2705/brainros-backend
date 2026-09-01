@@ -15,6 +15,11 @@ export class ResultController {
     return this.resultService.calculateResult(attemptId);
   }
 
+  @Get(':attemptId/status')
+  getAttemptResultStatus(@Param('attemptId') attemptId: string) {
+    return this.resultService.getAttemptResultStatus(attemptId);
+  }
+
   @Get(':attemptId')
   getResult(@Param('attemptId') attemptId: string) {
     return this.resultService.getResult(attemptId);

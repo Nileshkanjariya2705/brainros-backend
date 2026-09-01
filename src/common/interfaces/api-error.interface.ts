@@ -3,6 +3,7 @@ export interface ApiErrorResponse {
   statusCode: number;
   message: string;
   error: string;
+  code?: string;
   details?: unknown;
   timestamp: string;
   path: string;

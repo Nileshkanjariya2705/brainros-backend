@@ -3,6 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
 import { ExamSchedulingModule } from '../exam-scheduling/exam-scheduling.module';
 import { InstitutionModule } from '../institution/institution.module';
+import { NotificationModule } from '../notification/notification.module';
 
 // Controllers
 import { AdminDashboardController } from './controllers/admin-dashboard.controller';
@@ -27,7 +28,13 @@ import { InstitutionApprovalHandler } from './approval/handlers/institution-appr
 import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-approval.handler';
 
 @Module({
-  imports: [PrismaModule, RedisModule, ExamSchedulingModule, InstitutionModule],
+  imports: [
+    PrismaModule,
+    RedisModule,
+    ExamSchedulingModule,
+    InstitutionModule,
+    NotificationModule,
+  ],
   controllers: [
     AdminDashboardController,
     SuperAdminDashboardController,

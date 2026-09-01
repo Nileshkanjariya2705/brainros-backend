@@ -170,4 +170,29 @@ export class ExamSchedulingController {
       data,
     };
   }
+
+  @Get(['super-admin/exams/scheduling-candidates', 'exams/scheduling-candidates'])
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  async getSchedulingCandidates(@CurrentUser('id') _userId: string) {
+    const data = await this.scheduleService.getSchedulingCandidates();
+    return {
+      statusCode: 200,
+      message: 'Approved live exams awaiting scheduling fetched successfully',
+      data,
+    };
+  }
+
+  @Post(['super-admin/exams/:examId/activate', 'exams/:examId/activate'])
+  @Roles('SUPER_ADMIN')
+  async activateExamDirectly(
+    @Param('examId', ParseUUIDPipe) examId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const data = await this.scheduleService.activateExamDirectly(examId, userId);
+    return {
+      statusCode: 200,
+      message: data.message,
+      data,
+    };
+  }
 }

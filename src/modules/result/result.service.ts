@@ -253,6 +253,7 @@ export class ResultService {
         const result = await tx.result.create({
           data: {
             attemptId,
+            resultStatus: 'EVALUATED',
             totalQuestions,
             correctAnswers: totalCorrect,
             wrongAnswers: totalWrong,
@@ -266,19 +267,17 @@ export class ResultService {
           },
         });
 
-        // Batch subject results
+        // Subject results
         const subjectResultsData: any[] = [];
-        for (const [subjectId, data] of subjectMap) {
+        for (const [subjectId, data] of subjectMap.entries()) {
           const subjAttempted = data.correct + data.wrong;
           const subjAccuracy =
-            subjAttempted > 0
-              ? Math.round((data.correct / subjAttempted) * 10000) / 100
-              : 0;
+            subjAttempted > 0 ? (data.correct / subjAttempted) * 100 : 0;
           const subjPercentage =
             data.maxScore > 0
               ? Math.round((data.score / data.maxScore) * 10000) / 100
               : 0;
-          const subjStatus = this.analysisEngine.evaluateStatus(
+          const performanceStatus = this.analysisEngine.evaluateStatus(
             subjAccuracy,
             subjAttempted,
             thresholds,
@@ -300,7 +299,7 @@ export class ResultService {
               data.totalQuestions > 0
                 ? Math.round((data.timeSpent / data.totalQuestions) * 10) / 10
                 : 0,
-            performanceStatus: subjStatus,
+            performanceStatus,
           });
         }
 
@@ -308,14 +307,12 @@ export class ResultService {
           await tx.subjectResult.createMany({ data: subjectResultsData });
         }
 
-        // Batch chapter results
+        // Chapter results
         const chapterResultsData: any[] = [];
-        for (const [chapterId, data] of chapterMap) {
+        for (const [chapterId, data] of chapterMap.entries()) {
           const chapAttempted = data.correct + data.wrong;
           const chapAccuracy =
-            chapAttempted > 0
-              ? Math.round((data.correct / chapAttempted) * 10000) / 100
-              : 0;
+            chapAttempted > 0 ? (data.correct / chapAttempted) * 100 : 0;
           const chapPercentage =
             data.maxScore > 0
               ? Math.round((data.score / data.maxScore) * 10000) / 100
@@ -356,13 +353,75 @@ export class ResultService {
       },
     );
 
-    return this.getResult(attemptId);
+    return this.prisma.result.findUnique({ where: { attemptId } });
   }
 
   /**
-   * Get basic result for an attempt (auto-calculates if submitted)
+   * Get student attempt calculation and publication status.
+   */
+  async getAttemptResultStatus(attemptId: string) {
+    const attempt = await this.prisma.attempt.findUnique({
+      where: { id: attemptId },
+      include: {
+        status: true,
+        exam: {
+          include: {
+            schedules: { take: 1 },
+          },
+        },
+        result: true,
+      },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Attempt not found');
+    }
+
+    const isLive =
+      (attempt.exam.schedules && attempt.exam.schedules.length > 0) ||
+      (attempt.exam.title?.toUpperCase().includes('LIVE') &&
+        !attempt.exam.title?.toUpperCase().includes('PRACTICE'));
+
+    const resultStatus = attempt.result?.resultStatus || 'PROCESSING';
+    const isPublished = resultStatus === 'PUBLISHED';
+
+    if (isLive && !isPublished) {
+      return {
+        availability: 'RESULT_PENDING',
+        resultStatus,
+        examType: 'LIVE',
+        message:
+          'Your examination responses have been securely recorded and evaluated. Official results will be released upon publication by administration.',
+        attemptId,
+        examTitle: attempt.exam.title,
+        submittedAt: attempt.submittedAt,
+        publishedAt: null,
+      };
+    }
+
+    return {
+      availability: isPublished ? 'PUBLISHED' : 'PROCESSING',
+      resultStatus,
+      examType: isLive ? 'LIVE' : 'MOCK',
+      message: isPublished
+        ? 'Result is published and available.'
+        : 'Result is being calculated...',
+      attemptId,
+      examTitle: attempt.exam.title,
+      submittedAt: attempt.submittedAt,
+      publishedAt: attempt.result?.publishedAt || null,
+    };
+  }
+
+  /**
+   * Get basic result for an attempt (with anti-leakage protection for unpublished Live Exams)
    */
   async getResult(attemptId: string) {
+    const statusInfo = await this.getAttemptResultStatus(attemptId);
+    if (statusInfo.availability === 'RESULT_PENDING') {
+      return statusInfo;
+    }
+
     let result = await this.prisma.result.findUnique({
       where: { attemptId },
       include: {
@@ -433,9 +492,14 @@ export class ResultService {
   }
 
   /**
-   * Get Full Comprehensive Brainros Analysis Report (auto-calculates if submitted)
+   * Get Full Comprehensive Brainros Analysis Report (with anti-leakage protection)
    */
   async getFullAnalysis(attemptId: string) {
+    const statusInfo = await this.getAttemptResultStatus(attemptId);
+    if (statusInfo.availability === 'RESULT_PENDING') {
+      return statusInfo;
+    }
+
     const existingResult = await this.prisma.result.findUnique({
       where: { attemptId },
     });
@@ -521,9 +585,14 @@ export class ResultService {
   }
 
   /**
-   * Get detailed answer review (shows correct answers after submission)
+   * Get detailed answer review (shows correct answers after submission/publication)
    */
   async getAnswerReview(attemptId: string) {
+    const statusInfo = await this.getAttemptResultStatus(attemptId);
+    if (statusInfo.availability === 'RESULT_PENDING') {
+      return [];
+    }
+
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
       include: { status: true },

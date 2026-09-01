@@ -21,6 +21,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let error = 'Internal Server Error';
+    let code: string | undefined = undefined;
     let details: any = null;
 
     const path = request.url;
@@ -36,6 +37,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       if (typeof resBody === 'object' && resBody !== null) {
         error = (resBody as any).error || exception.name;
         message = (resBody as any).message || exception.message;
+        code = (resBody as any).code || undefined;
         details = (resBody as any).details || null;
       } else {
         message = exception.message || String(resBody);
@@ -71,6 +73,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode,
       message,
       error,
+      ...(code ? { code } : {}),
       details,
       timestamp,
       path,

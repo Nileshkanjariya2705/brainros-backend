@@ -111,3 +111,142 @@ export interface ExamPaperValidationResult {
     data: ParsedExamPaperRow;
   }>;
 }
+
+export interface BlueprintSubjectRule {
+  subject: string;
+  questionCount: number;
+  marks?: number;
+}
+
+export interface BlueprintItemDto {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  totalQuestions: number;
+  durationMinutes: number;
+  status: 'ACTIVE' | 'INACTIVE';
+  subjectDistribution: BlueprintSubjectRule[];
+  examTargetId?: string;
+}
+
+export interface TranslationValidationSummary {
+  languageId: string;
+  languageCode: string;
+  languageName: string;
+  fileName: string;
+  totalQuestions: number;
+  translatedQuestions: number;
+  coveragePercentage: number;
+  validRows: number;
+  invalidRows: number;
+  errors: string[];
+}
+
+export interface ComprehensiveExamValidationResult {
+  isValid: boolean;
+  blueprint: {
+    id: string;
+    name: string;
+    totalQuestions: number;
+    isMatched: boolean;
+    subjectChecks: Array<{
+      subject: string;
+      expectedCount: number;
+      actualCount: number;
+      isMatched: boolean;
+    }>;
+  };
+  questionsSummary: {
+    totalRows: number;
+    validRows: number;
+    invalidRows: number;
+    duplicateRows: number;
+    totalQuestions: number;
+    totalMarks: number;
+    durationMinutes: number;
+    subjectCounts: Record<string, number>;
+  };
+  translationsSummary: TranslationValidationSummary[];
+  previewRows: Array<{
+    rowNumber: number;
+    questionNumber?: number;
+    subject: string;
+    chapter?: string;
+    questionText: string;
+    questionType: string;
+    options: Array<{ key: string; text: string; isCorrect: boolean }>;
+    correctAnswer: string;
+    difficulty?: string;
+    status: 'VALID' | 'INVALID';
+    errors: string[];
+  }>;
+  errors: Array<{ row: number; column?: string; message: string }>;
+  warnings: string[];
+}
+
+export class CreateExamFromUploadDto {
+  @IsString()
+  title: string;
+
+  @IsString()
+  blueprintId: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  durationMinutes?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  defaultMarksPerQuestion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  defaultNegativeMarks?: number;
+
+  @IsOptional()
+  @IsString()
+  instructions?: string;
+}
+
+export class ExamManagerFilterDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 20;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string = 'createdAt';
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc' = 'desc';
+}

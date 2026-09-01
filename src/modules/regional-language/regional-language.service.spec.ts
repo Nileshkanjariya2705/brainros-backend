@@ -8,6 +8,8 @@ import { ExamAccessService } from '../exam-scheduling/services/exam-access.servi
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
 import { ResultService } from '../result/result.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { QuestionShuffleService } from '../exam-attempt/services/question-shuffle.service';
+import { RedisService } from '../redis/redis.service';
 import { SUPPORTED_NINE_REGIONAL_LANGUAGES } from './constants/supported-languages.constant';
 
 describe('Regional Language Engine & Multilingual Exam Attempts', () => {
@@ -89,6 +91,8 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         TranslationService,
         ExamLanguageService,
         ExamAttemptService,
+        QuestionShuffleService,
+        { provide: RedisService, useValue: { set: jest.fn().mockResolvedValue(undefined), get: jest.fn().mockResolvedValue(null) } },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ExamService, useValue: mockExamService },
         {
@@ -375,7 +379,7 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
       expect(res.language.nativeName).toBe('हिन्दी');
       expect(mockPrisma.attempt.update).toHaveBeenCalledWith({
         where: { id: attemptId },
-        data: { languageId: hindiLangId },
+        data: { languageId: hindiLangId, displayLanguageId: hindiLangId },
       });
       // CRITICAL: Ensure no answer table deletions or resets occurred
       expect(mockPrisma.answer.upsert).not.toHaveBeenCalled();

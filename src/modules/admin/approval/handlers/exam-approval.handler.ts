@@ -2,15 +2,21 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { IApprovalHandler } from '../interfaces/approval-handler.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { NotificationQueueService } from '../../../notification/queues/notification-queue.service';
 
 @Injectable()
 export class ExamApprovalHandler implements IApprovalHandler {
   readonly entityType = 'EXAM';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    private readonly notificationQueue?: NotificationQueueService,
+  ) {}
 
   async validateEntity(entityId: string, tx?: any): Promise<any> {
     const db = tx || this.prisma;
@@ -48,7 +54,10 @@ export class ExamApprovalHandler implements IApprovalHandler {
     const db = tx || this.prisma;
     const exam = await db.exam.findUnique({
       where: { id: request.resourceId },
-      include: { status: true },
+      include: {
+        status: true,
+        sections: { select: { subjectId: true } },
+      },
     });
 
     if (!exam) {
@@ -57,42 +66,108 @@ export class ExamApprovalHandler implements IApprovalHandler {
 
     const beforeState = { status: exam.status.name, title: exam.title };
 
-    let approvedStatus = await db.examStatus.findUnique({
-      where: { name: 'APPROVED' },
-    });
-    if (!approvedStatus) {
-      approvedStatus = await db.examStatus.create({
-        data: { name: 'APPROVED' },
+    // ── Check if entity is a Mock Test vs Live Exam ──
+    const isMock =
+      request.resourceType === 'MOCK_TEST' ||
+      exam.title.toUpperCase().includes('MOCK') ||
+      exam.title.toUpperCase().includes('PRACTICE') ||
+      (exam.sections && exam.sections.length === 1);
+
+    if (isMock) {
+      // ── MOCK TEST WORKFLOW: APPROVAL -> ACTIVE (Available directly) ──
+      let activeStatus = await db.examStatus.findUnique({
+        where: { name: 'ACTIVE' },
       });
-    }
+      if (!activeStatus) {
+        activeStatus = await db.examStatus.create({
+          data: { name: 'ACTIVE' },
+        });
+      }
 
-    const updated = await db.exam.update({
-      where: { id: exam.id },
-      data: {
-        statusId: approvedStatus.id,
+      const updated = await db.exam.update({
+        where: { id: exam.id },
+        data: {
+          statusId: activeStatus.id,
+          approvedById: reviewerId,
+          approvedAt: new Date(),
+          activatedAt: new Date(),
+        },
+        include: { status: true },
+      });
+
+      await db.examLifecycleHistory.create({
+        data: {
+          examId: exam.id,
+          action: 'APPROVE',
+          fromStatus: exam.status.name,
+          toStatus: 'ACTIVE',
+          performedById: reviewerId,
+          comments: comment || 'Mock test approved by Super Admin and made available to students.',
+        },
+      });
+
+      // Dispatch async notification to eligible students
+      if (this.notificationQueue) {
+        try {
+          this.notificationQueue.dispatchExamNotificationJob({
+            type: 'MOCK_AVAILABLE' as any,
+            examId: exam.id,
+          });
+        } catch {
+          // Non-blocking notification dispatch
+        }
+      }
+
+      const afterState = {
+        status: 'ACTIVE',
         approvedById: reviewerId,
-        approvedAt: new Date(),
-      },
-      include: { status: true },
-    });
+        approvedAt: updated.approvedAt,
+        isMock: true,
+        isAvailableToStudents: true,
+      };
+      return { beforeState, afterState };
+    } else {
+      // ── LIVE EXAM WORKFLOW: APPROVAL -> APPROVED (Awaiting Scheduling by Super Admin, NOT visible to students yet) ──
+      let approvedStatus = await db.examStatus.findUnique({
+        where: { name: 'APPROVED' },
+      });
+      if (!approvedStatus) {
+        approvedStatus = await db.examStatus.create({
+          data: { name: 'APPROVED' },
+        });
+      }
 
-    await db.examLifecycleHistory.create({
-      data: {
-        examId: exam.id,
-        action: 'APPROVE',
-        fromStatus: exam.status.name,
-        toStatus: 'APPROVED',
-        performedById: reviewerId,
-        comments: comment || 'Approved via central workflow',
-      },
-    });
+      const updated = await db.exam.update({
+        where: { id: exam.id },
+        data: {
+          statusId: approvedStatus.id,
+          approvedById: reviewerId,
+          approvedAt: new Date(),
+        },
+        include: { status: true },
+      });
 
-    const afterState = {
-      status: updated.status.name,
-      approvedById: reviewerId,
-      approvedAt: updated.approvedAt,
-    };
-    return { beforeState, afterState };
+      await db.examLifecycleHistory.create({
+        data: {
+          examId: exam.id,
+          action: 'APPROVE',
+          fromStatus: exam.status.name,
+          toStatus: 'APPROVED',
+          performedById: reviewerId,
+          comments: comment || 'Live exam approved by Super Admin. Awaiting scheduling.',
+        },
+      });
+
+      const afterState = {
+        status: 'APPROVED',
+        approvedById: reviewerId,
+        approvedAt: updated.approvedAt,
+        isMock: false,
+        isAwaitingScheduling: true,
+        isAvailableToStudents: false,
+      };
+      return { beforeState, afterState };
+    }
   }
 
   async onReject(

@@ -50,6 +50,11 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
     { code: 'exam:attempt', description: 'Attempt student exams' },
     { code: 'question:create', description: 'Author questions' },
     { code: 'question:review', description: 'Review & approve questions' },
+    { code: 'chapter:view', description: 'View chapters' },
+    { code: 'chapter:create', description: 'Create chapters' },
+    { code: 'chapter:update', description: 'Update chapters' },
+    { code: 'chapter:delete', description: 'Delete/archive chapters' },
+    { code: 'chapter:manage', description: 'Full chapter master management' },
     { code: 'student:manage', description: 'Manage student profiles' },
     { code: 'institution:manage', description: 'Manage institutions & batches' },
     { code: 'analytics:view', description: 'View performance analytics' },
@@ -77,6 +82,30 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
         update: {},
         create: { roleId: superAdminRole.id, permissionId: p.id },
       });
+    }
+  }
+
+  const adminRole = ctx.roles.get('ADMIN');
+  if (adminRole) {
+    const adminPermCodes = [
+      'exam:create',
+      'exam:edit',
+      'exam:schedule',
+      'question:create',
+      'question:review',
+      'chapter:view',
+      'student:manage',
+      'analytics:view',
+    ];
+    for (const code of adminPermCodes) {
+      const p = ctx.permissions.get(code);
+      if (p) {
+        await prisma.rolePermission.upsert({
+          where: { roleId_permissionId: { roleId: adminRole.id, permissionId: p.id } },
+          update: {},
+          create: { roleId: adminRole.id, permissionId: p.id },
+        });
+      }
     }
   }
 

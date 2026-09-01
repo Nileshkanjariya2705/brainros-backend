@@ -56,11 +56,18 @@ export class NotificationProcessor extends WorkerHost {
       let message = job.data.message;
 
       switch (type) {
+        case 'MOCK_AVAILABLE' as any:
+          title = title || `New Mock Test Available: ${exam.title}`;
+          message =
+            message ||
+            `A new mock test '${exam.title}' is now available for practice. You can take it anytime.`;
+          break;
+
         case 'EXAM_SCHEDULED':
           title = title || `New Exam Scheduled: ${exam.title}`;
           message =
             message ||
-            `${exam.title} (${exam.examTarget.name}) has been scheduled for ${formattedDate}. View details & blueprint now.`;
+            `${exam.title} (${exam.examTarget?.name || 'General'}) has been scheduled for ${formattedDate}. View details & blueprint now.`;
           break;
 
         case 'EXAM_RESCHEDULED':

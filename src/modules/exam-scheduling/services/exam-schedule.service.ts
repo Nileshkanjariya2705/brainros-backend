@@ -436,4 +436,115 @@ export class ExamScheduleService {
 
     return schedule;
   }
+
+  /**
+   * Get Approved Live Exams Awaiting Scheduling for Super Admin
+   */
+  async getSchedulingCandidates(query?: { search?: string; subjectId?: string }) {
+    const approvedStatus = await this.prisma.examStatus.findUnique({
+      where: { name: 'APPROVED' },
+    });
+
+    if (!approvedStatus) {
+      return [];
+    }
+
+    const where: any = {
+      statusId: approvedStatus.id,
+    };
+
+    if (query?.search) {
+      where.OR = [
+        { title: { contains: query.search, mode: 'insensitive' } },
+        { description: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const exams = await this.prisma.exam.findMany({
+      where,
+      include: {
+        examTarget: { select: { id: true, name: true } },
+        status: { select: { id: true, name: true } },
+        sections: {
+          include: {
+            subject: { select: { id: true, name: true } },
+          },
+        },
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+          take: 1,
+        },
+        _count: {
+          select: { examQuestions: true },
+        },
+      },
+      orderBy: { approvedAt: 'desc' },
+    });
+
+    return exams.map((exam) => ({
+      id: exam.id,
+      title: exam.title,
+      description: exam.description,
+      examTarget: exam.examTarget?.name || 'General',
+      durationMinutes: exam.durationMinutes,
+      totalMarks: exam.totalMarks,
+      totalQuestions: exam.totalQuestions || exam._count.examQuestions || 0,
+      approvedAt: exam.approvedAt || exam.createdAt,
+      createdAt: exam.createdAt,
+      status: exam.status.name,
+      subjects: exam.sections.map((s) => s.subject.name),
+      latestVersion: exam.versions[0]
+        ? {
+            id: exam.versions[0].id,
+            versionNumber: exam.versions[0].versionNumber,
+            status: exam.versions[0].status,
+          }
+        : null,
+    }));
+  }
+
+  /**
+   * Super Admin activates Exam directly by examId: SCHEDULED -> ACTIVE
+   */
+  async activateExamDirectly(examId: string, performedById: string) {
+    const schedule = await this.prisma.examSchedule.findFirst({
+      where: { examId, status: 'SCHEDULED' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (schedule) {
+      return this.activateExam(schedule.id, performedById);
+    }
+
+    // If no explicit schedule record exists, transition exam directly to ACTIVE
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: { status: true },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found`);
+    }
+
+    const activeStatus = await this.lifecycleService.getOrCreateExamStatus('ACTIVE');
+
+    await this.prisma.exam.update({
+      where: { id: examId },
+      data: {
+        statusId: activeStatus.id,
+        activatedAt: new Date(),
+      },
+    });
+
+    await this.lifecycleService.recordHistory({
+      examId,
+      action: 'ACTIVATE',
+      fromStatus: exam.status.name,
+      toStatus: 'ACTIVE',
+      performedById,
+      comment: 'Exam activated directly by Super Admin',
+    });
+
+    return { message: 'Exam successfully activated by Super Admin.' };
+  }
 }

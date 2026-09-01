@@ -4,20 +4,27 @@ import {
   Post,
   Param,
   Query,
+  Body,
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   Res,
+  BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  FileInterceptor,
+  AnyFilesInterceptor,
+} from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { ExamPaperImportService } from '../services/exam-paper-import.service';
 import { ExamService } from '../exam.service';
 import {
   ExamImportFormatEnum,
   ExamImportFilterDto,
+  CreateExamFromUploadDto,
+  ExamManagerFilterDto,
 } from '../dto/exam-manager.dto';
-import { ExamFilterDto } from '../dto/exam.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -30,6 +37,130 @@ export class ExamManagerController {
     private readonly examPaperImportService: ExamPaperImportService,
     private readonly examService: ExamService,
   ) {}
+
+  /**
+   * 1. Get all active predefined & custom blueprints from master data
+   * GET /admin/exam-manager/blueprints
+   */
+  @Get('blueprints')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async getBlueprints() {
+    const data = await this.examPaperImportService.getActiveBlueprints();
+    return {
+      statusCode: 200,
+      message: 'Active exam blueprints retrieved successfully',
+      data,
+    };
+  }
+
+  /**
+   * 2. Validate Question Paper + Multiple Simultaneous Regional Translation Files against Blueprint
+   * POST /admin/exam-manager/validate
+   */
+  @Post('validate')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(AnyFilesInterceptor())
+  async validateUpload(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() body: { blueprintId: string; languageIds?: string | string[] },
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No files uploaded for validation.');
+    }
+
+    const questionFile = files.find(
+      (f) =>
+        f.fieldname === 'questionFile' ||
+        f.fieldname === 'file' ||
+        !f.fieldname.startsWith('translation_'),
+    );
+
+    if (!questionFile) {
+      throw new BadRequestException('Question paper file is required.');
+    }
+
+    // Extract translation files
+    const translationFiles: Array<{
+      file: Express.Multer.File;
+      languageId: string;
+    }> = [];
+
+    for (const f of files) {
+      if (f.fieldname.startsWith('translation_')) {
+        const langId = f.fieldname.replace('translation_', '');
+        translationFiles.push({ file: f, languageId: langId });
+      }
+    }
+
+    const data =
+      await this.examPaperImportService.validateQuestionPaperAndTranslations(
+        questionFile,
+        body.blueprintId,
+        translationFiles,
+      );
+
+    return {
+      statusCode: 200,
+      message: data.isValid
+        ? 'Question paper and translations validated successfully.'
+        : 'Validation completed with errors.',
+      data,
+    };
+  }
+
+  /**
+   * 3. Transactionally Create Draft Exam + Sections + Questions + Immutable Version + Translations
+   * POST /admin/exam-manager/create-from-upload
+   */
+  @Post('create-from-upload')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(AnyFilesInterceptor())
+  async createExamFromUpload(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() body: CreateExamFromUploadDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No files uploaded for exam creation.');
+    }
+
+    const questionFile = files.find(
+      (f) =>
+        f.fieldname === 'questionFile' ||
+        f.fieldname === 'file' ||
+        !f.fieldname.startsWith('translation_'),
+    );
+
+    if (!questionFile) {
+      throw new BadRequestException('Question paper file is required.');
+    }
+
+    const translationFiles: Array<{
+      file: Express.Multer.File;
+      languageId: string;
+    }> = [];
+
+    for (const f of files) {
+      if (f.fieldname.startsWith('translation_')) {
+        const langId = f.fieldname.replace('translation_', '');
+        translationFiles.push({ file: f, languageId: langId });
+      }
+    }
+
+    const data =
+      await this.examPaperImportService.createExamFromValidatedUpload(
+        body,
+        questionFile,
+        translationFiles,
+        user.userId,
+      );
+
+    return {
+      statusCode: 201,
+      message: 'Exam created successfully in DRAFT status.',
+      data,
+    };
+  }
 
   /**
    * Download CSV or Excel Question Paper Template
@@ -125,13 +256,13 @@ export class ExamManagerController {
   }
 
   /**
-   * Get all exams list
+   * Get all exams list with search, status, type filter & pagination
    * GET /admin/exam-manager/exams
    */
   @Get('exams')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  getAllExams(@Query() filter: ExamFilterDto) {
-    return this.examService.findAll(filter);
+  async getAllExams(@Query() filter: ExamManagerFilterDto) {
+    return this.examPaperImportService.getAllExamsList(filter);
   }
 
   /**
@@ -141,6 +272,7 @@ export class ExamManagerController {
   @Get('exams/:id')
   @Roles('ADMIN', 'SUPER_ADMIN')
   getExamById(@Param('id') id: string) {
-    return this.examService.findOne(id);
+    return this.examService.findExamById(id);
   }
 }
+

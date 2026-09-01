@@ -47,7 +47,7 @@ export class QuestionBankService {
       );
     }
 
-    // 2. Verify chapter exists and belongs to subject
+    // 2. Verify chapter exists, belongs to subject, and is active
     const chapter = await this.prisma.chapter.findUnique({
       where: { id: chapterId },
     });
@@ -59,6 +59,11 @@ export class QuestionBankService {
     if (chapter.subjectId !== subjectId) {
       throw new BadRequestException(
         `Chapter '${chapter.name}' does not belong to the selected Subject '${subject.name}'.`,
+      );
+    }
+    if (!chapter.isActive) {
+      throw new BadRequestException(
+        `Selected chapter '${chapter.name}' is currently inactive/archived. Only ACTIVE chapters can be assigned to questions.`,
       );
     }
 
@@ -211,15 +216,79 @@ export class QuestionBankService {
   // ═══════════════════════════════════════════════════════════════════
 
   /**
+   * Resolves topicId and subTopicId by ID or by text name (auto-creating topic/subtopic if needed).
+   */
+  private async resolveTopicAndSubTopic(
+    chapterId: string,
+    topicId?: string,
+    topicName?: string,
+    subTopicId?: string,
+    subTopicName?: string,
+  ): Promise<{ topicId: string | null; subTopicId: string | null }> {
+    let resolvedTopicId = topicId || null;
+
+    if (!resolvedTopicId && topicName?.trim()) {
+      const tName = topicName.trim();
+      let existingTopic = await this.prisma.topic.findFirst({
+        where: {
+          chapterId,
+          name: { equals: tName, mode: 'insensitive' },
+        },
+      });
+      if (!existingTopic) {
+        existingTopic = await this.prisma.topic.create({
+          data: {
+            chapterId,
+            name: tName,
+          },
+        });
+      }
+      resolvedTopicId = existingTopic.id;
+    }
+
+    let resolvedSubTopicId = subTopicId || null;
+    if (!resolvedSubTopicId && subTopicName?.trim() && resolvedTopicId) {
+      const stName = subTopicName.trim();
+      let existingSubTopic = await this.prisma.subTopic.findFirst({
+        where: {
+          topicId: resolvedTopicId,
+          name: { equals: stName, mode: 'insensitive' },
+        },
+      });
+      if (!existingSubTopic) {
+        existingSubTopic = await this.prisma.subTopic.create({
+          data: {
+            topicId: resolvedTopicId,
+            name: stName,
+          },
+        });
+      }
+      resolvedSubTopicId = existingSubTopic.id;
+    }
+
+    return { topicId: resolvedTopicId, subTopicId: resolvedSubTopicId };
+  }
+
+  /**
    * Create a new question in DRAFT status with translations, options, answer, and explanation
    */
   async createQuestion(dto: CreateQuestionDto, createdById: string) {
+    // Resolve topic & subtopic by name or id
+    const { topicId: finalTopicId, subTopicId: finalSubTopicId } =
+      await this.resolveTopicAndSubTopic(
+        dto.chapterId,
+        dto.topicId,
+        dto.topicName,
+        dto.subTopicId,
+        dto.subTopicName,
+      );
+
     // 1. Hierarchy integrity check
     await this.validateHierarchy(
       dto.subjectId,
       dto.chapterId,
-      dto.topicId,
-      dto.subTopicId,
+      finalTopicId || undefined,
+      finalSubTopicId || undefined,
     );
 
     // 2. Determine type and difficulty
@@ -250,8 +319,8 @@ export class QuestionBankService {
         data: {
           subjectId: dto.subjectId,
           chapterId: dto.chapterId,
-          topicId: dto.topicId || null,
-          subTopicId: dto.subTopicId || null,
+          topicId: finalTopicId || null,
+          subTopicId: finalSubTopicId || null,
           difficultyId: dto.difficultyId || null,
           difficultyLevel,
           questionTypeId: dto.questionTypeId || null,
@@ -408,14 +477,24 @@ export class QuestionBankService {
     // ─── Standard In-Place Edit for DRAFT or REJECTED questions ──
     const subjectId = dto.subjectId || existing.subjectId;
     const chapterId = dto.chapterId || existing.chapterId;
-    const topicId =
-      dto.topicId !== undefined ? dto.topicId : existing.topicId || undefined;
-    const subTopicId =
-      dto.subTopicId !== undefined
-        ? dto.subTopicId
-        : existing.subTopicId || undefined;
 
-    await this.validateHierarchy(subjectId, chapterId, topicId, subTopicId);
+    const { topicId: finalTopicId, subTopicId: finalSubTopicId } =
+      await this.resolveTopicAndSubTopic(
+        chapterId,
+        dto.topicId !== undefined ? dto.topicId : existing.topicId || undefined,
+        dto.topicName,
+        dto.subTopicId !== undefined
+          ? dto.subTopicId
+          : existing.subTopicId || undefined,
+        dto.subTopicName,
+      );
+
+    await this.validateHierarchy(
+      subjectId,
+      chapterId,
+      finalTopicId || undefined,
+      finalSubTopicId || undefined,
+    );
 
     const type = (dto.type || existing.type) as QuestionTypeEnum;
     const difficultyLevel = (dto.difficultyLevel ||
@@ -442,8 +521,8 @@ export class QuestionBankService {
         data: {
           subjectId,
           chapterId,
-          topicId: topicId || null,
-          subTopicId: subTopicId || null,
+          topicId: finalTopicId || null,
+          subTopicId: finalSubTopicId || null,
           difficultyId:
             dto.difficultyId !== undefined
               ? dto.difficultyId

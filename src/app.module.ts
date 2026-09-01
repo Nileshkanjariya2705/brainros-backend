@@ -22,7 +22,26 @@ import { PredictedRankModule } from './modules/predicted-rank/predicted-rank.mod
 import { PerformanceTrendModule } from './modules/performance-trend/performance-trend.module';
 import { ParentDashboardModule } from './modules/parent-dashboard/parent-dashboard.module';
 import { RegionalLanguageModule } from './modules/regional-language/regional-language.module';
+import { ExamSecurityModule } from './modules/exam-security/exam-security.module';
+import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { BullModule } from '@nestjs/bullmq';
+import Redis from 'ioredis';
+
+const bullRedisClient = new Redis({
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: parseInt(process.env.REDIS_PORT || '6379', 10),
+  password: process.env.REDIS_PASSWORD || undefined,
+  maxRetriesPerRequest: null,
+  enableOfflineQueue: false,
+  retryStrategy: (times) => {
+    if (times > 2) return null;
+    return 1000;
+  },
+});
+
+bullRedisClient.on('error', (err) => {
+  // Gracefully handle Redis connection errors during development
+});
 
 @Module({
   imports: [
@@ -31,11 +50,7 @@ import { BullModule } from '@nestjs/bullmq';
       envFilePath: '.env',
     }),
     BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        password: process.env.REDIS_PASSWORD || undefined,
-      },
+      connection: bullRedisClient,
     }),
     ThrottlerModule.forRoot([
       {
@@ -56,6 +71,7 @@ import { BullModule } from '@nestjs/bullmq';
     ExamGeneratorModule,
     ExamSchedulingModule,
     ExamAttemptModule,
+    ExamSecurityModule,
     TimeAnalysisModule,
     AttemptStrategyModule,
     ResultModule,
@@ -64,6 +80,7 @@ import { BullModule } from '@nestjs/bullmq';
     PerformanceTrendModule,
     ParentDashboardModule,
     RegionalLanguageModule,
+    FeatureFlagModule,
   ],
 })
 export class AppModule {}

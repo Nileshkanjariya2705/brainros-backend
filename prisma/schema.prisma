@@ -118,6 +118,49 @@ enum ExamLifecycleAction {
   CANCEL
 }
 
+enum ExamSecurityLevel {
+  STANDARD
+  STRICT
+  HIGH_STAKES
+  LOCKDOWN
+}
+
+enum ExamSessionStatus {
+  ACTIVE
+  INVALIDATED
+  TERMINATED
+  EXPIRED
+}
+
+enum SecurityClientType {
+  STANDARD_BROWSER
+  LOCKDOWN_CLIENT
+}
+
+enum SecurityReviewStatus {
+  PENDING
+  CLEARED
+  CONFIRMED
+  DISQUALIFIED
+}
+
+enum SecurityActionType {
+  ALLOW
+  WARN
+  FLAG
+  REQUIRE_REAUTH
+  LOCK
+  AUTO_SUBMIT
+  TERMINATE
+}
+
+enum AttemptRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 model User {
   id                 String                  @id @default(uuid()) @db.Uuid
   phone              String?                 @unique
@@ -164,6 +207,9 @@ model User {
   createdQuestionImports QuestionImport[]    @relation("QuestionImportCreatedBy")
   createdTranslationImports TranslationImport[] @relation("TranslationImportCreatedBy")
   createdExamImports ExamImport[]              @relation("ExamImportCreatedBy")
+  examSessions       ExamSession[]
+  reviewedSecurityReviews AttemptSecurityReview[]
+  publishedResultPublications ExamResultPublication[] @relation("ResultPublishedBy")
 
   @@index([status])
   @@index([email])
@@ -475,6 +521,7 @@ model Chapter {
   subjectId      String          @map("subject_id") @db.Uuid
   name           String
   code           String?
+  description    String?
   displayOrder   Int             @default(0) @map("display_order")
   isActive       Boolean         @default(true) @map("is_active")
   createdAt      DateTime        @default(now()) @map("created_at")
@@ -653,8 +700,9 @@ model QuestionOption {
   createdAt    DateTime                    @default(now()) @map("created_at")
   updatedAt    DateTime                    @updatedAt @map("updated_at")
   question     Question                    @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  translations QuestionOptionTranslation[]
-  answers      Answer[]
+  translations           QuestionOptionTranslation[]
+  answers                Answer[]
+  attemptQuestionOptions AttemptQuestionOption[]
 
   @@index([questionId])
   @@map("question_options")
@@ -756,12 +804,14 @@ model Exam {
   approvedAt                 DateTime?         @map("approved_at")
   activatedAt                DateTime?         @map("activated_at")
   performanceThresholds      Json?             @map("performance_thresholds")
+  securityProfileId          String?           @map("security_profile_id") @db.Uuid
   createdAt                  DateTime          @default(now()) @map("created_at")
   updatedAt                  DateTime          @updatedAt @map("updated_at")
   examTarget                 ExamTarget        @relation(fields: [examTargetId], references: [id])
   status                     ExamStatus        @relation(fields: [statusId], references: [id])
   createdBy                  User              @relation("ExamCreatedBy", fields: [createdById], references: [id])
   approvedBy                 User?             @relation("ExamApprovedBy", fields: [approvedById], references: [id])
+  securityProfile            ExamSecurityProfile? @relation(fields: [securityProfileId], references: [id])
   sections                   ExamSection[]
   examQuestions              ExamQuestion[]
   scoringRules               ExamScoringRule[]
@@ -775,10 +825,12 @@ model Exam {
   rankingConfigs             RankingConfig[]
   calendars                  ExamCalendar[]
   orders                     Order[]
+  resultPublications         ExamResultPublication[]
 
   @@index([examTargetId])
   @@index([statusId])
   @@index([examDate])
+  @@index([securityProfileId])
   @@map("exams")
 }
 
@@ -832,8 +884,9 @@ model ExamQuestion {
   exam          Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
   section       ExamSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   question      Question         @relation(fields: [questionId], references: [id])
-  answers       Answer[]
-  timeLogs      QuestionTimeLog[]
+  answers          Answer[]
+  timeLogs         QuestionTimeLog[]
+  attemptQuestions AttemptQuestion[]
 
   @@unique([examId, questionId])
   @@index([examId])
@@ -870,39 +923,220 @@ model AttemptStatus {
 }
 
 model Attempt {
-  id              String          @id @default(uuid()) @db.Uuid
-  studentId       String          @map("student_id") @db.Uuid
-  examId          String          @map("exam_id") @db.Uuid
-  statusId        String          @map("status_id") @db.Uuid
-  languageId      String          @map("language_id") @db.Uuid
-  startedAt       DateTime?       @map("started_at")
-  submittedAt     DateTime?       @map("submitted_at")
-  serverStartTime DateTime?       @map("server_start_time")
-  serverEndTime   DateTime?       @map("server_end_time")
-  ipAddress       String?         @map("ip_address")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
-  student         Student         @relation(fields: [studentId], references: [id])
-  exam            Exam            @relation(fields: [examId], references: [id])
-  status          AttemptStatus   @relation(fields: [statusId], references: [id])
-  language        PreferredLanguage @relation(fields: [languageId], references: [id])
-  examVersionId   String?         @map("exam_version_id") @db.Uuid
-  scheduleId      String?         @map("schedule_id") @db.Uuid
-  answers         Answer[]
-  timeLogs        QuestionTimeLog[]
-  timeAnalyses    TimeAnalysis[]
-  strategyAnalyses StrategyAnalysis[]
-  candidateRanks  CandidateRank[]
-  predictionResults PredictionResult[]
-  result          Result?
-  examVersion     ExamVersion?    @relation(fields: [examVersionId], references: [id])
-  schedule        ExamSchedule?   @relation(fields: [scheduleId], references: [id])
+  id                      String                  @id @default(uuid()) @db.Uuid
+  studentId               String                  @map("student_id") @db.Uuid
+  examId                  String                  @map("exam_id") @db.Uuid
+  statusId                String                  @map("status_id") @db.Uuid
+  languageId              String                  @map("language_id") @db.Uuid
+  displayLanguageId       String?                 @map("display_language_id") @db.Uuid
+  randomSeed              String?                 @map("random_seed")
+  startedAt               DateTime?               @map("started_at")
+  submittedAt             DateTime?               @map("submitted_at")
+  serverStartTime         DateTime?               @map("server_start_time")
+  serverEndTime           DateTime?               @map("server_end_time")
+  ipAddress               String?                 @map("ip_address")
+  securityProfileId       String?                 @map("security_profile_id") @db.Uuid
+  securityProfileVersion  Int?                    @default(1) @map("security_profile_version")
+  riskScore               Float                   @default(0) @map("risk_score")
+  riskLevel               AttemptRiskLevel        @default(LOW) @map("risk_level")
+  isFlagged               Boolean                 @default(false) @map("is_flagged")
+  disqualifiedAt          DateTime?               @map("disqualified_at")
+  disqualificationReason  String?                 @map("disqualification_reason")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+  student                 Student                 @relation(fields: [studentId], references: [id])
+  exam                    Exam                    @relation(fields: [examId], references: [id])
+  status                  AttemptStatus           @relation(fields: [statusId], references: [id])
+  language                PreferredLanguage       @relation(fields: [languageId], references: [id])
+  examVersionId           String?                 @map("exam_version_id") @db.Uuid
+  scheduleId              String?                 @map("schedule_id") @db.Uuid
+  securityProfile         ExamSecurityProfile?    @relation(fields: [securityProfileId], references: [id])
+  answers                 Answer[]
+  timeLogs                QuestionTimeLog[]
+  timeAnalyses            TimeAnalysis[]
+  strategyAnalyses        StrategyAnalysis[]
+  candidateRanks          CandidateRank[]
+  predictionResults       PredictionResult[]
+  result                  Result?
+  examVersion             ExamVersion?            @relation(fields: [examVersionId], references: [id])
+  schedule                ExamSchedule?           @relation(fields: [scheduleId], references: [id])
+  attemptQuestions        AttemptQuestion[]
+  examSessions            ExamSession[]
+  attemptEvents           AttemptEvent[]
+  securityAcceptances     AttemptSecurityAcceptance[]
+  securityReviews         AttemptSecurityReview[]
 
   @@index([studentId, examId])
   @@index([studentId])
   @@index([examId])
   @@index([statusId])
+  @@index([riskLevel])
+  @@index([isFlagged])
   @@map("attempts")
+}
+
+model ExamSecurityProfile {
+  id                          String                    @id @default(uuid()) @db.Uuid
+  name                        String                    @unique
+  code                        String                    @unique
+  description                 String?
+  level                       ExamSecurityLevel         @default(STANDARD)
+  fullscreenRequired          Boolean                   @default(false) @map("fullscreen_required")
+  preventCopyPaste            Boolean                   @default(false) @map("prevent_copy_paste")
+  preventContextMenu          Boolean                   @default(false) @map("prevent_context_menu")
+  preventTextSelection        Boolean                   @default(false) @map("prevent_text_selection")
+  detectTabSwitch             Boolean                   @default(true) @map("detect_tab_switch")
+  detectWindowBlur            Boolean                   @default(true) @map("detect_window_blur")
+  detectFullscreenExit        Boolean                   @default(false) @map("detect_fullscreen_exit")
+  detectMultipleSessions      Boolean                   @default(true) @map("detect_multiple_sessions")
+  allowNetworkOffline         Boolean                   @default(true) @map("allow_network_offline")
+  singleSessionRequired       Boolean                   @default(false) @map("single_session_required")
+  singleDeviceRequired        Boolean                   @default(false) @map("single_device_required")
+  maxTabSwitches              Int                       @default(3) @map("max_tab_switches")
+  maxFullscreenExits          Int                       @default(2) @map("max_fullscreen_exits")
+  warningThreshold            Int                       @default(2) @map("warning_threshold")
+  autoTerminateThreshold      Int                       @default(10) @map("auto_terminate_threshold")
+  heartbeatIntervalSeconds    Int                       @default(30) @map("heartbeat_interval_seconds")
+  version                     Int                       @default(1)
+  isActive                    Boolean                   @default(true) @map("is_active")
+  createdAt                   DateTime                  @default(now()) @map("created_at")
+  updatedAt                   DateTime                  @updatedAt @map("updated_at")
+  exams                       Exam[]
+  attempts                    Attempt[]
+  rules                       ExamSecurityRule[]
+  acceptances                 AttemptSecurityAcceptance[]
+
+  @@map("exam_security_profiles")
+}
+
+model ExamSecurityRule {
+  id                String              @id @default(uuid()) @db.Uuid
+  profileId         String              @map("profile_id") @db.Uuid
+  ruleCode          String              @map("rule_code")
+  eventType         String              @map("event_type")
+  threshold         Int                 @default(1)
+  weight            Float               @default(5)
+  action            SecurityActionType  @default(WARN)
+  enabled           Boolean             @default(true)
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  profile           ExamSecurityProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, ruleCode])
+  @@index([profileId])
+  @@map("exam_security_rules")
+}
+
+model ExamSession {
+  id                String              @id @default(uuid()) @db.Uuid
+  attemptId         String              @map("attempt_id") @db.Uuid
+  userId            String              @map("user_id") @db.Uuid
+  clientType        SecurityClientType  @default(STANDARD_BROWSER) @map("client_type")
+  clientVersion     String?             @map("client_version")
+  deviceMetadata    Json?               @map("device_metadata")
+  userAgent         String?             @map("user_agent")
+  ipAddress         String?             @map("ip_address")
+  startedAt         DateTime            @default(now()) @map("started_at")
+  lastHeartbeatAt   DateTime            @default(now()) @map("last_heartbeat_at")
+  status            ExamSessionStatus   @default(ACTIVE)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  attempt           Attempt             @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  user              User                @relation(fields: [userId], references: [id])
+  events            AttemptEvent[]
+
+  @@index([attemptId])
+  @@index([userId])
+  @@index([status])
+  @@map("exam_sessions")
+}
+
+model AttemptEvent {
+  id                String              @id @default(uuid()) @db.Uuid
+  eventId           String              @unique @map("event_id")
+  attemptId         String              @map("attempt_id") @db.Uuid
+  examSessionId     String?             @map("exam_session_id") @db.Uuid
+  eventType         String              @map("event_type")
+  sequenceNumber    Int                 @default(1) @map("sequence_number")
+  clientTimestamp   DateTime?           @map("client_timestamp")
+  serverTimestamp   DateTime            @default(now()) @map("server_timestamp")
+  duration          Int?                @default(0)
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  attempt           Attempt             @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examSession       ExamSession?        @relation(fields: [examSessionId], references: [id], onDelete: SetNull)
+
+  @@index([attemptId, serverTimestamp])
+  @@index([attemptId, eventType])
+  @@index([examSessionId])
+  @@map("attempt_events")
+}
+
+model AttemptSecurityAcceptance {
+  id                String              @id @default(uuid()) @db.Uuid
+  attemptId         String              @map("attempt_id") @db.Uuid
+  securityProfileId String              @map("security_profile_id") @db.Uuid
+  policyVersion     Int                 @default(1) @map("policy_version")
+  acceptedAt        DateTime            @default(now()) @map("accepted_at")
+  ipAddress         String?             @map("ip_address")
+  userAgent         String?             @map("user_agent")
+  attempt           Attempt             @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  securityProfile   ExamSecurityProfile @relation(fields: [securityProfileId], references: [id])
+
+  @@unique([attemptId, securityProfileId, policyVersion])
+  @@index([attemptId])
+  @@map("attempt_security_acceptances")
+}
+
+model AttemptSecurityReview {
+  id                String                @id @default(uuid()) @db.Uuid
+  attemptId         String                @map("attempt_id") @db.Uuid
+  status            SecurityReviewStatus  @default(PENDING)
+  reviewedById      String?               @map("reviewed_by_id") @db.Uuid
+  reason            String?
+  notes             String?               @db.Text
+  reviewedAt        DateTime?             @map("reviewed_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  attempt           Attempt               @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  reviewedBy        User?                 @relation(fields: [reviewedById], references: [id])
+
+  @@index([attemptId])
+  @@index([status])
+  @@map("attempt_security_reviews")
+}
+
+model AttemptQuestion {
+  id             String                  @id @default(uuid()) @db.Uuid
+  attemptId      String                  @map("attempt_id") @db.Uuid
+  examQuestionId String                  @map("exam_question_id") @db.Uuid
+  displayOrder   Int                     @map("display_order")
+  sectionId      String?                 @map("section_id") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  attempt        Attempt                 @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examQuestion   ExamQuestion            @relation(fields: [examQuestionId], references: [id], onDelete: Cascade)
+  options        AttemptQuestionOption[]
+
+  @@unique([attemptId, examQuestionId])
+  @@index([attemptId, displayOrder])
+  @@map("attempt_questions")
+}
+
+model AttemptQuestionOption {
+  id                   String          @id @default(uuid()) @db.Uuid
+  attemptQuestionId    String          @map("attempt_question_id") @db.Uuid
+  examQuestionOptionId String          @map("exam_question_option_id") @db.Uuid
+  displayOrder         Int             @map("display_order")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  attemptQuestion      AttemptQuestion @relation(fields: [attemptQuestionId], references: [id], onDelete: Cascade)
+  examQuestionOption   QuestionOption  @relation(fields: [examQuestionOptionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptQuestionId, examQuestionOptionId])
+  @@index([attemptQuestionId, displayOrder])
+  @@map("attempt_question_options")
 }
 
 
@@ -1027,9 +1261,18 @@ model StrategyAnalysis {
 // RESULTS & ANALYTICS
 // ═══════════════════════════════════════════════════════════════════
 
+enum ExamPublicationStatus {
+  NOT_READY
+  PROCESSING
+  READY_TO_PUBLISH
+  PUBLISHED
+  WITHHELD
+}
+
 model Result {
   id                      String          @id @default(uuid()) @db.Uuid
   attemptId               String          @unique @map("attempt_id") @db.Uuid
+  resultStatus            String          @default("PROCESSING") @map("result_status")
   totalQuestions          Int             @map("total_questions")
   correctAnswers          Int             @map("correct_answers")
   wrongAnswers            Int             @map("wrong_answers")
@@ -1040,6 +1283,9 @@ model Result {
   accuracy                Float
   timeUsedSeconds         Int?            @map("time_used_seconds")
   averageTimePerQuestion  Float?          @map("average_time_per_question")
+  publicationVersion      Int             @default(1) @map("publication_version")
+  publishedAt             DateTime?       @map("published_at")
+  publishedBy             String?         @map("published_by") @db.Uuid
   metadata                Json?           @map("metadata")
   calculatedAt            DateTime        @default(now()) @map("calculated_at")
   createdAt               DateTime        @default(now()) @map("created_at")
@@ -1048,7 +1294,35 @@ model Result {
   subjectResults          SubjectResult[]
   chapterResults          ChapterResult[]
 
+  @@index([resultStatus])
   @@map("results")
+}
+
+model ExamResultPublication {
+  id                          String                @id @default(uuid()) @db.Uuid
+  examId                      String                @map("exam_id") @db.Uuid
+  examVersionId               String?               @map("exam_version_id") @db.Uuid
+  status                      ExamPublicationStatus @default(NOT_READY)
+  publicationVersion          Int                   @default(1) @map("publication_version")
+  publishedById               String?               @map("published_by_id") @db.Uuid
+  publishedAt                 DateTime?             @map("published_at")
+  totalEligibleAttempts       Int                   @default(0) @map("total_eligible_attempts")
+  finalizedAttempts           Int                   @default(0) @map("finalized_attempts")
+  evaluatedAttempts           Int                   @default(0) @map("evaluated_attempts")
+  analyticsCompletedAttempts  Int                   @default(0) @map("analytics_completed_attempts")
+  rankingCompleted            Boolean               @default(false) @map("ranking_completed")
+  securityReviewCompleted     Boolean               @default(true) @map("security_review_completed")
+  metadata                    Json?                 @map("metadata")
+  createdAt                   DateTime              @default(now()) @map("created_at")
+  updatedAt                   DateTime              @updatedAt @map("updated_at")
+
+  exam                        Exam                  @relation(fields: [examId], references: [id], onDelete: Cascade)
+  publishedBy                 User?                 @relation("ResultPublishedBy", fields: [publishedById], references: [id])
+
+  @@unique([examId, publicationVersion])
+  @@index([examId])
+  @@index([status])
+  @@map("exam_result_publications")
 }
 
 model SubjectResult {

@@ -9,13 +9,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ExamService } from '../exam/exam.service';
 import { ExamAccessService } from '../exam-scheduling/services/exam-access.service';
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
+import { QuestionShuffleService } from './services/question-shuffle.service';
+import { RedisService } from '../redis/redis.service';
+import { ResultService } from '../result/result.service';
 import {
   StartAttemptDto,
   SaveAnswerDto,
   BulkSaveAnswersDto,
   SaveTimeLogDto,
 } from './dto/attempt.dto';
-import { ResultService } from '../result/result.service';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 @Injectable()
 export class ExamAttemptService {
@@ -25,17 +30,24 @@ export class ExamAttemptService {
     private readonly examAccessService: ExamAccessService,
     private readonly questionTimingService: QuestionTimingService,
     private readonly resultService: ResultService,
+    private readonly questionShuffleService: QuestionShuffleService,
+    private readonly redisService: RedisService,
+    @InjectQueue(EVALUATION_QUEUE_NAME)
+    private readonly evaluationQueue: Queue,
   ) {}
 
   /**
    * Start a new exam attempt for a student.
    *
    * Gate checks (in order):
-   *   1. Exam existence
-   *   2. ExamAccessService.validateStudentAccess() — enforces ACTIVE status,
-   *      schedule window (startTime <= now < endTime), student eligibility
-   *   3. Duplicate-attempt guard (allow recovery for INTERRUPTED / IN_PROGRESS)
-   *   4. Create attempt bound to the active scheduleId + examVersionId
+   *   1. Exam existence & active status
+   *   2. Validate student access window & eligibility
+   *   3. Validate chosen language is active & allowed for this exam
+   *   4. Duplicate-attempt guard (allow recovery for INTERRUPTED / IN_PROGRESS)
+   *   5. Server-side random seed generation
+   *   6. Deterministic question and option shuffle per student
+   *   7. Atomic persistence in PostgreSQL (Attempt, AttemptQuestion, AttemptQuestionOption)
+   *   8. Warm active state in Redis
    */
   async startAttempt(
     dto: StartAttemptDto,
@@ -47,7 +59,6 @@ export class ExamAttemptService {
       dto.examId,
       studentId,
     );
-    // access.isAllowed is guaranteed true here (throws ForbiddenException otherwise)
 
     // ── 2. Fetch exam for duration ──────────────────────────────────────
     const exam = await this.prisma.exam.findUnique({
@@ -55,7 +66,41 @@ export class ExamAttemptService {
     });
     if (!exam) throw new NotFoundException('Exam not found');
 
-    // ── 3. Check for active (in-progress/interrupted) attempt to resume ───
+    // ── 3. Validate chosen language ─────────────────────────────────────
+    let resolvedLanguage = await this.prisma.preferredLanguage.findUnique({
+      where: { id: dto.languageId },
+    });
+    if (!resolvedLanguage) {
+      resolvedLanguage = await this.prisma.preferredLanguage.findFirst({
+        where: {
+          OR: [
+            { code: dto.languageId.toLowerCase() },
+            { code: dto.languageId.toUpperCase() },
+          ],
+        },
+      });
+    }
+    if (!resolvedLanguage || !resolvedLanguage.isActive) {
+      throw new BadRequestException(
+        'Selected examination language is not valid or active.',
+      );
+    }
+
+    const examLangCount = await this.prisma.examLanguage.count({
+      where: { examId: dto.examId },
+    });
+    if (examLangCount > 0) {
+      const isAllowed = await this.prisma.examLanguage.findFirst({
+        where: { examId: dto.examId, languageId: resolvedLanguage.id },
+      });
+      if (!isAllowed) {
+        throw new BadRequestException(
+          `Language '${resolvedLanguage.name}' is not configured for this exam.`,
+        );
+      }
+    }
+
+    // ── 4. Check for active (in-progress/interrupted) attempt to resume ───
     const activeAttempt = await this.prisma.attempt.findFirst({
       where: {
         studentId,
@@ -78,36 +123,141 @@ export class ExamAttemptService {
           examVersionId: access.examVersionId ?? activeAttempt.examVersionId,
         },
       });
+
+      await this.ensureAttemptQuestionsInitialized(
+        activeAttempt.id,
+        activeAttempt.examId,
+        activeAttempt.randomSeed || 'default_seed',
+      );
+
       return this.loadAttempt(activeAttempt.id);
     }
 
-    // ── 4. Create new attempt ───────────────────────────────────────────
+    // ── 5. Prepare Exam Questions & Deterministic Randomization ─────────
     const inProgressStatus = await this.getStatus('IN_PROGRESS');
     const now = new Date();
 
-    // Server-authoritative end time:
-    // min(examDuration from now, live window end) — whichever is sooner
     const durationEnd = new Date(
       now.getTime() + exam.durationMinutes * 60 * 1000,
     );
     const windowEnd = new Date(access.endTime);
     const serverEndTime = durationEnd < windowEnd ? durationEnd : windowEnd;
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        studentId,
-        examId: dto.examId,
-        statusId: inProgressStatus.id,
-        languageId: dto.languageId,
-        startedAt: now,
-        serverStartTime: now,
-        serverEndTime,
-        ipAddress,
-        // Bind to active scheduling artefacts for full audit trail
-        scheduleId: access.scheduleId ?? null,
-        examVersionId: access.examVersionId ?? null,
+    const randomSeed = this.questionShuffleService.generateAttemptSeed();
+
+    const rawExamQuestions = await this.prisma.examQuestion.findMany({
+      where: { examId: dto.examId },
+      include: {
+        section: true,
+        question: {
+          include: {
+            options: { orderBy: { displayOrder: 'asc' } },
+          },
+        },
       },
+      orderBy: { displayOrder: 'asc' },
     });
+
+    if (rawExamQuestions.length === 0) {
+      throw new BadRequestException('Exam has no questions configured.');
+    }
+
+    // Deterministically shuffle questions while preserving section order
+    const shuffledQuestions = this.questionShuffleService.shuffleQuestions(
+      rawExamQuestions,
+      randomSeed,
+      true,
+    );
+
+    // ── 6. Atomic Transaction: Persist Attempt & Personalized Order ───────
+    let securityProfileId = exam.securityProfileId;
+    let securityProfileVersion = 1;
+    if (securityProfileId) {
+      const sp = await this.prisma.examSecurityProfile.findUnique({
+        where: { id: securityProfileId },
+      });
+      if (sp) securityProfileVersion = sp.version;
+    } else {
+      const standardProfile = await this.prisma.examSecurityProfile.findUnique({
+        where: { code: 'STANDARD' },
+      });
+      if (standardProfile) {
+        securityProfileId = standardProfile.id;
+        securityProfileVersion = standardProfile.version;
+      }
+    }
+
+    const attempt = await this.prisma.$transaction(async (tx) => {
+      const newAttempt = await tx.attempt.create({
+        data: {
+          studentId,
+          examId: dto.examId,
+          statusId: inProgressStatus.id,
+          languageId: resolvedLanguage.id,
+          displayLanguageId: resolvedLanguage.id,
+          randomSeed,
+          securityProfileId: securityProfileId || null,
+          securityProfileVersion,
+          riskScore: 0,
+          riskLevel: 'LOW',
+          isFlagged: false,
+          startedAt: now,
+          serverStartTime: now,
+          serverEndTime,
+          ipAddress,
+          scheduleId: access.scheduleId ?? null,
+          examVersionId: access.examVersionId ?? null,
+        },
+      });
+
+      for (let qIdx = 0; qIdx < shuffledQuestions.length; qIdx++) {
+        const sq = shuffledQuestions[qIdx];
+        const aq = await tx.attemptQuestion.create({
+          data: {
+            attemptId: newAttempt.id,
+            examQuestionId: sq.id,
+            displayOrder: qIdx + 1,
+            sectionId: sq.sectionId ?? null,
+          },
+        });
+
+        const shuffledOpts = this.questionShuffleService.shuffleOptions(
+          sq.question?.options || [],
+          randomSeed,
+          sq.id,
+        );
+
+        if (shuffledOpts.length > 0) {
+          await tx.attemptQuestionOption.createMany({
+            data: shuffledOpts.map((opt, optIdx) => ({
+              attemptQuestionId: aq.id,
+              examQuestionOptionId: opt.id,
+              displayOrder: optIdx + 1,
+            })),
+          });
+        }
+      }
+
+      return newAttempt;
+    });
+
+    // ── 7. Warm Active State Cache in Redis ──────────────────────────────
+    try {
+      await this.redisService.set(
+        `attempt:${attempt.id}:state`,
+        JSON.stringify({
+          attemptId: attempt.id,
+          examId: attempt.examId,
+          languageId: resolvedLanguage.id,
+          status: 'IN_PROGRESS',
+          startedAt: now.toISOString(),
+          serverEndTime: serverEndTime.toISOString(),
+        }),
+        86400,
+      );
+    } catch {
+      // Non-blocking Redis fallback
+    }
 
     return this.loadAttempt(attempt.id);
   }
@@ -211,6 +361,8 @@ export class ExamAttemptService {
 
   /**
    * Student-initiated exam submission.
+   * Lightweight API: Validates ownership, locks status, saves answers,
+   * dispatches BullMQ evaluation job, and returns immediately.
    */
   async submitAttempt(attemptId: string, studentId: string) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
@@ -233,14 +385,31 @@ export class ExamAttemptService {
       },
     });
 
-    // Auto calculate result immediately on submission
+    // Enqueue Asynchronous BullMQ Evaluation Job
+    const evalJobId = `eval_${attemptId}`;
     try {
-      await this.resultService.calculateResult(attemptId);
-    } catch (err) {
-      // Non-blocking fallback
+      await this.evaluationQueue.add(
+        'EVALUATE_ATTEMPT',
+        { attemptId, triggeredAt: now.toISOString() },
+        {
+          jobId: evalJobId,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: true,
+        },
+      );
+    } catch (queueErr) {
+      // Fallback in case queue connection has transient glitch
+      this.resultService.calculateResult(attemptId).catch(() => {});
     }
 
-    return this.loadAttempt(attemptId);
+    return {
+      attemptId,
+      status: 'SUBMITTED',
+      resultStatus: 'PROCESSING',
+      message: 'Attempt submitted successfully and queued for evaluation.',
+      submittedAt: now.toISOString(),
+    };
   }
 
   /**
@@ -253,7 +422,13 @@ export class ExamAttemptService {
       include: { status: true },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.status.name !== 'IN_PROGRESS') return;
+    if (attempt.status.name !== 'IN_PROGRESS') {
+      return {
+        attemptId,
+        status: attempt.status.name,
+        resultStatus: 'PROCESSING',
+      };
+    }
 
     const now = new Date();
     const effectiveEndTime =
@@ -277,14 +452,30 @@ export class ExamAttemptService {
       },
     });
 
-    // Auto calculate result immediately on auto-submit
+    // Enqueue Asynchronous BullMQ Evaluation Job
+    const evalJobId = `eval_${attemptId}`;
     try {
-      await this.resultService.calculateResult(attemptId);
-    } catch (err) {
-      // Non-blocking fallback
+      await this.evaluationQueue.add(
+        'EVALUATE_ATTEMPT',
+        { attemptId, triggeredAt: effectiveEndTime.toISOString() },
+        {
+          jobId: evalJobId,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: true,
+        },
+      );
+    } catch (queueErr) {
+      this.resultService.calculateResult(attemptId).catch(() => {});
     }
 
-    return this.loadAttempt(attemptId);
+    return {
+      attemptId,
+      status: 'AUTO_SUBMITTED',
+      resultStatus: 'PROCESSING',
+      message: 'Attempt auto-submitted and queued for evaluation.',
+      submittedAt: effectiveEndTime.toISOString(),
+    };
   }
 
   /**
@@ -369,8 +560,24 @@ export class ExamAttemptService {
     // 3. Atomically update selected language on Attempt record
     await this.prisma.attempt.update({
       where: { id: attemptId },
-      data: { languageId: language.id },
+      data: {
+        languageId: language.id,
+        displayLanguageId: language.id,
+      },
     });
+
+    // 4. Update Redis active state
+    try {
+      const redisStateKey = `attempt:${attemptId}:state`;
+      const cached = await this.redisService.get(redisStateKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        parsed.languageId = language.id;
+        await this.redisService.set(redisStateKey, JSON.stringify(parsed), 86400);
+      }
+    } catch {
+      // Non-blocking Redis fallback
+    }
 
     return {
       attemptId,
@@ -384,15 +591,244 @@ export class ExamAttemptService {
   }
 
   /**
+   * Idempotently ensures that AttemptQuestion & AttemptQuestionOption records are persisted in DB.
+   */
+  async ensureAttemptQuestionsInitialized(
+    attemptId: string,
+    examId: string,
+    randomSeed: string,
+  ) {
+    const existingCount = await this.prisma.attemptQuestion.count({
+      where: { attemptId },
+    });
+    if (existingCount > 0) return;
+
+    const rawExamQuestions = await this.prisma.examQuestion.findMany({
+      where: { examId },
+      include: {
+        section: true,
+        question: {
+          include: {
+            options: { orderBy: { displayOrder: 'asc' } },
+          },
+        },
+      },
+      orderBy: { displayOrder: 'asc' },
+    });
+
+    if (rawExamQuestions.length === 0) return;
+
+    const shuffled = this.questionShuffleService.shuffleQuestions(
+      rawExamQuestions,
+      randomSeed,
+      true,
+    );
+
+    for (let qIdx = 0; qIdx < shuffled.length; qIdx++) {
+      const sq = shuffled[qIdx];
+      const aq = await this.prisma.attemptQuestion.create({
+        data: {
+          attemptId,
+          examQuestionId: sq.id,
+          displayOrder: qIdx + 1,
+          sectionId: sq.sectionId ?? null,
+        },
+      });
+
+      const shuffledOpts = this.questionShuffleService.shuffleOptions(
+        sq.question?.options || [],
+        randomSeed,
+        sq.id,
+      );
+
+      if (shuffledOpts.length > 0) {
+        await this.prisma.attemptQuestionOption.createMany({
+          data: shuffledOpts.map((opt, optIdx) => ({
+            attemptQuestionId: aq.id,
+            examQuestionOptionId: opt.id,
+            displayOrder: optIdx + 1,
+          })),
+        });
+      }
+    }
+  }
+
+  /**
    * Get the exam questions for a specific attempt
-   * (includes language filtering & 4-tier fallback).
+   * (Returns student-specific deterministic question order & option order with localized language fallback).
    */
   async getAttemptQuestions(attemptId: string, studentId: string) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
-    return this.examService.getExamQuestionsForAttempt(
+
+    // 1. Ensure AttemptQuestion & AttemptQuestionOption records exist for this attempt
+    await this.ensureAttemptQuestionsInitialized(
+      attempt.id,
       attempt.examId,
-      attempt.languageId,
+      attempt.randomSeed || 'default_seed',
     );
+
+    // 2. Fetch personalized AttemptQuestion mappings ordered by displayOrder asc
+    const attemptQuestions = await this.prisma.attemptQuestion.findMany({
+      where: { attemptId: attempt.id },
+      orderBy: { displayOrder: 'asc' },
+      include: {
+        options: {
+          orderBy: { displayOrder: 'asc' },
+        },
+        examQuestion: {
+          include: {
+            section: { select: { id: true, name: true, subjectId: true } },
+            question: {
+              include: {
+                questionType: { select: { id: true, name: true, code: true } },
+                translations: {
+                  include: {
+                    language: { select: { id: true, code: true, name: true } },
+                  },
+                },
+                options: {
+                  include: {
+                    translations: {
+                      include: {
+                        language: {
+                          select: { id: true, code: true, name: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const examLanguages = await this.prisma.examLanguage.findMany({
+      where: { examId: attempt.examId },
+      orderBy: { isDefault: 'desc' },
+    });
+    const examDefaultLanguageId = examLanguages.find(
+      (el) => el.isDefault,
+    )?.languageId;
+    const currentLanguageId = attempt.languageId;
+
+    return attemptQuestions.map((aq) => {
+      const eq = aq.examQuestion;
+      const q = eq.question;
+
+      // 4-Tier Translation Fallback:
+      // 1. Attempt Language
+      // 2. Exam Default Language
+      // 3. Question Default Language
+      // 4. First Available Translation
+      const matchedTranslation =
+        q.translations.find(
+          (t) =>
+            t.languageId === currentLanguageId ||
+            t.language?.code === currentLanguageId,
+        ) ||
+        (examDefaultLanguageId
+          ? q.translations.find((t) => t.languageId === examDefaultLanguageId)
+          : null) ||
+        q.translations.find((t) => t.languageId === q.defaultLanguageId) ||
+        q.translations[0];
+
+      // Build question translations map for instant client-side switching (indexed by ID & code)
+      const qTranslationsMap: Record<
+        string,
+        {
+          questionText: string;
+          passageText?: string | null;
+          assertionText?: string | null;
+          reasonText?: string | null;
+        }
+      > = {};
+      q.translations.forEach((t) => {
+        const transObj = {
+          questionText: t.questionText,
+          passageText: t.passageText || null,
+          assertionText: t.assertionText || null,
+          reasonText: t.reasonText || null,
+        };
+        qTranslationsMap[t.languageId] = transObj;
+        if (t.language?.code) {
+          qTranslationsMap[t.language.code.toLowerCase()] = transObj;
+        }
+      });
+
+      // Map options strictly according to AttemptQuestionOption.displayOrder
+      const rawOptionsMap = new Map<string, any>(
+        q.options.map((o) => [o.id, o]),
+      );
+      const orderedOptions = aq.options
+        .map((aqo) => {
+          const rawOpt = rawOptionsMap.get(aqo.examQuestionOptionId);
+          if (!rawOpt) return null;
+
+          const matchedOptTranslation =
+            rawOpt.translations?.find(
+              (ot: any) =>
+                ot.languageId === currentLanguageId ||
+                ot.language?.code === currentLanguageId,
+            ) ||
+            (examDefaultLanguageId
+              ? rawOpt.translations?.find(
+                  (ot: any) => ot.languageId === examDefaultLanguageId,
+                )
+              : null) ||
+            rawOpt.translations?.find(
+              (ot: any) => ot.languageId === q.defaultLanguageId,
+            ) ||
+            rawOpt.translations?.[0];
+
+          const optTranslationsMap: Record<string, { optionText: string }> = {};
+          (rawOpt.translations || []).forEach((ot: any) => {
+            const optTransObj = {
+              optionText:
+                ot.optionText || rawOpt.optionText || rawOpt.optionLabel || '',
+            };
+            optTranslationsMap[ot.languageId] = optTransObj;
+            if (ot.language?.code) {
+              optTranslationsMap[ot.language.code.toLowerCase()] = optTransObj;
+            }
+          });
+
+          return {
+            id: rawOpt.id,
+            attemptQuestionOptionId: aqo.id,
+            displayOrder: aqo.displayOrder,
+            optionKey: rawOpt.optionKey,
+            optionLabel: rawOpt.optionLabel || rawOpt.optionKey || '',
+            optionText:
+              matchedOptTranslation?.optionText ||
+              rawOpt.optionText ||
+              rawOpt.optionLabel ||
+              '',
+            translations: optTranslationsMap,
+          };
+        })
+        .filter(Boolean);
+
+      return {
+        attemptQuestionId: aq.id,
+        examQuestionId: eq.id,
+        questionId: q.id,
+        displayOrder: aq.displayOrder,
+        marks: eq.marks,
+        negativeMarks: eq.negativeMarks,
+        section: eq.section,
+        type: q.type,
+        questionType: q.questionType,
+        passage: matchedTranslation?.passageText || q.passage || null,
+        assertion: matchedTranslation?.assertionText || q.assertion || null,
+        reason: matchedTranslation?.reasonText || q.reason || null,
+        questionText:
+          matchedTranslation?.questionText || (q as any).questionText || '',
+        translations: qTranslationsMap,
+        options: orderedOptions,
+      };
+    });
   }
 
   /**

@@ -32,9 +32,12 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { FeatureGuard } from '../../feature-flag/feature-flag.guard';
+import { RequireFeature } from '../../feature-flag/feature-flag.decorator';
+import { FEATURE_KEYS } from '../../feature-flag/feature-flag.constants';
 
 @Controller('translations')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
 export class TranslationController {
   constructor(
     private readonly translationService: TranslationService,
@@ -51,6 +54,7 @@ export class TranslationController {
    */
   @Get('import/template')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async downloadTemplate(
     @Query('format') format: TranslationImportFormatEnum = TranslationImportFormatEnum.XLSX,
     @Res() res: Response,
@@ -72,6 +76,7 @@ export class TranslationController {
    */
   @Post('import')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @UseInterceptors(FileInterceptor('file'))
   async uploadImportFile(
     @UploadedFile() file: Express.Multer.File,
@@ -94,6 +99,7 @@ export class TranslationController {
    */
   @Get('import/:importId')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   getImportSession(@Param('importId') importId: string) {
     return this.translationImportService.getImportSession(importId);
   }
@@ -104,6 +110,7 @@ export class TranslationController {
    */
   @Get('import/:importId/rows')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   getImportRows(
     @Param('importId') importId: string,
     @Query() query: TranslationImportFilterDto,
@@ -117,6 +124,7 @@ export class TranslationController {
    */
   @Patch('import/:importId/rows/:rowId')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   updateImportRow(
     @Param('importId') importId: string,
     @Param('rowId') rowId: string,
@@ -131,6 +139,7 @@ export class TranslationController {
    */
   @Post('import/:importId/confirm')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @HttpCode(HttpStatus.OK)
   async confirmImport(
     @Param('importId') importId: string,
@@ -150,6 +159,7 @@ export class TranslationController {
    */
   @Post('import/:importId/cancel')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @HttpCode(HttpStatus.OK)
   cancelImport(@Param('importId') importId: string) {
     return this.translationImportService.cancelImportSession(importId);
@@ -161,6 +171,7 @@ export class TranslationController {
    */
   @Get('import/:importId/errors/export')
   @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async exportImportErrors(
     @Param('importId') importId: string,
     @Query('format') format: TranslationImportFormatEnum = TranslationImportFormatEnum.XLSX,

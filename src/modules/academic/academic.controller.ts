@@ -7,6 +7,7 @@ import {
   Param,
   Body,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AcademicService } from './academic.service';
@@ -15,6 +16,8 @@ import {
   UpdateSubjectDto,
   CreateChapterDto,
   UpdateChapterDto,
+  ChapterQueryDto,
+  ReorderChaptersDto,
   CreateTopicDto,
   UpdateTopicDto,
   CreateSubTopicDto,
@@ -45,6 +48,11 @@ export class AcademicController {
     return this.academicService.getExamStatuses();
   }
 
+  @Get('exam-targets')
+  getExamTargets() {
+    return this.academicService.getExamTargets();
+  }
+
   @Get('hierarchy/:examTargetId')
   getHierarchy(@Param('examTargetId') examTargetId: string) {
     return this.academicService.getHierarchy(examTargetId);
@@ -53,8 +61,9 @@ export class AcademicController {
   // ─── Subjects ────────────────────────────────────────────────
   @Post('subjects')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  createSubject(@Body() dto: CreateSubjectDto) {
-    return this.academicService.createSubject(dto);
+  createSubject(@Body() dto: CreateSubjectDto, @Req() req: any) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.academicService.createSubject(dto, actorUserId);
   }
 
   @Get('subjects')
@@ -80,15 +89,41 @@ export class AcademicController {
   }
 
   // ─── Chapters ────────────────────────────────────────────────
+  @Get('chapters')
+  findAllChapters(@Query() query: ChapterQueryDto) {
+    return this.academicService.findAllChapters(query);
+  }
+
   @Post('chapters')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  createChapter(@Body() dto: CreateChapterDto) {
-    return this.academicService.createChapter(dto);
+  createChapter(@Body() dto: CreateChapterDto, @Req() req: any) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.academicService.createChapter(dto, actorUserId);
   }
 
   @Get('subjects/:subjectId/chapters')
-  findChaptersBySubject(@Param('subjectId') subjectId: string) {
-    return this.academicService.findChaptersBySubject(subjectId);
+  findChaptersBySubject(
+    @Param('subjectId') subjectId: string,
+    @Query('includeInactive') includeInactive?: boolean,
+  ) {
+    const shouldInclude =
+      includeInactive === true || (includeInactive as any) === 'true';
+    return this.academicService.findChaptersBySubject(subjectId, shouldInclude);
+  }
+
+  @Patch('subjects/:subjectId/chapters/reorder')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  reorderChapters(
+    @Param('subjectId') subjectId: string,
+    @Body() dto: ReorderChaptersDto,
+    @Req() req: any,
+  ) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.academicService.reorderChapters(
+      subjectId,
+      dto.chapterIds,
+      actorUserId,
+    );
   }
 
   @Get('chapters/:id')
@@ -98,14 +133,20 @@ export class AcademicController {
 
   @Patch('chapters/:id')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  updateChapter(@Param('id') id: string, @Body() dto: UpdateChapterDto) {
-    return this.academicService.updateChapter(id, dto);
+  updateChapter(
+    @Param('id') id: string,
+    @Body() dto: UpdateChapterDto,
+    @Req() req: any,
+  ) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.academicService.updateChapter(id, dto, actorUserId);
   }
 
   @Delete('chapters/:id')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  deleteChapter(@Param('id') id: string) {
-    return this.academicService.deleteChapter(id);
+  deleteChapter(@Param('id') id: string, @Req() req: any) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.academicService.deleteChapter(id, actorUserId);
   }
 
   // ─── Topics ──────────────────────────────────────────────────

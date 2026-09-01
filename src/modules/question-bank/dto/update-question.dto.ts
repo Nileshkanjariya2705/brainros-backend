@@ -31,8 +31,16 @@ export class UpdateQuestionDto {
   topicId?: string;
 
   @IsOptional()
+  @IsString()
+  topicName?: string;
+
+  @IsOptional()
   @IsUUID('4')
   subTopicId?: string;
+
+  @IsOptional()
+  @IsString()
+  subTopicName?: string;
 
   @IsOptional()
   @IsUUID('4')

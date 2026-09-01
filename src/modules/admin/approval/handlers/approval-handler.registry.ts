@@ -19,6 +19,8 @@ export class ApprovalHandlerRegistry implements OnModuleInit {
   onModuleInit() {
     this.registerHandler(this.questionHandler);
     this.registerHandler(this.examHandler);
+    this.handlers.set('MOCK_TEST', this.examHandler);
+    this.handlers.set('MOCK', this.examHandler);
     this.registerHandler(this.institutionHandler);
     this.registerHandler(this.bulkUploadHandler);
   }

@@ -322,7 +322,13 @@ export class ApprovalWorkflowService {
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (filter.entityType) where.resourceType = filter.entityType.toUpperCase();
+    if (filter.entityType) {
+      if (filter.entityType.toUpperCase() === 'MOCK_TEST' || filter.entityType.toUpperCase() === 'MOCK') {
+        where.resourceType = { in: ['MOCK_TEST', 'MOCK', 'EXAM'] };
+      } else {
+        where.resourceType = filter.entityType.toUpperCase();
+      }
+    }
     if (filter.status) where.status = filter.status.toUpperCase();
     if (filter.submittedBy) where.requestedById = filter.submittedBy;
 
@@ -332,7 +338,7 @@ export class ApprovalWorkflowService {
       if (filter.to) where.createdAt.lte = new Date(filter.to);
     }
 
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       this.prisma.approvalRequest.findMany({
         where,
         skip,
@@ -341,6 +347,81 @@ export class ApprovalWorkflowService {
       }),
       this.prisma.approvalRequest.count({ where }),
     ]);
+
+    // Batch enrich items with entity previews
+    const items = await Promise.all(
+      rawItems.map(async (item) => {
+        let entitySummary: any = null;
+        let requestedByEmail: string | undefined;
+
+        try {
+          // Fetch requester info
+          const user = await this.prisma.user.findUnique({
+            where: { id: item.requestedById },
+            select: { email: true, phone: true, student: { select: { name: true } } },
+          });
+          if (user) {
+            requestedByEmail = user.student?.name || user.email || user.phone || 'Admin';
+          }
+
+          if (item.resourceType === 'EXAM' || item.resourceType === 'MOCK_TEST' || item.resourceType === 'MOCK') {
+            const exam = await this.prisma.exam.findUnique({
+              where: { id: item.resourceId },
+              include: {
+                examTarget: { select: { name: true } },
+                status: { select: { name: true } },
+                sections: { include: { subject: { select: { name: true } } } },
+                _count: { select: { examQuestions: true } },
+              },
+            });
+            if (exam) {
+              const isMock =
+                item.resourceType === 'MOCK_TEST' ||
+                exam.title.toUpperCase().includes('MOCK') ||
+                exam.title.toUpperCase().includes('PRACTICE') ||
+                (exam.sections && exam.sections.length === 1);
+
+              entitySummary = {
+                id: exam.id,
+                title: exam.title,
+                targetExam: exam.examTarget?.name || 'General',
+                totalQuestions: exam.totalQuestions || exam._count.examQuestions || 0,
+                durationMinutes: exam.durationMinutes || 60,
+                totalMarks: exam.totalMarks || 0,
+                subjects: exam.sections.map((s) => s.subject.name),
+                status: exam.status?.name,
+                isMock,
+              };
+            }
+          } else if (item.resourceType === 'QUESTION') {
+            const question = await this.prisma.question.findUnique({
+              where: { id: item.resourceId },
+              include: {
+                subject: { select: { name: true } },
+                translations: { select: { questionText: true }, take: 1 },
+              },
+            });
+            if (question) {
+              entitySummary = {
+                id: question.id,
+                title:
+                  question.translations?.[0]?.questionText?.substring(0, 100) ||
+                  `Question ${question.id.substring(0, 8)}`,
+                subject: question.subject?.name,
+              };
+            }
+          }
+        } catch {
+          // graceful fallback
+        }
+
+        return {
+          ...item,
+          entitySummary,
+          requestedByName: requestedByEmail || 'Admin',
+        };
+      }),
+    );
 
     return {
       data: items,
@@ -367,7 +448,17 @@ export class ApprovalWorkflowService {
 
     // Resolve target entity summary
     let entityPreview: any = null;
+    let requestedByName: string | undefined;
+
     try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: request.requestedById },
+        select: { email: true, phone: true, student: { select: { name: true } } },
+      });
+      if (user) {
+        requestedByName = user.student?.name || user.email || user.phone || 'Admin';
+      }
+
       if (request.resourceType === 'QUESTION') {
         entityPreview = await this.prisma.question.findUnique({
           where: { id: request.resourceId },
@@ -376,10 +467,20 @@ export class ApprovalWorkflowService {
             options: true,
           },
         });
-      } else if (request.resourceType === 'EXAM') {
+      } else if (
+        request.resourceType === 'EXAM' ||
+        request.resourceType === 'MOCK_TEST' ||
+        request.resourceType === 'MOCK'
+      ) {
         entityPreview = await this.prisma.exam.findUnique({
           where: { id: request.resourceId },
-          include: { examTarget: true, status: true },
+          include: {
+            examTarget: true,
+            status: true,
+            sections: { include: { subject: true } },
+            versions: { orderBy: { versionNumber: 'desc' }, take: 1 },
+            _count: { select: { examQuestions: true } },
+          },
         });
       } else if (request.resourceType === 'INSTITUTION') {
         entityPreview = await this.prisma.institution.findUnique({
@@ -398,6 +499,7 @@ export class ApprovalWorkflowService {
     return {
       ...request,
       entityPreview,
+      requestedByName: requestedByName || 'Admin',
     };
   }
 }

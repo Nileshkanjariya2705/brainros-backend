@@ -8,8 +8,10 @@ import { ExamSnapshotService } from './services/exam-snapshot.service';
 import { BlueprintService } from './services/blueprint.service';
 import { ExamGenerationService } from './services/exam-generation.service';
 import { ExamGenerationProcessor } from './services/exam-generation.processor';
+import { SubjectMockService } from './services/subject-mock.service';
 import { ExamBlueprintController } from './controllers/exam-blueprint.controller';
 import { ExamGenerationController } from './controllers/exam-generation.controller';
+import { SubjectMockController } from './controllers/subject-mock.controller';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({
@@ -19,7 +21,11 @@ import { BullModule } from '@nestjs/bullmq';
       name: 'exam-generation',
     }),
   ],
-  controllers: [ExamBlueprintController, ExamGenerationController],
+  controllers: [
+    ExamBlueprintController,
+    ExamGenerationController,
+    SubjectMockController,
+  ],
   providers: [
     ExamRandomizationService,
     BlueprintValidationService,
@@ -28,6 +34,7 @@ import { BullModule } from '@nestjs/bullmq';
     BlueprintService,
     ExamGenerationService,
     ExamGenerationProcessor,
+    SubjectMockService,
   ],
   exports: [
     ExamRandomizationService,
@@ -36,7 +43,9 @@ import { BullModule } from '@nestjs/bullmq';
     ExamSnapshotService,
     BlueprintService,
     ExamGenerationService,
+    SubjectMockService,
     BullModule,
   ],
 })
 export class ExamGeneratorModule {}
+

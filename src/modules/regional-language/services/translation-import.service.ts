@@ -355,9 +355,11 @@ export class TranslationImportService {
         questionMap.set(q.id.toLowerCase(), q);
       }
 
-      const languageMap = new Map<string, { id: string; code: string; name: string; nativeName: string; isActive: boolean }>();
+      const languageMap = new Map<string, { id: string; code: string | null; name: string; nativeName: string | null; isActive: boolean }>();
       for (const lang of languages) {
-        languageMap.set(lang.code.toLowerCase(), lang);
+        if (lang.code) {
+          languageMap.set(lang.code.toLowerCase(), lang);
+        }
       }
 
       const existingTranslationSet = new Set<string>();
