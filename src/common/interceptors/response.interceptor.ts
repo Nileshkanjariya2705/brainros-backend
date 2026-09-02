@@ -41,12 +41,17 @@ export class ResponseInterceptor<T> implements NestInterceptor<
         // Extract nested data, message, and metadata if the controller returned a structured helper object
         if (
           result &&
-          typeof result === 'object' &&
-          ('data' in result || 'message' in result || 'meta' in result)
+          typeof result === 'object'
         ) {
-          message = result.message || message;
-          data = result.data !== undefined ? result.data : null;
-          meta = result.meta || null;
+          if ('data' in result) {
+            message = result.message || message;
+            data = result.data;
+            meta = result.meta || null;
+          } else {
+            message = result.message || message;
+            meta = result.meta || null;
+            data = result;
+          }
         }
 
         return {

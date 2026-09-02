@@ -1,7 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationModule } from '../notification/notification.module';
 import { AdminModule } from '../admin/admin.module';
+import { EXAM_WINDOW_END_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 // Existing Services
 import { ExamLifecycleService } from './services/exam-lifecycle.service';
@@ -21,7 +23,14 @@ import { ExamCalendarController } from './controllers/exam-calendar.controller';
 import { FeatureActivationController } from './controllers/feature-activation.controller';
 
 @Module({
-  imports: [PrismaModule, NotificationModule, forwardRef(() => AdminModule)],
+  imports: [
+    PrismaModule,
+    NotificationModule,
+    forwardRef(() => AdminModule),
+    BullModule.registerQueue({
+      name: EXAM_WINDOW_END_QUEUE_NAME,
+    }),
+  ],
   controllers: [
     ExamSchedulingController,
     ExamCycleController,

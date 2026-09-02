@@ -45,6 +45,35 @@ export class RankQueryService {
       throw new ForbiddenException('You do not own this attempt');
     }
 
+    // For Live exams, verify official publication by Super Admin before releasing ranks
+    const isMock =
+      attempt.exam.title.toUpperCase().includes('MOCK') ||
+      attempt.exam.title.toUpperCase().includes('PRACTICE');
+
+    if (!isMock) {
+      const pub = await this.prisma.examResultPublication.findFirst({
+        where: { examId: attempt.examId, status: 'PUBLISHED' },
+      });
+
+      if (!pub) {
+        return {
+          attemptId,
+          examId: attempt.examId,
+          examTitle: attempt.exam.title,
+          status: 'RANK_PENDING',
+          snapshotVersion: 0,
+          overall: {
+            type: 'OVERALL',
+            rank: 0,
+            totalCandidates: 0,
+            percentile: 0,
+            score: 0,
+            accuracy: 0,
+          },
+        };
+      }
+    }
+
     // Find latest completed RankSnapshot for this exam
     const snapshot = await this.prisma.rankSnapshot.findFirst({
       where: { examId: attempt.examId, status: 'COMPLETED' },

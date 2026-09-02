@@ -75,6 +75,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Mechanics',
         subjectId: 'sub-1',
+        isActive: true,
       });
       prisma.topic.findUnique.mockResolvedValue({
         id: 'top-1',
@@ -124,6 +125,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Mechanics',
         subjectId: 'sub-1',
+        isActive: true,
       });
       prisma.topic.findUnique.mockResolvedValue({
         id: 'top-1',
@@ -145,6 +147,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Mechanics',
         subjectId: 'sub-1',
+        isActive: true,
       });
       prisma.topic.findUnique.mockResolvedValue({
         id: 'top-1',
@@ -171,6 +174,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Mechanics',
         subjectId: 'sub-1',
+        isActive: true,
       });
 
       await expect(
@@ -309,6 +313,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Organic',
         subjectId: 'sub-1',
+        isActive: true,
       });
       prisma.question.create.mockResolvedValue({
         id: 'q-101',
@@ -537,6 +542,7 @@ describe('QuestionBankService', () => {
         id: 'chap-1',
         name: 'Motion',
         subjectId: 'sub-1',
+        isActive: true,
       });
       prisma.question.create.mockResolvedValue({
         id: 'q-v2',

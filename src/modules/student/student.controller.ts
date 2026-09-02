@@ -4,6 +4,8 @@ import {
   Patch,
   Post,
   Body,
+  Query,
+  Param,
   UseGuards,
   Request,
   HttpCode,
@@ -19,6 +21,10 @@ import {
   RequestChangeEmailDto,
   VerifyChangeEmailDto,
 } from './dto/change-email.dto';
+import {
+  StudentExamsQueryDto,
+  StudentMockTestsQueryDto,
+} from './dto/student-exams.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 
@@ -26,6 +32,75 @@ import { Throttle } from '@nestjs/throttler';
 @UseGuards(JwtAuthGuard)
 export class StudentController {
   constructor(private readonly studentService: StudentService) {}
+
+  /**
+   * GET /students/me/exams & /student/exams
+   * Official scheduled and live exams listing for the logged-in student.
+   */
+  @Get(['me/exams', '/student/exams'])
+  async getMyExams(@Request() req: any, @Query() query: StudentExamsQueryDto) {
+    const userId = req.user?.userId || req.user?.id || req.user?.sub;
+    const result = await this.studentService.getStudentExams(userId, query);
+    return {
+      message: 'Student exams retrieved successfully',
+      data: result.items,
+      meta: result.pagination,
+    };
+  }
+
+  /**
+   * GET /students/me/mock-tests & /student/mock-tests
+   * Practice tests & mock exams listing for the logged-in student.
+   */
+  @Get(['me/mock-tests', '/student/mock-tests'])
+  async getMyMockTests(@Request() req: any, @Query() query: StudentMockTestsQueryDto) {
+    const userId = req.user?.userId || req.user?.id || req.user?.sub;
+    const result = await this.studentService.getStudentMockTests(userId, query);
+    return {
+      message: 'Student mock tests retrieved successfully',
+      data: result.items,
+      meta: result.pagination,
+    };
+  }
+
+  /**
+   * GET /students/me/mock-history & /student/mock-history
+   * Mock test attempt history with detailed analytics & subject breakdowns.
+   */
+  @Get(['me/mock-history', '/student/mock-history'])
+  async getMyMockHistory(@Request() req: any, @Query() query: any) {
+    const userId = req.user?.userId || req.user?.id || req.user?.sub;
+    const result = await this.studentService.getStudentMockHistory(userId, query);
+    return {
+      message: 'Student mock test history retrieved successfully',
+      data: result,
+    };
+  }
+
+  /**
+   * GET /students/me/mock-tests/:mockTestId/attempts & /students/me/exams/:mockTestId/attempts
+   * Returns all attempt records for a specific mock test for the logged-in student,
+   * deterministically numbered and sorted newest first.
+   */
+  @Get(['me/mock-tests/:mockTestId/attempts', 'me/exams/:mockTestId/attempts'])
+  async getMockTestAttempts(
+    @Request() req: any,
+    @Param('mockTestId') mockTestId: string,
+    @Query() query: any,
+  ) {
+    const userId = req.user?.userId || req.user?.id || req.user?.sub;
+    const result = await this.studentService.getMockTestAttempts(
+      userId,
+      mockTestId,
+      query,
+    );
+    return {
+      message: 'Mock test attempts retrieved successfully',
+      data: result.attempts,
+      summary: result.summary,
+      meta: result.pagination,
+    };
+  }
 
   @Get('me')
   async getMyProfile(@Request() req: any) {

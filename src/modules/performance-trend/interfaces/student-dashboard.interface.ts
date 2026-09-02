@@ -87,9 +87,14 @@ export interface DashboardRecommendationItem {
   id: string;
   type: 'WARNING' | 'OPPORTUNITY' | 'STRENGTH' | 'TIP';
   message: string;
-  actionLabel?: string;
-  actionType?: 'PRACTICE' | 'VIEW_STRATEGY' | 'VIEW_ANALYSIS' | 'VIEW_EXAMS';
-  targetUrl?: string;
+  actionLabel?: string | null;
+  actionType?: 'PRACTICE' | 'PRACTICE_MOCK' | 'VIEW_STRATEGY' | 'VIEW_ANALYSIS' | 'VIEW_EXAMS';
+  targetUrl?: string | null;
+  subjectId?: string | null;
+  subjectName?: string | null;
+  mockTestId?: string | null;
+  mockTestName?: string | null;
+  fallbackMessage?: string | null;
 }
 
 export interface TimeManagementWidget {
@@ -124,6 +129,7 @@ export interface RecentResultItem {
 export interface StudentDashboardResponse {
   student: StudentInfo;
   nextExam: NextExamWidget | null;
+  upcomingExams: NextExamWidget[];
   activeAttempt: ActiveAttemptWidget | null;
   latestPerformance: PerformanceSummaryWidget | null;
   rank: RankSummaryWidget | null;

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -10,7 +11,8 @@ import { NotificationQueueService } from '../../notification/queues/notification
 
 export const VALID_LIFECYCLE_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['SUBMITTED', 'CANCELLED'],
-  SUBMITTED: ['APPROVED', 'CANCELLED'],
+  SUBMITTED: ['APPROVED', 'REJECTED', 'CANCELLED'],
+  REJECTED: ['SUBMITTED', 'DRAFT', 'CANCELLED'],
   APPROVED: ['SCHEDULED', 'CANCELLED'],
   SCHEDULED: ['ACTIVE', 'CANCELLED', 'SCHEDULED'], // reschedule stays SCHEDULED
   ACTIVE: ['ENDED', 'CANCELLED'],
@@ -161,6 +163,12 @@ export class ExamLifecycleService {
       throw new NotFoundException(`Exam with ID '${examId}' not found`);
     }
 
+    if (exam.createdById && exam.createdById === performedById) {
+      throw new ForbiddenException(
+        'Self-approval is forbidden. An exam must be reviewed and approved by another administrator.',
+      );
+    }
+
     this.validateTransition(exam.status.name, 'APPROVED');
 
     return this.prisma.$transaction(async (tx) => {
@@ -191,6 +199,59 @@ export class ExamLifecycleService {
 
       this.logger.log(
         `Exam '${examId}' approved by Super Admin '${performedById}'`,
+      );
+      return updated;
+    });
+  }
+
+  /**
+   * Super Admin rejects Exam: SUBMITTED -> REJECTED
+   */
+  async rejectExam(examId: string, performedById: string, reason: string) {
+    if (!reason || !reason.trim()) {
+      throw new BadRequestException('A valid rejection reason is mandatory.');
+    }
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        status: true,
+        versions: true,
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found`);
+    }
+
+    this.validateTransition(exam.status.name, 'REJECTED');
+
+    return this.prisma.$transaction(async (tx) => {
+      const rejectedStatus = await this.getOrCreateExamStatus('REJECTED', tx);
+
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: {
+          statusId: rejectedStatus.id,
+        },
+        include: { status: true },
+      });
+
+      await this.recordHistory(
+        {
+          examId,
+          examVersionId: exam.versions[0]?.id || null,
+          action: 'REJECT' as any,
+          fromStatus: exam.status.name,
+          toStatus: 'REJECTED',
+          performedById,
+          comment: reason.trim(),
+        },
+        tx,
+      );
+
+      this.logger.log(
+        `Exam '${examId}' rejected by Super Admin '${performedById}': ${reason}`,
       );
       return updated;
     });
@@ -305,16 +366,41 @@ export class ExamLifecycleService {
   }
 
   /**
-   * Super Admin activates Exam: SCHEDULED/APPROVED -> ACTIVE
+   * Super Admin activates Exam: SCHEDULED -> ACTIVE
    */
   async activateExam(examId: string, performedById: string, tx?: any) {
     const db = tx || this.prisma;
     const exam = await db.exam.findUnique({
       where: { id: examId },
-      include: { status: true },
+      include: {
+        status: true,
+        schedules: {
+          where: { status: { in: ['SCHEDULED', 'ACTIVE'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
     });
 
     if (!exam) throw new NotFoundException(`Exam '${examId}' not found`);
+
+    // Verify valid lifecycle transition (prevents activating DRAFT, REJECTED, or already ACTIVE exams)
+    this.validateTransition(exam.status.name, 'ACTIVE');
+
+    // Verify active/scheduled window exists and has not already expired
+    const activeSchedule = exam.schedules?.[0];
+    if (!activeSchedule) {
+      throw new BadRequestException(
+        'Cannot activate an exam without an active or scheduled time slot.',
+      );
+    }
+
+    const now = new Date();
+    if (now >= new Date(activeSchedule.endTime)) {
+      throw new BadRequestException(
+        'Cannot activate an exam whose scheduled end time has already passed.',
+      );
+    }
 
     const activeStatus = await this.getOrCreateExamStatus('ACTIVE', db);
 
@@ -322,10 +408,17 @@ export class ExamLifecycleService {
       where: { id: examId },
       data: {
         statusId: activeStatus.id,
-        activatedAt: new Date(),
+        activatedAt: now,
       },
       include: { status: true },
     });
+
+    if (activeSchedule.status !== 'ACTIVE') {
+      await db.examSchedule.update({
+        where: { id: activeSchedule.id },
+        data: { status: 'ACTIVE' },
+      });
+    }
 
     await this.recordHistory(
       {

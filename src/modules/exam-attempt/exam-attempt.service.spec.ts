@@ -9,6 +9,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ExamService } from '../exam/exam.service';
 import { ExamAccessService } from '../exam-scheduling/services/exam-access.service';
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
+import { ResultReadinessService } from '../result/services/result-readiness.service';
+import { QuestionShuffleService } from './services/question-shuffle.service';
+import { RedisService } from '../redis/redis.service';
+import { getQueueToken } from '@nestjs/bullmq';
+import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 // ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
 // ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
@@ -19,16 +24,47 @@ const prismaMock = {
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findMany: jest.fn(),
   },
+  examQuestion: {
+    findMany: jest.fn().mockResolvedValue([
+      { id: 'eq-1', sectionId: 'sec-1', displayOrder: 1, question: { options: [] } },
+    ]),
+  },
+  attemptQuestion: {
+    findMany: jest.fn().mockResolvedValue([]),
+    create: jest.fn(),
+    count: jest.fn().mockResolvedValue(1),
+  },
+  attemptQuestionOption: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
   answer: {
     upsert: jest.fn(),
     findMany: jest.fn(),
   },
   questionTimeLog: { create: jest.fn() },
   attemptStatus: { findUnique: jest.fn() },
-  preferredLanguage: { findUnique: jest.fn(), findFirst: jest.fn() },
-  examLanguage: { count: jest.fn(), findFirst: jest.fn() },
+  preferredLanguage: {
+    findUnique: jest.fn().mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: where?.id || 'lang-uuid',
+        code: where?.id === 'hi' ? 'hi' : 'en',
+        name: where?.id === 'hi' ? 'Hindi' : 'English',
+        isActive: true,
+      }),
+    ),
+    findFirst: jest.fn().mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: 'lang-uuid',
+        code: 'hi',
+        name: 'Hindi',
+        isActive: true,
+      }),
+    ),
+  },
+  examSecurityProfile: { findUnique: jest.fn().mockResolvedValue(null) },
+  examLanguage: { count: jest.fn().mockResolvedValue(0), findFirst: jest.fn() },
+  $transaction: jest.fn((cb) => cb(prismaMock)),
 };
 
 import { ResultService } from '../result/result.service';
@@ -43,7 +79,7 @@ const examAccessServiceMock = {
 };
 
 const questionTimingServiceMock = {
-  finalizeActiveTiming: jest.fn(),
+  finalizeActiveTiming: jest.fn().mockResolvedValue({}),
 };
 
 const resultServiceMock = {
@@ -65,6 +101,32 @@ describe('ExamAttemptService', () => {
         { provide: ExamAccessService, useValue: examAccessServiceMock },
         { provide: QuestionTimingService, useValue: questionTimingServiceMock },
         { provide: ResultService, useValue: resultServiceMock },
+        {
+          provide: ResultReadinessService,
+          useValue: { isLiveExam: jest.fn().mockResolvedValue(false) },
+        },
+        {
+          provide: QuestionShuffleService,
+          useValue: {
+            generateAttemptSeed: jest.fn().mockReturnValue('seed-123'),
+            shuffleQuestions: jest.fn().mockImplementation((q) => q),
+            shuffleOptions: jest.fn().mockImplementation((opts) => opts),
+          },
+        },
+        {
+          provide: RedisService,
+          useValue: {
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn().mockResolvedValue('OK'),
+            del: jest.fn().mockResolvedValue(1),
+          },
+        },
+        {
+          provide: getQueueToken(EVALUATION_QUEUE_NAME),
+          useValue: {
+            add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+          },
+        },
       ],
     }).compile();
 
@@ -172,7 +234,10 @@ describe('ExamAttemptService', () => {
         scheduleId: null,
         examVersionId: null,
       };
-      prismaMock.attempt.findFirst.mockResolvedValue(interruptedAttempt);
+      prismaMock.attempt.findFirst.mockImplementation(({ where }: any) => {
+        if (where?.examId?.not) return Promise.resolve(null);
+        return Promise.resolve(interruptedAttempt);
+      });
       prismaMock.attempt.findUnique.mockResolvedValue({
         id: 'old-attempt',
         exam: {},
@@ -309,7 +374,7 @@ describe('ExamAttemptService', () => {
       prismaMock.attempt.update.mockResolvedValue({});
 
       const result = await service.submitAttempt(attemptId, studentId);
-      expect(prismaMock.attempt.update).toHaveBeenCalledWith(
+      expect(prismaMock.attempt.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ submittedAt: expect.any(Date) }),
         }),
@@ -344,7 +409,7 @@ describe('ExamAttemptService', () => {
 
     it('switches language atomically with no state loss', async () => {
       prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
-      prismaMock.preferredLanguage.findFirst.mockResolvedValue({
+      prismaMock.preferredLanguage.findUnique.mockResolvedValue({
         id: languageId,
         code: 'hi',
         name: 'Hindi',
@@ -360,15 +425,18 @@ describe('ExamAttemptService', () => {
         studentId,
       );
 
-      expect(prismaMock.attempt.update).toHaveBeenCalledWith({
-        where: { id: attemptId },
-        data: { languageId },
-      });
+      expect(prismaMock.attempt.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: attemptId },
+          data: expect.objectContaining({ languageId }),
+        }),
+      );
       expect(result.language.code).toBe('hi');
     });
 
     it('throws BadRequestException for inactive language', async () => {
       prismaMock.attempt.findUnique.mockResolvedValue(inProgressAttempt);
+      prismaMock.preferredLanguage.findUnique.mockResolvedValue(null);
       prismaMock.preferredLanguage.findFirst.mockResolvedValue({
         id: languageId,
         isActive: false,

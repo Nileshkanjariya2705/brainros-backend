@@ -72,6 +72,19 @@ export class IngestSecurityEventsDto {
   sessionId?: string;
 }
 
+export class CreateSessionDto {
+  @IsString()
+  @IsOptional()
+  sessionId?: string;
+
+  @IsOptional()
+  deviceMetadata?: Record<string, any>;
+
+  @IsBoolean()
+  @IsOptional()
+  transferSession?: boolean;
+}
+
 export class HeartbeatDto {
   @IsString()
   @IsOptional()
@@ -80,6 +93,10 @@ export class HeartbeatDto {
   @IsString()
   @IsOptional()
   clientTimestamp?: string;
+
+  @IsString()
+  @IsOptional()
+  visibilityState?: string;
 
   @IsOptional()
   deviceMetadata?: Record<string, any>;

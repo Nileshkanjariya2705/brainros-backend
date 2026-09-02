@@ -191,27 +191,27 @@ export class ExamApprovalHandler implements IApprovalHandler {
 
     const beforeState = { status: exam.status.name, title: exam.title };
 
-    let cancelledStatus = await db.examStatus.findUnique({
-      where: { name: 'CANCELLED' },
+    let rejectedStatus = await db.examStatus.findUnique({
+      where: { name: 'REJECTED' },
     });
-    if (!cancelledStatus) {
-      cancelledStatus = await db.examStatus.create({
-        data: { name: 'CANCELLED' },
+    if (!rejectedStatus) {
+      rejectedStatus = await db.examStatus.create({
+        data: { name: 'REJECTED' },
       });
     }
 
     const updated = await db.exam.update({
       where: { id: exam.id },
-      data: { statusId: cancelledStatus.id },
+      data: { statusId: rejectedStatus.id },
       include: { status: true },
     });
 
     await db.examLifecycleHistory.create({
       data: {
         examId: exam.id,
-        action: 'CANCEL',
+        action: 'REJECT' as any,
         fromStatus: exam.status.name,
-        toStatus: 'CANCELLED',
+        toStatus: 'REJECTED',
         performedById: reviewerId,
         comments: reason,
       },

@@ -25,6 +25,8 @@ export class ExamSessionService {
     deviceMetadata?: Record<string, any>,
     ipAddress?: string,
     userAgent?: string,
+    transferSession?: boolean,
+    sessionId?: string,
   ) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
@@ -43,21 +45,56 @@ export class ExamSessionService {
     }
 
     const now = new Date();
-    const singleSessionRequired =
-      attempt.securityProfile?.singleSessionRequired ?? false;
 
-    // Invalidate existing active sessions if single session required
-    if (singleSessionRequired) {
-      await this.prisma.examSession.updateMany({
-        where: {
-          attemptId,
-          status: ExamSessionStatus.ACTIVE,
-        },
-        data: {
-          status: ExamSessionStatus.INVALIDATED,
-        },
-      });
+    // ── Check for existing active session conflict in Redis ─────────
+    try {
+      const existingSessionId = await this.redisService.get(
+        `exam:attempt:${attemptId}:session`,
+      );
+      const lastHb = await this.redisService.get(
+        `exam:attempt:${attemptId}:heartbeat`,
+      );
+      const isRecentlyActive =
+        lastHb && now.getTime() - new Date(lastHb).getTime() < 45000;
+
+      // If it's the exact same session resuming / refreshing, keep it active without conflict
+      if (sessionId && existingSessionId && sessionId === existingSessionId) {
+        await this.redisService.set(
+          `exam:attempt:${attemptId}:heartbeat`,
+          now.toISOString(),
+          86400,
+        );
+        return {
+          id: existingSessionId,
+          status: 'ACTIVE',
+          conflict: false,
+        };
+      }
+
+      // If active in another window/device and transferSession is NOT requested, report conflict
+      if (existingSessionId && isRecentlyActive && !transferSession) {
+        return {
+          id: existingSessionId,
+          status: 'CONFLICT',
+          conflict: true,
+          message:
+            'This exam attempt is already actively open in another browser tab or device.',
+        };
+      }
+    } catch {
+      // Non-blocking Redis check fallback
     }
+
+    // Invalidate existing active sessions in database
+    await this.prisma.examSession.updateMany({
+      where: {
+        attemptId,
+        status: ExamSessionStatus.ACTIVE,
+      },
+      data: {
+        status: ExamSessionStatus.INVALIDATED,
+      },
+    });
 
     const session = await this.prisma.examSession.create({
       data: {
@@ -88,7 +125,11 @@ export class ExamSessionService {
       // Non-blocking Redis fallback
     }
 
-    return session;
+    return {
+      id: session.id,
+      status: ExamSessionStatus.ACTIVE,
+      conflict: false,
+    };
   }
 
   /**
@@ -143,13 +184,20 @@ export class ExamSessionService {
       }).catch(() => {});
     }
 
-    // Refresh Redis heartbeat
+    // Refresh Redis heartbeat and session TTL
     try {
       await this.redisService.set(
         `exam:attempt:${attemptId}:heartbeat`,
         now.toISOString(),
         86400,
       );
+      if (dto.sessionId && !multipleSessionDetected) {
+        await this.redisService.set(
+          `exam:attempt:${attemptId}:session`,
+          dto.sessionId,
+          86400,
+        );
+      }
     } catch {
       // Non-blocking Redis fallback
     }

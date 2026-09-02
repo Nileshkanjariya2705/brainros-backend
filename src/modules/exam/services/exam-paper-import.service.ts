@@ -1109,7 +1109,7 @@ export class ExamPaperImportService {
 
     for (const rule of blueprint.subjectDistribution) {
       const actual = subjectCounts[rule.subject] || 0;
-      const isMatched = actual >= rule.questionCount;
+      const isMatched = actual === rule.questionCount;
       if (!isMatched) isBlueprintMatched = false;
 
       subjectChecks.push({
@@ -1126,13 +1126,25 @@ export class ExamPaperImportService {
     if (!isBlueprintMatched) {
       for (const sc of subjectChecks) {
         if (!sc.isMatched) {
+          const detail =
+            sc.actualCount < sc.expectedCount
+              ? `insufficient questions (${sc.actualCount}/${sc.expectedCount})`
+              : `excess questions (${sc.actualCount}/${sc.expectedCount})`;
           errors.push({
             row: 0,
             column: 'subject_distribution',
-            message: `Blueprint validation failed for ${sc.subject}: Required ${sc.expectedCount} questions, found ${sc.actualCount}.`,
+            message: `Blueprint validation failed for ${sc.subject}: Required exactly ${sc.expectedCount} questions, found ${sc.actualCount} (${detail}).`,
           });
         }
       }
+    }
+
+    if (blueprint.totalQuestions && paperValidation.validRows !== blueprint.totalQuestions) {
+      errors.push({
+        row: 0,
+        column: 'total_questions',
+        message: `Blueprint total question count mismatch: Required ${blueprint.totalQuestions} questions, but paper contains ${paperValidation.validRows} valid questions.`,
+      });
     }
 
     // 5. Validate Simultaneous Translation Files

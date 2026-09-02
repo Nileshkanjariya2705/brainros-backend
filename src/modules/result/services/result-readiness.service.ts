@@ -22,6 +22,7 @@ export class ResultReadinessService {
 
   /**
    * Determine whether an exam is a synchronized LIVE exam or an on-demand MOCK test.
+   * Mock and practice tests are always evaluated immediately and auto-published.
    */
   async isLiveExam(examId: string): Promise<boolean> {
     const exam = await this.prisma.exam.findUnique({
@@ -36,11 +37,14 @@ export class ResultReadinessService {
 
     if (!exam) return false;
 
-    // If an exam has official synchronized schedules or title/description flags it as Live
-    const hasSchedules = (exam.schedules && exam.schedules.length > 0);
-    const titleIndicatesLive =
-      exam.title?.toUpperCase().includes('LIVE') &&
-      !exam.title?.toUpperCase().includes('PRACTICE');
+    const titleUpper = (exam.title || '').toUpperCase();
+    const isMockOrPractice =
+      titleUpper.includes('MOCK') || titleUpper.includes('PRACTICE');
+    if (isMockOrPractice) return false;
+
+    // Only non-mock synchronized live exams are Live
+    const hasSchedules = exam.schedules && exam.schedules.length > 0;
+    const titleIndicatesLive = titleUpper.includes('LIVE');
 
     return Boolean(hasSchedules || titleIndicatesLive);
   }
@@ -136,14 +140,20 @@ export class ResultReadinessService {
     const pendingEvaluationCount =
       finalizedAttempts.length - evaluatedAttempts.length;
 
-    // Check existing ExamResultPublication
-    let publicationRecord = await this.prisma.examResultPublication.findFirst({
-      where: { examId },
-      orderBy: { publicationVersion: 'desc' },
-    });
-
-    let publicationStatus =
-      publicationRecord?.status || ExamPublicationStatusEnum.NOT_READY;
+    // Safely check existing ExamResultPublication (table may not exist if unmigrated)
+    let publicationRecord: any = null;
+    let publicationStatus = ExamPublicationStatusEnum.NOT_READY;
+    try {
+      publicationRecord = await this.prisma.examResultPublication.findFirst({
+        where: { examId },
+        orderBy: { publicationVersion: 'desc' },
+      });
+      if (publicationRecord?.status) {
+        publicationStatus = publicationRecord.status;
+      }
+    } catch {
+      // Table unmigrated fallback
+    }
 
     // Reasons why it might not be ready
     let reason: string | null = null;
@@ -167,53 +177,58 @@ export class ResultReadinessService {
       reason = null;
     }
 
-    // Auto update / upsert ExamResultPublication state
+    // Auto update / upsert ExamResultPublication state if table exists
     if (publicationStatus !== ExamPublicationStatusEnum.PUBLISHED) {
       const newStatus = isReady
         ? ExamPublicationStatusEnum.READY_TO_PUBLISH
         : ExamPublicationStatusEnum.PROCESSING;
 
-      if (!publicationRecord) {
-        publicationRecord = await this.prisma.examResultPublication.create({
-          data: {
-            examId,
-            examVersionId: exam.versions?.[0]?.id,
-            status: newStatus as any,
-            totalEligibleAttempts,
-            finalizedAttempts: finalizedAttempts.length,
-            evaluatedAttempts: evaluatedAttempts.length,
-            analyticsCompletedAttempts: analyticsCompletedAttempts.length,
-            rankingCompleted,
-            securityReviewCompleted,
-            metadata: {
-              flaggedAttempts,
-              disqualifiedAttempts,
-              pendingSecurityReviews,
-              lastCheckedAt: new Date().toISOString(),
+      try {
+        if (!publicationRecord) {
+          publicationRecord = await this.prisma.examResultPublication.create({
+            data: {
+              examId,
+              examVersionId: exam.versions?.[0]?.id,
+              status: newStatus as any,
+              totalEligibleAttempts,
+              finalizedAttempts: finalizedAttempts.length,
+              evaluatedAttempts: evaluatedAttempts.length,
+              analyticsCompletedAttempts: analyticsCompletedAttempts.length,
+              rankingCompleted,
+              securityReviewCompleted,
+              metadata: {
+                flaggedAttempts,
+                disqualifiedAttempts,
+                pendingSecurityReviews,
+                lastCheckedAt: new Date().toISOString(),
+              },
             },
-          },
-        });
-      } else {
-        publicationRecord = await this.prisma.examResultPublication.update({
-          where: { id: publicationRecord.id },
-          data: {
-            status: newStatus as any,
-            totalEligibleAttempts,
-            finalizedAttempts: finalizedAttempts.length,
-            evaluatedAttempts: evaluatedAttempts.length,
-            analyticsCompletedAttempts: analyticsCompletedAttempts.length,
-            rankingCompleted,
-            securityReviewCompleted,
-            metadata: {
-              flaggedAttempts,
-              disqualifiedAttempts,
-              pendingSecurityReviews,
-              lastCheckedAt: new Date().toISOString(),
+          });
+        } else {
+          publicationRecord = await this.prisma.examResultPublication.update({
+            where: { id: publicationRecord.id },
+            data: {
+              status: newStatus as any,
+              totalEligibleAttempts,
+              finalizedAttempts: finalizedAttempts.length,
+              evaluatedAttempts: evaluatedAttempts.length,
+              analyticsCompletedAttempts: analyticsCompletedAttempts.length,
+              rankingCompleted,
+              securityReviewCompleted,
+              metadata: {
+                flaggedAttempts,
+                disqualifiedAttempts,
+                pendingSecurityReviews,
+                lastCheckedAt: new Date().toISOString(),
+              },
             },
-          },
-        });
+          });
+        }
+        publicationStatus = newStatus;
+      } catch {
+        // Table unmigrated fallback
+        publicationStatus = newStatus;
       }
-      publicationStatus = publicationRecord.status;
     }
 
     return {
@@ -294,4 +309,159 @@ export class ResultReadinessService {
       );
     }
   }
+
+  /**
+   * Admin / Super Admin Exam Processing Dashboard & Stuck Attempt Detection.
+   * Provides real-time visibility across evaluation, analytics, ranking, and publication.
+   */
+  async getExamProcessingDetails(examId: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: true,
+        schedules: { take: 1 },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam '${examId}' not found`);
+    }
+
+    const isLive = await this.isLiveExam(examId);
+
+    const attempts = await this.prisma.attempt.findMany({
+      where: {
+        examId,
+        status: { name: { notIn: ['CANCELLED', 'NOT_STARTED'] } },
+      },
+      include: {
+        student: {
+          include: {
+            user: { select: { id: true, email: true } },
+          },
+        },
+        status: true,
+        result: true,
+        timeAnalyses: { take: 1 },
+        strategyAnalyses: { take: 1 },
+        candidateRanks: { take: 1 },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = Date.now();
+    const STUCK_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
+
+    const details = attempts.map((att) => {
+      const isFinalized = ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(
+        att.status?.name,
+      );
+      const evalDone = Boolean(
+        att.result &&
+          att.result.totalScore !== undefined &&
+          att.result.totalScore !== null,
+      );
+      const analyticsDone = Boolean(
+        att.timeAnalyses &&
+          att.timeAnalyses.length > 0 &&
+          att.strategyAnalyses &&
+          att.strategyAnalyses.length > 0,
+      );
+      const rankDone = Boolean(att.candidateRanks && att.candidateRanks.length > 0);
+
+      const submittedTime = att.submittedAt
+        ? new Date(att.submittedAt).getTime()
+        : new Date(att.createdAt).getTime();
+      const elapsed = now - submittedTime;
+      const isStuck =
+        isFinalized && (!evalDone || !analyticsDone) && elapsed > STUCK_THRESHOLD_MS;
+
+      let processingStatus: string;
+      if (!isFinalized) {
+        processingStatus = 'NOT_STARTED';
+      } else if (evalDone && analyticsDone && rankDone) {
+        processingStatus = 'COMPLETED';
+      } else if (isStuck) {
+        processingStatus = 'STUCK';
+      } else {
+        processingStatus = 'PROCESSING';
+      }
+
+      let publication: string;
+      if (att.result?.resultStatus === 'PUBLISHED') {
+        publication = 'PUBLISHED';
+      } else if (isLive) {
+        publication =
+          evalDone && analyticsDone ? 'READY_TO_PUBLISH' : 'NOT_PUBLISHED';
+      } else {
+        publication = evalDone ? 'PUBLISHED' : 'NOT_PUBLISHED';
+      }
+
+      return {
+        attemptId: att.id,
+        studentId: att.studentId,
+        studentName: att.student?.name || 'Student',
+        studentEmail: att.student?.user?.email,
+        examId,
+        examTitle: exam.title,
+        processingStatus,
+        evaluation: evalDone ? 'COMPLETED' : isStuck ? 'STUCK' : 'PROCESSING',
+        analytics: analyticsDone
+          ? 'COMPLETED'
+          : evalDone
+            ? 'PROCESSING'
+            : 'PENDING',
+        ranking: rankDone
+          ? 'COMPLETED'
+          : analyticsDone
+            ? 'PROCESSING'
+            : 'PENDING',
+        publication,
+        isStuck,
+        submittedAt: att.submittedAt
+          ? new Date(att.submittedAt).toISOString()
+          : null,
+        lastUpdated: att.updatedAt
+          ? new Date(att.updatedAt).toISOString()
+          : new Date().toISOString(),
+      };
+    });
+
+    const totalEligible = attempts.length;
+    const evaluationCount = details.filter(
+      (d) => d.evaluation === 'COMPLETED',
+    ).length;
+    const analyticsCount = details.filter(
+      (d) => d.analytics === 'COMPLETED',
+    ).length;
+    const rankingCount = details.filter(
+      (d) => d.ranking === 'COMPLETED',
+    ).length;
+    const stuckCount = details.filter((d) => d.isStuck).length;
+
+    let overallProcessingStatus = 'COMPLETED';
+    if (totalEligible === 0) {
+      overallProcessingStatus = 'EMPTY';
+    } else if (
+      evaluationCount < totalEligible ||
+      analyticsCount < totalEligible ||
+      rankingCount < totalEligible
+    ) {
+      overallProcessingStatus = stuckCount > 0 ? 'FLAGGED_STUCK' : 'PROCESSING';
+    }
+
+    return {
+      examId,
+      examTitle: exam.title,
+      examType: isLive ? 'LIVE' : 'MOCK',
+      overallProcessingStatus,
+      totalEligibleAttempts: totalEligible,
+      evaluatedAttempts: evaluationCount,
+      analyticsCompletedAttempts: analyticsCount,
+      rankingCompletedAttempts: rankingCount,
+      stuckAttemptsCount: stuckCount,
+      attempts: details,
+    };
+  }
 }
+

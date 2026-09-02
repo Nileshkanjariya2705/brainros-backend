@@ -11,6 +11,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TwoFactorProvider } from './otp/two-factor.provider';
+import { RealTwoFactorProvider } from './two-factor/real-two-factor.provider';
+import { DevelopmentOtpProvider } from './two-factor/development-otp.provider';
+import { TwoFactorService } from './two-factor/two-factor.service';
+import { TwoFactorConfig } from './config/two-factor.config';
 import { RedisModule } from '../redis/redis.module';
 
 @Module({
@@ -25,8 +29,12 @@ import { RedisModule } from '../redis/redis.module';
   ],
   controllers: [AuthController],
   providers: [
-    AuthService,
+    TwoFactorConfig,
+    RealTwoFactorProvider,
+    DevelopmentOtpProvider,
+    TwoFactorService,
     OtpService,
+    AuthService,
     TokenService,
     PasswordService,
     SessionService,
@@ -42,6 +50,8 @@ import { RedisModule } from '../redis/redis.module';
     SecurityEventService,
     SessionService,
     TokenService,
+    TwoFactorConfig,
+    TwoFactorService,
     OtpService,
   ],
 })

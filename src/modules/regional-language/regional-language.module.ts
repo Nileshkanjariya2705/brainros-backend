@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { RedisModule } from '../redis/redis.module';
 import { LanguageService } from './services/language.service';
 import { TranslationService } from './services/translation.service';
 import { TranslationImportService } from './services/translation-import.service';
@@ -9,8 +11,15 @@ import { TranslationController } from './controllers/translation.controller';
 import { ExamLanguageController } from './controllers/exam-language.controller';
 import { ExamTranslationController } from './controllers/exam-translation.controller';
 import { TranslationTargetsController } from './controllers/translation-targets.controller';
+import { TranslationImportProcessor } from './processors/translation-import.processor';
 
 @Module({
+  imports: [
+    RedisModule,
+    BullModule.registerQueue({
+      name: 'translation-import',
+    }),
+  ],
   controllers: [
     LanguageController,
     TranslationController,
@@ -24,6 +33,7 @@ import { TranslationTargetsController } from './controllers/translation-targets.
     TranslationImportService,
     ExamLanguageService,
     ExamTranslationService,
+    TranslationImportProcessor,
   ],
   exports: [
     LanguageService,

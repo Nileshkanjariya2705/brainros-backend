@@ -9,6 +9,8 @@ import { ExamScheduleService } from './services/exam-schedule.service';
 import { ExamAccessService } from './services/exam-access.service';
 import { NotificationQueueService } from '../notification/queues/notification-queue.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getQueueToken } from '@nestjs/bullmq';
+import { EXAM_WINDOW_END_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 describe('Exam Scheduling & Activation Engine', () => {
   let lifecycleService: ExamLifecycleService;
@@ -57,6 +59,12 @@ describe('Exam Scheduling & Activation Engine', () => {
           useValue: {
             queueExamPublishedNotification: jest.fn().mockResolvedValue(true),
             dispatchExamNotificationJob: jest.fn().mockResolvedValue(true),
+          },
+        },
+        {
+          provide: getQueueToken(EXAM_WINDOW_END_QUEUE_NAME),
+          useValue: {
+            add: jest.fn().mockResolvedValue({ id: 'window-job-1' }),
           },
         },
       ],

@@ -5,10 +5,13 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LanguageService } from './language.service';
+import { RedisService } from '../../redis/redis.service';
 import {
   ExamTranslationExportFormat,
   ExamTranslationCoverageResponse,
@@ -30,6 +33,9 @@ export class ExamTranslationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly languageService: LanguageService,
+    private readonly redisService: RedisService,
+    @InjectQueue('translation-import')
+    private readonly translationQueue: Queue,
   ) {}
 
   /**
@@ -117,17 +123,11 @@ export class ExamTranslationService {
     // Fetch all active system languages
     const allActiveLanguages = await this.languageService.getAllLanguages(false);
 
-    // Fetch configured languages for exam or default to all
-    const configuredLanguages =
-      exam.languages && exam.languages.length > 0
-        ? exam.languages
-        : allActiveLanguages.map((l, idx) => ({
-            id: l.id,
-            languageId: l.id,
-            isDefault: idx === 0,
-            displayOrder: idx,
-            language: l,
-          }));
+    // Map configured languages for quick lookup
+    const configuredExamLangsMap = new Map<string, any>();
+    for (const el of exam.languages || []) {
+      configuredExamLangsMap.set(el.languageId, el);
+    }
 
     const questionIds = questions.map((q) => q.id);
 
@@ -155,79 +155,113 @@ export class ExamTranslationService {
       }),
     ]);
 
-    const languageCoverageList: ExamLanguageCoverageItem[] = configuredLanguages.map((el: any) => {
-      const lang = el.language;
-      const langId = el.languageId || lang.id;
+    const languageCoverageList: ExamLanguageCoverageItem[] = await Promise.all(
+      allActiveLanguages.map(async (lang: any) => {
+        const langId = lang.id;
+        const configuredEl = configuredExamLangsMap.get(langId);
+        const isDefault = Boolean(configuredEl?.isDefault) || lang.code?.toLowerCase() === 'en';
 
-      // Filter translations for this language
-      const qTranslations = allQuestionTranslations.filter(
-        (qt) => qt.languageId === langId && Boolean(qt.questionText?.trim()),
-      );
-      const translatedQIds = new Set(qTranslations.map((qt) => qt.questionId));
+        // Check Redis for active/recent job status
+        const redisStatusRaw = await this.redisService.get(
+          `translation:status:${examId}:${langId}`,
+        );
+        let redisJob: any = null;
+        if (redisStatusRaw) {
+          try {
+            redisJob = JSON.parse(redisStatusRaw);
+          } catch {
+            redisJob = null;
+          }
+        }
 
-      const optTranslations = allOptionTranslations.filter(
-        (ot) => ot.languageId === langId && Boolean(ot.optionText?.trim()),
-      );
+        // Filter translations for this language
+        const qTranslations = allQuestionTranslations.filter(
+          (qt) => qt.languageId === langId && Boolean(qt.questionText?.trim()),
+        );
+        const translatedQIds = new Set(qTranslations.map((qt) => qt.questionId));
 
-      const translatedQuestionsCount = translatedQIds.size;
-      const translatedOptionsCount = optTranslations.length;
+        const optTranslations = allOptionTranslations.filter(
+          (ot) => ot.languageId === langId && Boolean(ot.optionText?.trim()),
+        );
 
-      const questionCoveragePercentage =
-        totalQuestions > 0
-          ? Math.round((translatedQuestionsCount / totalQuestions) * 100)
-          : 0;
+        const translatedQuestionsCount = translatedQIds.size;
+        const translatedOptionsCount = optTranslations.length;
 
-      const optionCoveragePercentage =
-        totalOptions > 0
-          ? Math.round((translatedOptionsCount / totalOptions) * 100)
-          : 0;
+        const questionCoveragePercentage =
+          totalQuestions > 0
+            ? Math.round((translatedQuestionsCount / totalQuestions) * 100)
+            : 0;
 
-      const overallCoveragePercentage =
-        totalQuestions > 0
-          ? Math.round(
-              ((translatedQuestionsCount + translatedOptionsCount) /
-                (totalQuestions + totalOptions || 1)) *
-                100,
-            )
-          : 0;
+        const optionCoveragePercentage =
+          totalOptions > 0
+            ? Math.round((translatedOptionsCount / totalOptions) * 100)
+            : 0;
 
-      const missingQuestionIds = questions
-        .filter((q) => !translatedQIds.has(q.id))
-        .map((q) => q.id);
+        const overallCoveragePercentage =
+          totalQuestions > 0
+            ? Math.round(
+                ((translatedQuestionsCount + translatedOptionsCount) /
+                  (totalQuestions + totalOptions || 1)) *
+                  100,
+              )
+            : 0;
 
-      let status: 'COMPLETE' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
-      if (questionCoveragePercentage >= 100 && (totalOptions === 0 || optionCoveragePercentage >= 100)) {
-        status = 'COMPLETE';
-      } else if (translatedQuestionsCount > 0 || translatedOptionsCount > 0) {
-        status = 'IN_PROGRESS';
-      }
+        const missingQuestionIds = questions
+          .filter((q) => !translatedQIds.has(q.id))
+          .map((q) => q.id);
 
-      // Find latest updated timestamp
-      const allTimestamps = [
-        ...qTranslations.map((t) => t.updatedAt?.getTime() || 0),
-        ...optTranslations.map((t) => t.updatedAt?.getTime() || 0),
-      ];
-      const maxTs = allTimestamps.length > 0 ? Math.max(...allTimestamps) : null;
+        let status:
+          | 'NOT_ADDED'
+          | 'PROCESSING'
+          | 'COMPLETED'
+          | 'FAILED'
+          | 'IN_PROGRESS' = 'NOT_ADDED';
 
-      return {
-        languageId: langId,
-        languageCode: lang.code,
-        languageName: lang.name,
-        nativeName: lang.nativeName,
-        isDefault: Boolean(el.isDefault),
-        totalQuestions,
-        translatedQuestions: translatedQuestionsCount,
-        questionCoveragePercentage,
-        totalOptions,
-        translatedOptions: translatedOptionsCount,
-        optionCoveragePercentage,
-        overallCoveragePercentage,
-        status,
-        missingQuestionsCount: missingQuestionIds.length,
-        missingQuestionIds,
-        lastUpdatedAt: maxTs ? new Date(maxTs).toISOString() : null,
-      };
-    });
+        if (redisJob?.status === 'PROCESSING') {
+          status = 'PROCESSING';
+        } else if (redisJob?.status === 'FAILED') {
+          status = 'FAILED';
+        } else if (
+          isDefault ||
+          questionCoveragePercentage >= 100 ||
+          redisJob?.status === 'COMPLETED'
+        ) {
+          status = 'COMPLETED';
+        } else if (translatedQuestionsCount > 0 || translatedOptionsCount > 0) {
+          status = 'IN_PROGRESS';
+        } else {
+          status = 'NOT_ADDED';
+        }
+
+        // Find latest updated timestamp
+        const allTimestamps = [
+          ...qTranslations.map((t) => t.updatedAt?.getTime() || 0),
+          ...optTranslations.map((t) => t.updatedAt?.getTime() || 0),
+        ];
+        const maxTs = allTimestamps.length > 0 ? Math.max(...allTimestamps) : null;
+
+        return {
+          languageId: langId,
+          languageCode: lang.code,
+          languageName: lang.name,
+          nativeName: lang.nativeName,
+          isDefault,
+          totalQuestions,
+          translatedQuestions: translatedQuestionsCount,
+          questionCoveragePercentage,
+          totalOptions,
+          translatedOptions: translatedOptionsCount,
+          optionCoveragePercentage,
+          overallCoveragePercentage,
+          status,
+          missingQuestionsCount: missingQuestionIds.length,
+          missingQuestionIds,
+          lastUpdatedAt: maxTs ? new Date(maxTs).toISOString() : null,
+          jobId: redisJob?.jobId,
+          processingError: redisJob?.error || null,
+        };
+      }),
+    );
 
     const overallCompleteness =
       languageCoverageList.length > 0
@@ -237,7 +271,9 @@ export class ExamTranslationService {
           )
         : 0;
 
-    const isAllRequiredComplete = languageCoverageList.every((l) => l.status === 'COMPLETE');
+    const isAllRequiredComplete = languageCoverageList.every(
+      (l) => l.status === 'COMPLETED' || l.status === 'COMPLETE',
+    );
 
     return {
       examId,
@@ -247,6 +283,91 @@ export class ExamTranslationService {
       languages: languageCoverageList,
       overallCompletenessPercentage: overallCompleteness,
       isAllRequiredComplete,
+    };
+  }
+
+  /**
+   * Enqueue Translation Import as an Asynchronous BullMQ Job
+   */
+  async enqueueTranslationImport(
+    examId: string,
+    languageId: string,
+    file: { originalname: string; size: number; buffer: Buffer },
+    userId: string,
+    replaceMode = false,
+  ) {
+    this.validateRawFile(file);
+
+    // 1. Verify exam existence and access
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      select: { id: true, title: true, status: true },
+    });
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    // 2. Verify selected language
+    const language = await this.languageService.getLanguageById(languageId);
+    if (!language) {
+      throw new NotFoundException(`Language with ID '${languageId}' not found.`);
+    }
+
+    // 3. Duplicate protection: Reject if job is currently PROCESSING
+    const redisKey = `translation:status:${examId}:${languageId}`;
+    const currentRaw = await this.redisService.get(redisKey);
+    if (currentRaw) {
+      try {
+        const current = JSON.parse(currentRaw);
+        if (current.status === 'PROCESSING') {
+          throw new BadRequestException(
+            `A translation import is already processing for ${language.name}. Please wait for it to complete.`,
+          );
+        }
+      } catch (e: any) {
+        if (e instanceof BadRequestException) throw e;
+      }
+    }
+
+    // 4. Mark status in Redis as PROCESSING immediately
+    const processingState = {
+      status: 'PROCESSING',
+      fileName: file.originalname,
+      startedAt: new Date().toISOString(),
+    };
+    await this.redisService.set(redisKey, JSON.stringify(processingState), 86400);
+
+    // 5. Create idempotent BullMQ job
+    const jobId = `trans_${examId}_${languageId}_${Date.now()}`;
+    await this.translationQueue.add(
+      'import-exam-translation',
+      {
+        examId,
+        languageId,
+        userId,
+        fileName: file.originalname,
+        fileBufferBase64: file.buffer.toString('base64'),
+        replaceMode,
+        uploadedAt: new Date().toISOString(),
+      },
+      {
+        jobId,
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+
+    this.logger.log(
+      `[enqueueTranslationImport] Enqueued BullMQ translation job ${jobId} for exam ${examId}, language ${language.name}`,
+    );
+
+    return {
+      jobId,
+      status: 'PROCESSING',
+      message: 'Translation upload started. Processing in background...',
+      examId,
+      languageId,
+      languageName: language.name,
     };
   }
 
@@ -618,21 +739,22 @@ export class ExamTranslationService {
     const { exam, questions } = await this.getExamQuestionsAndOptions(examId);
     const questionMap = new Map(questions.map((q) => [q.id, q]));
 
-    // Check version immutability: If exam is PUBLISHED/ACTIVE with attempts, protect historical record
+    // Check version immutability: If exam has existing attempts, protect active and historical record
     const hasAttempts = await this.prisma.attempt.count({
       where: { examId },
     });
-    if (exam.status?.name === 'PUBLISHED' && hasAttempts > 0) {
+    const effectiveReplaceMode = hasAttempts > 0 ? false : replaceMode;
+    if (hasAttempts > 0) {
       this.logger.log(
-        `Exam '${examId}' has active attempts. Applying safe non-destructive translation update.`,
+        `Exam '${examId}' has ${hasAttempts} attempts. Enforcing safe non-destructive translation upsert mode to protect historical and active attempts.`,
       );
     }
 
     const rawRows = await this.parseFileBuffer(file.buffer, file.originalname);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. If replaceMode, delete existing translations for this language on this exam's questions
-      if (replaceMode) {
+      // 1. If effectiveReplaceMode, delete existing translations for this language on this exam's questions
+      if (effectiveReplaceMode) {
         const qIds = questions.map((q) => q.id);
         await tx.questionOptionTranslation.deleteMany({
           where: {

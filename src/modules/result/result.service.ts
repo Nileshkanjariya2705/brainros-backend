@@ -2,14 +2,21 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalysisEngineService } from './services/analysis-engine.service';
+import { ResultAccessService } from './services/result-access.service';
 import {
   DEFAULT_PERFORMANCE_THRESHOLDS,
   PerformanceThresholds,
 } from './interfaces/analysis.interface';
+import {
+  ResultProcessingStatus,
+  ResultPublicationStatus,
+  ResultStatusEnum,
+} from './interfaces/result-lifecycle.interface';
 
 @Injectable()
 export class ResultService {
@@ -18,18 +25,25 @@ export class ResultService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly analysisEngine: AnalysisEngineService,
+    private readonly resultAccessService: ResultAccessService,
   ) {}
 
   /**
    * Calculate and persist results for a submitted attempt.
    * Runs as a single atomic transaction.
+   * Strictly idempotent — safe to retry without duplicate records.
    */
   async calculateResult(attemptId: string) {
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
       include: {
         status: true,
-        result: true,
+        result: {
+          include: {
+            subjectResults: true,
+            chapterResults: true,
+          },
+        },
         exam: {
           include: {
             scoringRules: { include: { questionType: true } },
@@ -40,14 +54,21 @@ export class ResultService {
     });
 
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (!['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)) {
+    if (!['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(attempt.status.name)) {
       throw new BadRequestException(
         'Attempt must be submitted before calculating results',
       );
     }
 
-    // Skip recalculation if result already calculated
-    if (attempt.result) return attempt.result;
+    // Skip recalculation if complete result already exists
+    if (
+      attempt.result &&
+      attempt.result.totalScore !== undefined &&
+      attempt.result.totalScore !== null &&
+      attempt.result.subjectResults?.length > 0
+    ) {
+      return attempt.result;
+    }
 
     // Resolve configurable thresholds per exam
     let thresholds = DEFAULT_PERFORMANCE_THRESHOLDS;
@@ -247,13 +268,14 @@ export class ResultService {
         ? Math.round((timeUsedSeconds / totalQuestions) * 10) / 10
         : 0;
 
-    // ─── Persist results in transaction ────────────────────────
+    // ─── Persist results in atomic transaction ─────────────────
     await this.prisma.$transaction(
       async (tx) => {
-        const result = await tx.result.create({
-          data: {
-            attemptId,
-            resultStatus: 'EVALUATED',
+        // Upsert Result to guarantee idempotency on retries
+        const result = await tx.result.upsert({
+          where: { attemptId },
+          update: {
+            resultStatus: ResultStatusEnum.EVALUATED,
             totalQuestions,
             correctAnswers: totalCorrect,
             wrongAnswers: totalWrong,
@@ -264,7 +286,31 @@ export class ResultService {
             accuracy: Math.round(accuracy * 100) / 100,
             timeUsedSeconds,
             averageTimePerQuestion,
+            calculatedAt: new Date(),
           },
+          create: {
+            attemptId,
+            resultStatus: ResultStatusEnum.EVALUATED,
+            totalQuestions,
+            correctAnswers: totalCorrect,
+            wrongAnswers: totalWrong,
+            unattempted: totalUnattempted,
+            totalScore: Math.max(totalScore, 0),
+            maxScore,
+            percentage: Math.round(percentage * 100) / 100,
+            accuracy: Math.round(accuracy * 100) / 100,
+            timeUsedSeconds,
+            averageTimePerQuestion,
+            calculatedAt: new Date(),
+          },
+        });
+
+        // Clean any existing subject/chapter results to prevent duplicate key errors on retry
+        await tx.subjectResult.deleteMany({
+          where: { resultId: result.id },
+        });
+        await tx.chapterResult.deleteMany({
+          where: { resultId: result.id },
         });
 
         // Subject results
@@ -353,76 +399,43 @@ export class ResultService {
       },
     );
 
-    return this.prisma.result.findUnique({ where: { attemptId } });
+    // Invalidate Redis caches after transaction commits
+    await this.resultAccessService.invalidateResultCache(
+      attemptId,
+      attempt.studentId,
+      attempt.examId,
+    );
+
+    return this.prisma.result.findUnique({
+      where: { attemptId },
+      include: {
+        subjectResults: true,
+        chapterResults: true,
+      },
+    });
   }
 
   /**
    * Get student attempt calculation and publication status.
+   * Centralized via ResultAccessService.
    */
-  async getAttemptResultStatus(attemptId: string) {
-    const attempt = await this.prisma.attempt.findUnique({
-      where: { id: attemptId },
-      include: {
-        status: true,
-        exam: {
-          include: {
-            schedules: { take: 1 },
-          },
-        },
-        result: true,
-      },
-    });
-
-    if (!attempt) {
-      throw new NotFoundException('Attempt not found');
-    }
-
-    const isLive =
-      (attempt.exam.schedules && attempt.exam.schedules.length > 0) ||
-      (attempt.exam.title?.toUpperCase().includes('LIVE') &&
-        !attempt.exam.title?.toUpperCase().includes('PRACTICE'));
-
-    const resultStatus = attempt.result?.resultStatus || 'PROCESSING';
-    const isPublished = resultStatus === 'PUBLISHED';
-
-    if (isLive && !isPublished) {
-      return {
-        availability: 'RESULT_PENDING',
-        resultStatus,
-        examType: 'LIVE',
-        message:
-          'Your examination responses have been securely recorded and evaluated. Official results will be released upon publication by administration.',
-        attemptId,
-        examTitle: attempt.exam.title,
-        submittedAt: attempt.submittedAt,
-        publishedAt: null,
-      };
-    }
-
-    return {
-      availability: isPublished ? 'PUBLISHED' : 'PROCESSING',
-      resultStatus,
-      examType: isLive ? 'LIVE' : 'MOCK',
-      message: isPublished
-        ? 'Result is published and available.'
-        : 'Result is being calculated...',
-      attemptId,
-      examTitle: attempt.exam.title,
-      submittedAt: attempt.submittedAt,
-      publishedAt: attempt.result?.publishedAt || null,
-    };
+  async getAttemptResultStatus(attemptId: string, user?: any) {
+    return this.resultAccessService.getResultStatus(user, attemptId);
   }
 
   /**
-   * Get basic result for an attempt (with anti-leakage protection for unpublished Live Exams)
+   * Get basic result for an attempt.
+   * PURE READ-ONLY. Never recalculates or modifies results.
    */
-  async getResult(attemptId: string) {
-    const statusInfo = await this.getAttemptResultStatus(attemptId);
-    if (statusInfo.availability === 'RESULT_PENDING') {
-      return statusInfo;
+  async getResult(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return this.resultAccessService.getResultStatus(user, attemptId);
+      }
     }
 
-    let result = await this.prisma.result.findUnique({
+    const result = await this.prisma.result.findUnique({
       where: { attemptId },
       include: {
         attempt: {
@@ -444,60 +457,29 @@ export class ResultService {
             },
           },
         },
+        subjectResults: { include: { subject: true } },
+        chapterResults: { include: { chapter: { include: { subject: true } } } },
       },
     });
 
     if (!result) {
-      const attempt = await this.prisma.attempt.findUnique({
-        where: { id: attemptId },
-        include: { status: true },
-      });
-      if (
-        attempt &&
-        ['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)
-      ) {
-        await this.calculateResult(attemptId);
-        result = await this.prisma.result.findUnique({
-          where: { attemptId },
-          include: {
-            attempt: {
-              select: {
-                id: true,
-                examId: true,
-                startedAt: true,
-                submittedAt: true,
-                exam: {
-                  select: {
-                    id: true,
-                    title: true,
-                    totalQuestions: true,
-                    totalMarks: true,
-                    durationMinutes: true,
-                    performanceThresholds: true,
-                    examTarget: { select: { id: true, name: true } },
-                  },
-                },
-              },
-            },
-          },
-        });
-      }
-    }
-
-    if (!result)
       throw new NotFoundException(
-        'Result not found. Exam may not be submitted yet.',
+        'Result not found. Exam may not be submitted or evaluated yet.',
       );
+    }
     return result;
   }
 
   /**
-   * Get Full Comprehensive Brainros Analysis Report (with anti-leakage protection)
+   * Get Full Comprehensive Brainros Analysis Report.
+   * PURE READ-ONLY. Does not re-trigger calculation.
    */
-  async getFullAnalysis(attemptId: string) {
-    const statusInfo = await this.getAttemptResultStatus(attemptId);
-    if (statusInfo.availability === 'RESULT_PENDING') {
-      return statusInfo;
+  async getFullAnalysis(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return this.resultAccessService.getResultStatus(user, attemptId);
+      }
     }
 
     const existingResult = await this.prisma.result.findUnique({
@@ -505,25 +487,138 @@ export class ResultService {
     });
 
     if (!existingResult) {
-      const attempt = await this.prisma.attempt.findUnique({
-        where: { id: attemptId },
-        include: { status: true },
-      });
-      if (
-        attempt &&
-        ['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)
-      ) {
-        await this.calculateResult(attemptId);
-      }
+      throw new NotFoundException(
+        'Analysis not available. Result has not been calculated yet.',
+      );
     }
 
     return this.analysisEngine.generateFullAnalysis(attemptId);
   }
 
   /**
+   * Deep Verification of Persisted Result.
+   * Checks Attempt, Result, SubjectResult, ChapterResult, TimeAnalysis, StrategyAnalysis, CandidateRank.
+   */
+  async verifyResult(attemptId: string) {
+    const attempt = await this.prisma.attempt.findUnique({
+      where: { id: attemptId },
+      include: {
+        status: true,
+        exam: {
+          include: {
+            schedules: { take: 1 },
+          },
+        },
+        result: {
+          include: {
+            subjectResults: true,
+            chapterResults: true,
+          },
+        },
+        answers: true,
+        timeAnalyses: { take: 1 },
+        strategyAnalyses: { take: 1 },
+        candidateRanks: { take: 1 },
+      },
+    });
+
+    if (!attempt) throw new NotFoundException(`Attempt '${attemptId}' not found`);
+
+    const state = await this.resultAccessService.verifyResultState(attempt);
+    const evaluationComplete = Boolean(
+      attempt.result &&
+      attempt.result.totalScore !== undefined &&
+      attempt.result.subjectResults?.length > 0,
+    );
+    const analyticsComplete = Boolean(
+      attempt.timeAnalyses?.length > 0 && attempt.strategyAnalyses?.length > 0,
+    );
+    const rankingComplete = Boolean(attempt.candidateRanks?.length > 0);
+
+    return {
+      attemptId,
+      examId: attempt.examId,
+      examTitle: attempt.exam?.title,
+      examType: state.isLive ? 'LIVE' : 'MOCK',
+      processingStatus: state.processingStatus,
+      publicationStatus: state.publicationStatus,
+      resultAvailable: state.resultCalculated,
+      reportAvailable: state.reportAvailable,
+      onlineReportAvailable: state.onlineReportAvailable,
+      evaluationComplete,
+      analyticsComplete,
+      rankingComplete,
+      totalQuestions: attempt.result?.totalQuestions || 0,
+      totalScore: attempt.result?.totalScore || 0,
+      maxScore: attempt.result?.maxScore || 0,
+      percentage: attempt.result?.percentage || 0,
+      accuracy: attempt.result?.accuracy || 0,
+      answersCount: attempt.answers?.length || 0,
+      subjectBreakdowns: attempt.result?.subjectResults?.length || 0,
+      chapterBreakdowns: attempt.result?.chapterResults?.length || 0,
+    };
+  }
+
+  /**
+   * Controlled Recalculation for Admin / Super Admin
+   */
+  async recalculateResult(attemptId: string, user: any, newEvaluationVersion: number = 1) {
+    const userRole = (user?.role || user?.roles?.[0] || '').toUpperCase();
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(userRole)) {
+      throw new ForbiddenException(
+        'Only Administrators have permission to trigger result recalculation.',
+      );
+    }
+
+    this.logger.log(
+      `[Recalculation] Admin '${user.userId || user.id}' recalculating attempt '${attemptId}' (version ${newEvaluationVersion})`,
+    );
+
+    // Clean existing results to ensure full recalculation
+    await this.prisma.subjectResult.deleteMany({
+      where: { result: { attemptId } },
+    });
+    await this.prisma.chapterResult.deleteMany({
+      where: { result: { attemptId } },
+    });
+    await this.prisma.result.deleteMany({
+      where: { attemptId },
+    });
+
+    const result = await this.calculateResult(attemptId);
+
+    // Audit trail
+    try {
+      await this.prisma.securityEvent.create({
+        data: {
+          userId: user.userId || user.id,
+          eventType: 'ROLE_CHANGED' as any,
+          ipAddress: 'admin-action',
+          metadata: {
+            action: 'RESULT_RECALCULATED',
+            attemptId,
+            newEvaluationVersion,
+            score: result?.totalScore,
+            recalculatedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch {}
+
+    return result;
+  }
+
+  /**
    * Get subject-wise breakdown
    */
-  async getSubjectResults(attemptId: string) {
+  async getSubjectResults(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return [];
+      }
+    }
+
     const result = await this.prisma.result.findUnique({
       where: { attemptId },
     });
@@ -540,7 +635,14 @@ export class ResultService {
   /**
    * Get chapter-wise breakdown
    */
-  async getChapterResults(attemptId: string) {
+  async getChapterResults(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return [];
+      }
+    }
+
     const result = await this.prisma.result.findUnique({
       where: { attemptId },
     });
@@ -563,7 +665,14 @@ export class ResultService {
   /**
    * Get time analysis only
    */
-  async getTimeAnalysis(attemptId: string) {
+  async getTimeAnalysis(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return null;
+      }
+    }
+
     const full = await this.analysisEngine.generateFullAnalysis(attemptId);
     return full.timeAnalysis;
   }
@@ -571,7 +680,14 @@ export class ResultService {
   /**
    * Get attempt strategy only
    */
-  async getAttemptStrategy(attemptId: string) {
+  async getAttemptStrategy(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return null;
+      }
+    }
+
     const full = await this.analysisEngine.generateFullAnalysis(attemptId);
     return full.attemptStrategy;
   }
@@ -579,7 +695,14 @@ export class ResultService {
   /**
    * Get recommendations only
    */
-  async getRecommendations(attemptId: string) {
+  async getRecommendations(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return [];
+      }
+    }
+
     const full = await this.analysisEngine.generateFullAnalysis(attemptId);
     return full.recommendations;
   }
@@ -587,10 +710,12 @@ export class ResultService {
   /**
    * Get detailed answer review (shows correct answers after submission/publication)
    */
-  async getAnswerReview(attemptId: string) {
-    const statusInfo = await this.getAttemptResultStatus(attemptId);
-    if (statusInfo.availability === 'RESULT_PENDING') {
-      return [];
+  async getAnswerReview(attemptId: string, user?: any) {
+    if (user) {
+      const canView = await this.resultAccessService.canViewReport(user, attemptId);
+      if (!canView) {
+        return [];
+      }
     }
 
     const attempt = await this.prisma.attempt.findUnique({
@@ -598,26 +723,37 @@ export class ResultService {
       include: { status: true },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (!['SUBMITTED', 'AUTO_SUBMITTED'].includes(attempt.status.name)) {
+    if (!['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(attempt.status.name)) {
       throw new BadRequestException('Exam must be submitted to view review');
     }
 
-    const examQuestions = await this.prisma.examQuestion.findMany({
-      where: { examId: attempt.examId },
+    // 1. Check for personalized AttemptQuestion and AttemptQuestionOption ordering
+    const attemptQuestions = await this.prisma.attemptQuestion.findMany({
+      where: { attemptId },
       orderBy: { displayOrder: 'asc' },
       include: {
-        section: { select: { name: true } },
-        question: {
+        options: {
+          orderBy: { displayOrder: 'asc' },
           include: {
-            questionType: { select: { name: true, code: true } },
-            translations: {
-              where: { languageId: attempt.languageId },
-            },
-            options: {
-              orderBy: { displayOrder: 'asc' },
+            examQuestionOption: {
               include: {
-                translations: {
-                  where: { languageId: attempt.languageId },
+                translations: true,
+              },
+            },
+          },
+        },
+        examQuestion: {
+          include: {
+            section: { select: { name: true } },
+            question: {
+              include: {
+                questionType: { select: { name: true, code: true } },
+                translations: true,
+                options: {
+                  orderBy: { displayOrder: 'asc' },
+                  include: {
+                    translations: true,
+                  },
                 },
               },
             },
@@ -631,31 +767,128 @@ export class ResultService {
     });
     const answerMap = new Map(answers.map((a) => [a.examQuestionId, a]));
 
+    if (attemptQuestions.length > 0) {
+      return attemptQuestions.map((aq) => {
+        const eq = aq.examQuestion;
+        const answer = answerMap.get(eq.id);
+        const qTrans =
+          eq.question.translations.find((t) => t.languageId === attempt.languageId) ||
+          eq.question.translations[0];
+
+        // Format options using the attempt's specific randomized option sequence
+        const options =
+          aq.options && aq.options.length > 0
+            ? aq.options.map((opt) => {
+                const o = opt.examQuestionOption;
+                const oTrans =
+                  o.translations.find((t) => t.languageId === attempt.languageId) ||
+                  o.translations[0];
+                return {
+                  id: o.id,
+                  optionLabel: String.fromCharCode(64 + opt.displayOrder),
+                  optionKey: o.optionKey || String.fromCharCode(64 + opt.displayOrder),
+                  optionText: oTrans?.optionText || o.optionText || '',
+                  isCorrect: o.isCorrect,
+                };
+              })
+            : eq.question.options.map((o) => {
+                const oTrans =
+                  o.translations.find((t) => t.languageId === attempt.languageId) ||
+                  o.translations[0];
+                return {
+                  id: o.id,
+                  optionLabel: o.optionLabel || o.optionKey || '',
+                  optionKey: o.optionKey || o.optionLabel || '',
+                  optionText: oTrans?.optionText || o.optionText || '',
+                  isCorrect: o.isCorrect,
+                };
+              });
+
+        return {
+          displayOrder: aq.displayOrder,
+          sectionName: eq.section?.name || 'General',
+          questionType: eq.question.questionType,
+          questionText: qTrans?.questionText || (eq.question as any).passage || '',
+          explanation: qTrans?.explanation || '',
+          options,
+          studentAnswer: answer
+            ? {
+                selectedOptionId: answer.selectedOptionId,
+                numericalAnswer: answer.numericalAnswer,
+                selectedOptions: answer.selectedOptions,
+                isMarkedForReview: answer.isMarkedForReview,
+              }
+            : null,
+          isCorrect: answer ? this.evaluateAnswer(eq.question, answer) : false,
+          isAttempted:
+            !!answer &&
+            (!!answer.selectedOptionId ||
+              answer.numericalAnswer !== null ||
+              (Array.isArray(answer.selectedOptions) &&
+                answer.selectedOptions.length > 0)),
+        };
+      });
+    }
+
+    const examQuestions = await this.prisma.examQuestion.findMany({
+      where: { examId: attempt.examId },
+      orderBy: { displayOrder: 'asc' },
+      include: {
+        section: { select: { name: true } },
+        question: {
+          include: {
+            questionType: { select: { name: true, code: true } },
+            translations: true,
+            options: {
+              orderBy: { displayOrder: 'asc' },
+              include: {
+                translations: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
     return examQuestions.map((eq) => {
       const answer = answerMap.get(eq.id);
+      const qTrans =
+        eq.question.translations.find((t) => t.languageId === attempt.languageId) ||
+        eq.question.translations[0];
+
       return {
         displayOrder: eq.displayOrder,
         sectionName: eq.section.name,
         questionType: eq.question.questionType,
-        questionText: eq.question.translations[0]?.questionText ?? '',
-        explanation: eq.question.translations[0]?.explanation ?? '',
-        options: eq.question.options.map((o) => ({
-          id: o.id,
-          optionLabel: o.optionLabel,
-          optionText: o.translations[0]?.optionText ?? '',
-          isCorrect: o.isCorrect,
-        })),
+        questionText: qTrans?.questionText || (eq.question as any).passage || '',
+        explanation: qTrans?.explanation || '',
+        options: eq.question.options.map((o) => {
+          const oTrans =
+            o.translations.find((t) => t.languageId === attempt.languageId) ||
+            o.translations[0];
+          return {
+            id: o.id,
+            optionLabel: o.optionLabel || o.optionKey || '',
+            optionKey: o.optionKey || o.optionLabel || '',
+            optionText: oTrans?.optionText || o.optionText || '',
+            isCorrect: o.isCorrect,
+          };
+        }),
         studentAnswer: answer
           ? {
               selectedOptionId: answer.selectedOptionId,
               numericalAnswer: answer.numericalAnswer,
+              selectedOptions: answer.selectedOptions,
               isMarkedForReview: answer.isMarkedForReview,
             }
           : null,
         isCorrect: answer ? this.evaluateAnswer(eq.question, answer) : false,
         isAttempted:
           !!answer &&
-          (!!answer.selectedOptionId || answer.numericalAnswer !== null),
+          (!!answer.selectedOptionId ||
+            answer.numericalAnswer !== null ||
+            (Array.isArray(answer.selectedOptions) &&
+              answer.selectedOptions.length > 0)),
       };
     });
   }

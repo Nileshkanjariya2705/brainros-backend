@@ -12,6 +12,7 @@ import { QuestionTimingService } from '../time-analysis/services/question-timing
 import { QuestionShuffleService } from './services/question-shuffle.service';
 import { RedisService } from '../redis/redis.service';
 import { ResultService } from '../result/result.service';
+import { ResultReadinessService } from '../result/services/result-readiness.service';
 import {
   StartAttemptDto,
   SaveAnswerDto,
@@ -20,7 +21,10 @@ import {
 } from './dto/attempt.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
+import {
+  EVALUATION_QUEUE_NAME,
+  ResultStatusEnum,
+} from '../result/interfaces/result-lifecycle.interface';
 
 @Injectable()
 export class ExamAttemptService {
@@ -30,6 +34,7 @@ export class ExamAttemptService {
     private readonly examAccessService: ExamAccessService,
     private readonly questionTimingService: QuestionTimingService,
     private readonly resultService: ResultService,
+    private readonly resultReadinessService: ResultReadinessService,
     private readonly questionShuffleService: QuestionShuffleService,
     private readonly redisService: RedisService,
     @InjectQueue(EVALUATION_QUEUE_NAME)
@@ -100,7 +105,25 @@ export class ExamAttemptService {
       }
     }
 
-    // ── 4. Check for active (in-progress/interrupted) attempt to resume ───
+    // ── 4a. Check for active attempts on other exams (One Active Attempt Rule) ──
+    const now = new Date();
+    const otherActiveAttempt = await this.prisma.attempt.findFirst({
+      where: {
+        studentId,
+        examId: { not: dto.examId },
+        status: { name: 'IN_PROGRESS' },
+        serverEndTime: { gt: now },
+      },
+      include: { exam: { select: { title: true } } },
+    });
+
+    if (otherActiveAttempt) {
+      throw new BadRequestException(
+        `You already have an active exam in progress: "${otherActiveAttempt.exam.title}". You must finish or submit your active exam before starting another one.`,
+      );
+    }
+
+    // ── 4b. Check for active (in-progress/interrupted) attempt to resume ───
     const activeAttempt = await this.prisma.attempt.findFirst({
       where: {
         studentId,
@@ -112,6 +135,22 @@ export class ExamAttemptService {
     });
 
     if (activeAttempt) {
+      // If serverEndTime has already passed, finalize immediately and do not resume
+      if (
+        activeAttempt.serverEndTime &&
+        now.getTime() >= activeAttempt.serverEndTime.getTime()
+      ) {
+        await this.submitAttempt(
+          activeAttempt.id,
+          studentId,
+          'AUTO_SUBMIT_EXPIRED',
+        );
+        throw new ForbiddenException({
+          code: 'EXAM_ATTEMPT_EXPIRED',
+          message: 'The examination time for this attempt has expired.',
+        });
+      }
+
       // Allow seamless recovery for interrupted/in-progress attempts
       const inProgressStatus = await this.getStatus('IN_PROGRESS');
       await this.prisma.attempt.update({
@@ -133,9 +172,30 @@ export class ExamAttemptService {
       return this.loadAttempt(activeAttempt.id);
     }
 
+    // ── 4c. Single Attempt Rule for Live Exams ───
+    const isLive = await this.resultReadinessService.isLiveExam(dto.examId);
+    if (isLive) {
+      const priorAttempt = await this.prisma.attempt.findFirst({
+        where: {
+          studentId,
+          examId: dto.examId,
+          status: {
+            name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'] },
+          },
+        },
+      });
+
+      if (priorAttempt) {
+        throw new ForbiddenException({
+          code: 'LIVE_EXAM_ALREADY_SUBMITTED',
+          message:
+            'You have already submitted this live examination. Multiple attempts are not permitted for live exams.',
+        });
+      }
+    }
+
     // ── 5. Prepare Exam Questions & Deterministic Randomization ─────────
     const inProgressStatus = await this.getStatus('IN_PROGRESS');
-    const now = new Date();
 
     const durationEnd = new Date(
       now.getTime() + exam.durationMinutes * 60 * 1000,
@@ -362,35 +422,102 @@ export class ExamAttemptService {
   /**
    * Student-initiated exam submission.
    * Lightweight API: Validates ownership, locks status, saves answers,
-   * dispatches BullMQ evaluation job, and returns immediately.
+   * dispatches BullMQ evaluation job (if Mock) or defers until scheduled window ends (if Live).
    */
-  async submitAttempt(attemptId: string, studentId: string) {
+  async submitAttempt(attemptId: string, studentId: string, reason: string = 'USER_SUBMIT') {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
     this.verifyAttemptInProgress(attempt);
 
-    // Finalize any open active timing interval
     const now = new Date();
-    await this.questionTimingService.finalizeActiveTiming(
-      attemptId,
-      'SUBMIT',
-      now,
-    );
-
+    const inProgressStatus = await this.getStatus('IN_PROGRESS');
     const submittedStatus = await this.getStatus('SUBMITTED');
-    await this.prisma.attempt.update({
-      where: { id: attemptId },
+
+    // Atomic compare-and-swap: only transition if status is currently IN_PROGRESS
+    const updateResult = await this.prisma.attempt.updateMany({
+      where: {
+        id: attemptId,
+        statusId: inProgressStatus.id,
+      },
       data: {
         statusId: submittedStatus.id,
         submittedAt: now,
       },
     });
 
-    // Enqueue Asynchronous BullMQ Evaluation Job
+    if (updateResult.count === 0) {
+      // Race condition handled: another request or auto-submit already finalized this attempt
+      const existing = await this.prisma.attempt.findUnique({
+        where: { id: attemptId },
+        include: { status: true, result: true },
+      });
+      return {
+        attemptId,
+        status: existing?.status?.name || 'SUBMITTED',
+        resultStatus: existing?.result?.resultStatus || 'PROCESSING',
+        message: 'Attempt already finalized.',
+        submittedAt: existing?.submittedAt?.toISOString() || now.toISOString(),
+      };
+    }
+
+    // Finalize any open active timing interval
+    await this.questionTimingService
+      .finalizeActiveTiming(attemptId, 'SUBMIT', now)
+      .catch(() => {});
+
+    // Clean up Redis session cache
+    try {
+      await this.redisService.del(`exam:attempt:${attemptId}:session`);
+      await this.redisService.del(`exam:attempt:${attemptId}:heartbeat`);
+    } catch {
+      // Non-blocking
+    }
+
+    const isLive = await this.resultReadinessService.isLiveExam(attempt.examId);
+
+    if (isLive) {
+      // For Live/Scheduled exams: DO NOT evaluate immediately.
+      // Create/update Result placeholder with PENDING_WINDOW_CLOSE status.
+      await this.prisma.result.upsert({
+        where: { attemptId },
+        update: {
+          resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+        },
+        create: {
+          attemptId,
+          resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+          totalQuestions: 0,
+          correctAnswers: 0,
+          wrongAnswers: 0,
+          unattempted: 0,
+          totalScore: 0,
+          maxScore: 0,
+          percentage: 0,
+          accuracy: 0,
+          metadata: {
+            deferred: true,
+            reason: 'Awaiting scheduled examination window end',
+            submissionReason: reason,
+            submittedAt: now.toISOString(),
+          },
+        },
+      });
+
+      return {
+        attemptId,
+        status: 'SUBMITTED',
+        resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+        message:
+          'Attempt submitted successfully. Evaluation and ranking will begin after the scheduled examination window ends.',
+        submittedAt: now.toISOString(),
+      };
+    }
+
+    // ─── MOCK TEST: Immediate BullMQ Evaluation ───
     const evalJobId = `eval_${attemptId}`;
     try {
       await this.evaluationQueue.add(
         'EVALUATE_ATTEMPT',
-        { attemptId, triggeredAt: now.toISOString() },
+        { attemptId, triggeredAt: now.toISOString(), evaluationMode: 'IMMEDIATE' },
         {
           jobId: evalJobId,
           attempts: 3,
@@ -422,13 +549,6 @@ export class ExamAttemptService {
       include: { status: true },
     });
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.status.name !== 'IN_PROGRESS') {
-      return {
-        attemptId,
-        status: attempt.status.name,
-        resultStatus: 'PROCESSING',
-      };
-    }
 
     const now = new Date();
     const effectiveEndTime =
@@ -436,28 +556,90 @@ export class ExamAttemptService {
         ? attempt.serverEndTime
         : now;
 
-    // Finalize active timing interval up to expiration
-    await this.questionTimingService.finalizeActiveTiming(
-      attemptId,
-      'AUTO_SUBMIT',
-      effectiveEndTime,
-    );
-
+    const inProgressStatus = await this.getStatus('IN_PROGRESS');
     const autoSubmittedStatus = await this.getStatus('AUTO_SUBMITTED');
-    await this.prisma.attempt.update({
-      where: { id: attemptId },
+
+    // Atomic compare-and-swap
+    const updateResult = await this.prisma.attempt.updateMany({
+      where: {
+        id: attemptId,
+        statusId: inProgressStatus.id,
+      },
       data: {
         statusId: autoSubmittedStatus.id,
         submittedAt: effectiveEndTime,
       },
     });
 
-    // Enqueue Asynchronous BullMQ Evaluation Job
+    if (updateResult.count === 0) {
+      // Concurrently finalized by student submit or previous auto-submit
+      return {
+        attemptId,
+        status: attempt.status.name,
+        resultStatus: 'PROCESSING',
+        message: 'Attempt already finalized.',
+      };
+    }
+
+    // Finalize active timing interval up to expiration
+    await this.questionTimingService
+      .finalizeActiveTiming(attemptId, 'AUTO_SUBMIT', effectiveEndTime)
+      .catch(() => {});
+
+    // Clean up Redis session cache
+    try {
+      await this.redisService.del(`exam:attempt:${attemptId}:session`);
+      await this.redisService.del(`exam:attempt:${attemptId}:heartbeat`);
+    } catch {
+      // Non-blocking
+    }
+
+    const isLive = await this.resultReadinessService.isLiveExam(attempt.examId);
+
+    if (isLive) {
+      // For Live/Scheduled exams: DO NOT evaluate immediately.
+      // Create/update Result placeholder with PENDING_WINDOW_CLOSE status.
+      await this.prisma.result.upsert({
+        where: { attemptId },
+        update: {
+          resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+        },
+        create: {
+          attemptId,
+          resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+          totalQuestions: 0,
+          correctAnswers: 0,
+          wrongAnswers: 0,
+          unattempted: 0,
+          totalScore: 0,
+          maxScore: 0,
+          percentage: 0,
+          accuracy: 0,
+          metadata: {
+            deferred: true,
+            autoSubmitted: true,
+            reason: 'Awaiting scheduled examination window end',
+            submittedAt: effectiveEndTime.toISOString(),
+          },
+        },
+      });
+
+      return {
+        attemptId,
+        status: 'AUTO_SUBMITTED',
+        resultStatus: ResultStatusEnum.PENDING_WINDOW_CLOSE,
+        message:
+          'Attempt auto-submitted. Evaluation and ranking will begin after the scheduled examination window ends.',
+        submittedAt: effectiveEndTime.toISOString(),
+      };
+    }
+
+    // ─── MOCK TEST: Immediate BullMQ Evaluation ───
     const evalJobId = `eval_${attemptId}`;
     try {
       await this.evaluationQueue.add(
         'EVALUATE_ATTEMPT',
-        { attemptId, triggeredAt: effectiveEndTime.toISOString() },
+        { attemptId, triggeredAt: effectiveEndTime.toISOString(), evaluationMode: 'IMMEDIATE' },
         {
           jobId: evalJobId,
           attempts: 3,
@@ -862,18 +1044,68 @@ export class ExamAttemptService {
             totalMarks: true,
             durationMinutes: true,
             examTarget: { select: { id: true, name: true } },
+            sections: {
+              include: {
+                subject: { select: { id: true, name: true } },
+              },
+            },
           },
         },
         status: { select: { id: true, name: true } },
         result: {
           select: {
+            id: true,
             totalScore: true,
             maxScore: true,
             percentage: true,
+            accuracy: true,
             correctAnswers: true,
             wrongAnswers: true,
             unattempted: true,
+            timeUsedSeconds: true,
+            averageTimePerQuestion: true,
+            resultStatus: true,
+            subjectResults: {
+              select: {
+                id: true,
+                subjectId: true,
+                subject: { select: { id: true, name: true } },
+                score: true,
+                maxScore: true,
+                accuracy: true,
+                correctAnswers: true,
+                wrongAnswers: true,
+                unattempted: true,
+              },
+            },
           },
+        },
+        candidateRanks: {
+          select: {
+            rank: true,
+            totalCandidates: true,
+            percentile: true,
+            rankType: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        timeAnalyses: {
+          select: {
+            averageTimePerQuestionSeconds: true,
+            timeUtilizationPercentage: true,
+            totalTimeUsedSeconds: true,
+          },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
+        strategyAnalyses: {
+          select: {
+            primaryClassification: true,
+            avoidableNegativeMarks: true,
+            projectedScore: true,
+          },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
         },
       },
     });

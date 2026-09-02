@@ -5,9 +5,11 @@ import {
   UnauthorizedException,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OtpService, OtpPurpose } from './services/otp.service';
+import { TwoFactorService } from './two-factor/two-factor.service';
 import { TokenService } from './services/token.service';
 import { PasswordService } from './services/password.service';
 import { SessionService } from './services/session.service';
@@ -62,7 +64,16 @@ export class AuthService {
     private readonly oauthService: OAuthService,
     private readonly securityEventService: SecurityEventService,
     private readonly redisService: RedisService,
+    @Optional()
+    private readonly twoFactorService?: TwoFactorService,
   ) {}
+
+  /**
+   * Returns the centralized TwoFactorService instance, falling back to OtpService
+   */
+  private get twoFactor(): TwoFactorService | OtpService {
+    return this.twoFactorService || this.otpService;
+  }
 
   // ─── Helper: Extract request metadata ─────────────────────────
   private extractRequestContext(req: any) {
@@ -233,6 +244,11 @@ export class AuthService {
 
     if (!targetClass)
       throw new NotFoundException('Selected class does not exist.');
+    if (targetClass.name === 'FOUNDATION') {
+      throw new BadRequestException(
+        'Class FOUNDATION is no longer available.',
+      );
+    }
     if (!targetLang)
       throw new NotFoundException(
         'Selected preferred language does not exist.',
@@ -1160,7 +1176,10 @@ export class AuthService {
 
   async getRegisterOptions() {
     const [classes, languages, examTargets, states] = await Promise.all([
-      this.prisma.studentClass.findMany({ select: { id: true, name: true } }),
+      this.prisma.studentClass.findMany({
+        where: { name: { not: 'FOUNDATION' } },
+        select: { id: true, name: true },
+      }),
       this.prisma.preferredLanguage.findMany({
         where: { isActive: true },
         select: { id: true, name: true, code: true },

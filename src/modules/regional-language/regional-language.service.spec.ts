@@ -8,9 +8,12 @@ import { ExamAccessService } from '../exam-scheduling/services/exam-access.servi
 import { QuestionTimingService } from '../time-analysis/services/question-timing.service';
 import { ResultService } from '../result/result.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { QuestionShuffleService } from '../exam-attempt/services/question-shuffle.service';
 import { RedisService } from '../redis/redis.service';
+import { QuestionShuffleService } from '../exam-attempt/services/question-shuffle.service';
 import { SUPPORTED_NINE_REGIONAL_LANGUAGES } from './constants/supported-languages.constant';
+import { ResultReadinessService } from '../result/services/result-readiness.service';
+import { getQueueToken } from '@nestjs/bullmq';
+import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 describe('Regional Language Engine & Multilingual Exam Attempts', () => {
   let languageService: LanguageService;
@@ -106,6 +109,14 @@ describe('Regional Language Engine & Multilingual Exam Attempts', () => {
         {
           provide: ResultService,
           useValue: { calculateResult: jest.fn(), getResult: jest.fn() },
+        },
+        {
+          provide: ResultReadinessService,
+          useValue: { isLiveExam: jest.fn().mockResolvedValue(false) },
+        },
+        {
+          provide: getQueueToken(EVALUATION_QUEUE_NAME),
+          useValue: { add: jest.fn().mockResolvedValue({ id: 'job-1' }) },
         },
       ],
     }).compile();

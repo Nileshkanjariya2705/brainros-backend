@@ -16,7 +16,11 @@ import { ExamLifecycleService } from '../services/exam-lifecycle.service';
 import { ExamScheduleService } from '../services/exam-schedule.service';
 import { ExamAccessService } from '../services/exam-access.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
-import { CancelExamDto, ActionReasonDto } from '../dto/lifecycle-action.dto';
+import {
+  CancelExamDto,
+  ActionReasonDto,
+  RejectExamDto,
+} from '../dto/lifecycle-action.dto';
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -61,6 +65,25 @@ export class ExamSchedulingController {
     return {
       statusCode: 200,
       message: 'Exam approved by Super Admin. Ready for scheduling.',
+      data,
+    };
+  }
+
+  @Post('exams/:examId/reject')
+  @Roles('SUPER_ADMIN')
+  async rejectExam(
+    @Param('examId', ParseUUIDPipe) examId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: RejectExamDto,
+  ) {
+    const data = await this.lifecycleService.rejectExam(
+      examId,
+      userId,
+      dto?.reason,
+    );
+    return {
+      statusCode: 200,
+      message: 'Exam rejected by Super Admin.',
       data,
     };
   }

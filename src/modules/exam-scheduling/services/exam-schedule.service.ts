@@ -8,6 +8,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ExamLifecycleService } from './exam-lifecycle.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
 import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { EXAM_WINDOW_END_QUEUE_NAME } from '../../result/interfaces/result-lifecycle.interface';
 
 @Injectable()
 export class ExamScheduleService {
@@ -17,6 +20,8 @@ export class ExamScheduleService {
     private readonly prisma: PrismaService,
     private readonly lifecycleService: ExamLifecycleService,
     private readonly notificationQueue: NotificationQueueService,
+    @InjectQueue(EXAM_WINDOW_END_QUEUE_NAME)
+    private readonly windowEndQueue: Queue,
   ) {}
 
   /**
@@ -88,7 +93,31 @@ export class ExamScheduleService {
       );
     }
 
+    if (endTime.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Cannot schedule an exam in the past. The schedule end time must be in the future.',
+      );
+    }
+
     const scheduled = await this.prisma.$transaction(async (tx) => {
+      // Check for overlapping active or scheduled sessions for this exam
+      const existingOverlapping = await tx.examSchedule.findFirst({
+        where: {
+          examId,
+          status: { in: ['SCHEDULED', 'ACTIVE'] },
+          AND: [
+            { startTime: { lt: endTime } },
+            { endTime: { gt: startTime } },
+          ],
+        },
+      });
+
+      if (existingOverlapping) {
+        throw new BadRequestException(
+          'An active or scheduled session already overlaps with the specified time window for this exam.',
+        );
+      }
+
       // 1. Create schedule record
       const schedule = await tx.examSchedule.create({
         data: {
@@ -205,6 +234,41 @@ export class ExamScheduleService {
       scheduleId: scheduled.id,
     });
 
+    // 3. Schedule delayed BullMQ job to trigger automated batch evaluation when window closes
+    try {
+      const nowMs = Date.now();
+      const endMs = endTime.getTime();
+      const delay = Math.max(0, endMs - nowMs);
+      const windowEndJobId = `window_end_${examId}_${scheduled.id}`;
+
+      // Remove existing job if any
+      const existingJob = await this.windowEndQueue.getJob(windowEndJobId);
+      if (existingJob) {
+        await existingJob.remove();
+      }
+
+      await this.windowEndQueue.add(
+        'EXAM_WINDOW_END',
+        {
+          examId,
+          scheduleId: scheduled.id,
+          triggeredAt: endTime.toISOString(),
+        },
+        {
+          jobId: windowEndJobId,
+          delay,
+          removeOnComplete: true,
+        },
+      );
+      this.logger.log(
+        `[ScheduleExam] Scheduled window-end job '${windowEndJobId}' with delay ${delay}ms (${endTime.toISOString()})`,
+      );
+    } catch (queueErr: any) {
+      this.logger.error(
+        `[ScheduleExam] Failed to schedule window-end BullMQ job: ${queueErr.message}`,
+      );
+    }
+
     return scheduled;
   }
 
@@ -304,6 +368,40 @@ export class ExamScheduleService {
       examId: schedule.examId,
       scheduleId,
     });
+
+    // Update delayed BullMQ job to trigger automated batch evaluation at newEndTime
+    try {
+      const nowMs = Date.now();
+      const endMs = newEndTime.getTime();
+      const delay = Math.max(0, endMs - nowMs);
+      const windowEndJobId = `window_end_${schedule.examId}_${schedule.id}`;
+
+      const existingJob = await this.windowEndQueue.getJob(windowEndJobId);
+      if (existingJob) {
+        await existingJob.remove();
+      }
+
+      await this.windowEndQueue.add(
+        'EXAM_WINDOW_END',
+        {
+          examId: schedule.examId,
+          scheduleId: schedule.id,
+          triggeredAt: newEndTime.toISOString(),
+        },
+        {
+          jobId: windowEndJobId,
+          delay,
+          removeOnComplete: true,
+        },
+      );
+      this.logger.log(
+        `[RescheduleExam] Rescheduled window-end job '${windowEndJobId}' with delay ${delay}ms (${newEndTime.toISOString()})`,
+      );
+    } catch (queueErr: any) {
+      this.logger.error(
+        `[RescheduleExam] Failed to reschedule window-end BullMQ job: ${queueErr.message}`,
+      );
+    }
 
     return updated;
   }

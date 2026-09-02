@@ -9,6 +9,8 @@ import { TimeAnalysisModule } from '../time-analysis/time-analysis.module';
 import { ResultModule } from '../result/result.module';
 import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
+import { ActiveAttemptGuard } from './guards/active-attempt.guard';
+
 @Module({
   imports: [
     ExamModule,
@@ -20,7 +22,7 @@ import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.int
     }),
   ],
   controllers: [ExamAttemptController],
-  providers: [ExamAttemptService, QuestionShuffleService],
-  exports: [ExamAttemptService, QuestionShuffleService],
+  providers: [ExamAttemptService, QuestionShuffleService, ActiveAttemptGuard],
+  exports: [ExamAttemptService, QuestionShuffleService, ActiveAttemptGuard],
 })
 export class ExamAttemptModule {}

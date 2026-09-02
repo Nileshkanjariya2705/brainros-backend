@@ -6,6 +6,14 @@ export class UpdateStudentProfileDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
   @IsUUID()
   stateId?: string;
 

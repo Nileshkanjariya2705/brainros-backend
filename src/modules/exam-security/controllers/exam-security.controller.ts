@@ -17,6 +17,7 @@ import {
   IngestSecurityEventsDto,
   HeartbeatDto,
   AcceptSecurityPolicyDto,
+  CreateSessionDto,
 } from '../dto/security.dto';
 
 @Controller()
@@ -30,12 +31,12 @@ export class ExamSecurityController {
   ) {}
 
   @Get('exams/:examId/security-preflight')
-  getPreflightInfo(@Param('examId') examId: string) {
+  getSecurityPreflight(@Param('examId') examId: string) {
     return this.securityProfileService.getPreflightInfo(examId);
   }
 
   @Post('attempts/:attemptId/accept-policy')
-  acceptPolicy(
+  acceptSecurityPolicy(
     @Param('attemptId') attemptId: string,
     @Body() dto: AcceptSecurityPolicyDto,
     @Req() req: any,
@@ -45,7 +46,7 @@ export class ExamSecurityController {
     return this.securityProfileService.acceptSecurityPolicy(
       attemptId,
       dto.securityProfileId,
-      dto.policyVersion,
+      dto.policyVersion || 1,
       ipAddress,
       userAgent,
     );
@@ -54,7 +55,7 @@ export class ExamSecurityController {
   @Post('attempts/:attemptId/session')
   createOrResumeSession(
     @Param('attemptId') attemptId: string,
-    @Body() body: { deviceMetadata?: Record<string, any> },
+    @Body() body: CreateSessionDto,
     @CurrentUser() user: any,
     @Req() req: any,
   ) {
@@ -64,9 +65,11 @@ export class ExamSecurityController {
     return this.examSessionService.createOrResumeSession(
       attemptId,
       userId,
-      body.deviceMetadata,
+      body?.deviceMetadata,
       ipAddress,
       userAgent,
+      body?.transferSession,
+      body?.sessionId,
     );
   }
 

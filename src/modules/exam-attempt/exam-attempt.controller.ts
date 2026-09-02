@@ -119,7 +119,17 @@ export class ExamAttemptController {
     @CurrentUser() user: any,
   ) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.submitAttempt(attemptId, studentId);
+    return this.attemptService.submitAttempt(attemptId, studentId, 'USER_SUBMIT');
+  }
+
+  @Post(':id/leave')
+  @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  async leaveAttempt(
+    @Param('id') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
+    const studentId = await this.resolveStudentId(user);
+    return this.attemptService.submitAttempt(attemptId, studentId, 'USER_LEAVE');
   }
 
   /**

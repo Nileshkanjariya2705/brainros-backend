@@ -142,10 +142,10 @@ export class ExamTranslationController {
   }
 
   /**
-   * 5. Execute Transactional Translation Import for target Exam
-   * POST /exams/:examId/translations/import
+   * 5. Enqueue Asynchronous Background Translation Import for target Exam
+   * POST /exams/:examId/translations/import or POST /exams/:examId/translations/upload
    */
-  @Post('import')
+  @Post(['import', 'upload'])
   @Roles('ADMIN', 'SUPER_ADMIN')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @UseInterceptors(FileInterceptor('file'))
@@ -164,7 +164,7 @@ export class ExamTranslationController {
 
     const replaceMode = String(dto.replaceMode) === 'true' || dto.replaceMode === true;
 
-    const data = await this.examTranslationService.importExamTranslations(
+    const data = await this.examTranslationService.enqueueTranslationImport(
       examId,
       dto.languageId,
       file,

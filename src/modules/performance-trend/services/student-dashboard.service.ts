@@ -95,11 +95,18 @@ export class StudentDashboardService {
       };
     }
 
-    // 3. Fetch Next Upcoming / Live Exam for Student's Target
-    const upcomingExamRecord = await this.prisma.exam.findFirst({
+    // 3. Fetch Upcoming / Live Exams for Student's Target
+    const upcomingExamRecords = await this.prisma.exam.findMany({
       where: {
-        examTargetId: student.examTargetId,
         status: { name: { in: ['SCHEDULED', 'ACTIVE'] } },
+        ...(student.examTargetId
+          ? {
+              OR: [
+                { examTargetId: student.examTargetId },
+                { examTarget: { name: 'General' } },
+              ],
+            }
+          : {}),
         NOT: {
           attempts: {
             some: {
@@ -119,13 +126,13 @@ export class StudentDashboardService {
         },
       },
       orderBy: [{ startTime: 'asc' }, { createdAt: 'desc' }],
+      take: 10,
     });
 
-    let nextExam: NextExamWidget | null = null;
-    if (upcomingExamRecord) {
-      const schedule = upcomingExamRecord.schedules?.[0];
-      const startTime = schedule?.startTime || upcomingExamRecord.startTime || upcomingExamRecord.examDate;
-      const endTime = schedule?.endTime || upcomingExamRecord.endTime;
+    const upcomingExams: NextExamWidget[] = upcomingExamRecords.map((rec) => {
+      const schedule = rec.schedules?.[0];
+      const startTime = schedule?.startTime || rec.startTime || rec.examDate;
+      const endTime = schedule?.endTime || rec.endTime;
 
       let canStart = false;
       let waitSeconds = 0;
@@ -144,22 +151,24 @@ export class StudentDashboardService {
         message = 'Exam is live now!';
       }
 
-      nextExam = {
-        examId: upcomingExamRecord.id,
-        title: upcomingExamRecord.title,
-        examTarget: upcomingExamRecord.examTarget?.name || student.examTarget?.name || 'NEET',
-        durationMinutes: upcomingExamRecord.durationMinutes,
-        totalQuestions: upcomingExamRecord.totalQuestions,
-        totalMarks: upcomingExamRecord.totalMarks,
+      return {
+        examId: rec.id,
+        title: rec.title,
+        examTarget: rec.examTarget?.name || student.examTarget?.name || 'General',
+        durationMinutes: rec.durationMinutes,
+        totalQuestions: rec.totalQuestions,
+        totalMarks: rec.totalMarks,
         startTime: startTime ? new Date(startTime).toISOString() : null,
         endTime: endTime ? new Date(endTime).toISOString() : null,
-        status: upcomingExamRecord.status?.name || 'SCHEDULED',
+        status: rec.status?.name || 'SCHEDULED',
         canStart,
         waitSeconds,
         accessStatus,
         message,
       };
-    }
+    });
+
+    const nextExam = upcomingExams[0] || null;
 
     // 4. Fetch Evaluated Mocks (Latest 10 for trends & performance)
     const evaluatedAttempts: any[] = await this.prisma.attempt.findMany({
@@ -206,8 +215,8 @@ export class StudentDashboardService {
       latestPerformance = {
         latestScore: res.totalScore,
         maxScore: res.maxScore || latestAttempt.exam.totalMarks || 720,
-        percentage: res.percentage,
-        accuracy: res.accuracy,
+        percentage: Math.round(Number(res.percentage || 0) * 100) / 100,
+        accuracy: Math.round(Number(res.accuracy || 0) * 100) / 100,
         totalAttempts: totalEvaluatedCount,
         timeSpentSeconds: res.timeUsedSeconds || 0,
         correctCount: res.correctCount,
@@ -269,7 +278,7 @@ export class StudentDashboardService {
           subjectName: sr.subject.name,
           score: sr.score,
           maxScore: sr.maxScore,
-          accuracy,
+          accuracy: Math.round(Number(accuracy || 0) * 100) / 100,
           status,
           trendDelta,
         });
@@ -283,7 +292,7 @@ export class StudentDashboardService {
         latestAttempt.result.chapterResults.map((cr: any) => ({
           subject: cr.chapter?.subject?.name || 'General',
           name: cr.chapter?.name || 'Chapter',
-          accuracy: cr.accuracy,
+          accuracy: Math.round(Number(cr.accuracy || 0) * 100) / 100,
           total: cr.totalQuestions,
         }));
 
@@ -295,7 +304,7 @@ export class StudentDashboardService {
           weakAreas.push({
             subjectName: c.subject,
             chapterName: c.name,
-            accuracy: c.accuracy,
+            accuracy: Math.round(Number(c.accuracy || 0) * 100) / 100,
             totalQuestions: c.total,
             status: c.accuracy < 50 ? 'WEAK' : 'NEEDS_FOCUS',
           });
@@ -357,7 +366,7 @@ export class StudentDashboardService {
       recentScores.push({
         mockLabel: `Mock ${idx + 1}`,
         score: res?.totalScore || 0,
-        accuracy: res?.accuracy || 0,
+        accuracy: Math.round(Number(res?.accuracy || 0) * 100) / 100,
         rank: r ? r.rank : null,
         percentile: r ? r.percentile : null,
       });
@@ -393,14 +402,63 @@ export class StudentDashboardService {
       const strongest = [...subjects].sort((a, b) => b.accuracy - a.accuracy)[0];
 
       if (weakest && weakest.accuracy < 70) {
-        recommendations.push({
-          id: 'rec-weak-subject',
-          type: 'WARNING',
-          message: `${weakest.subjectName} accuracy (${weakest.accuracy}%) is below target. Focus revision on key concepts.`,
-          actionLabel: `Practice ${weakest.subjectName}`,
-          actionType: 'PRACTICE',
-          targetUrl: '/student/exams',
+        // Query an approved & accessible Subject-wise Mock Test
+        const recommendedMock = await this.prisma.exam.findFirst({
+          where: {
+            status: {
+              name: { in: ['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'ENDED'] },
+            },
+            ...(student.examTargetId
+              ? {
+                  OR: [
+                    { examTargetId: student.examTargetId },
+                    { examTarget: { name: 'General' } },
+                  ],
+                }
+              : {}),
+            sections: {
+              some: {
+                subjectId: weakest.subjectId,
+              },
+            },
+          },
+          select: {
+            id: true,
+            title: true,
+            totalQuestions: true,
+            durationMinutes: true,
+          },
+          orderBy: { createdAt: 'desc' },
         });
+
+        if (recommendedMock) {
+          recommendations.push({
+            id: 'rec-weak-subject',
+            type: 'WARNING',
+            message: `${weakest.subjectName} accuracy (${weakest.accuracy}%) is below target. Practice a subject-wise mock test to improve.`,
+            actionLabel: `Practice ${weakest.subjectName} Mock Test`,
+            actionType: 'PRACTICE_MOCK',
+            targetUrl: `/student/mock-tests?mockTestId=${recommendedMock.id}`,
+            subjectId: weakest.subjectId,
+            subjectName: weakest.subjectName,
+            mockTestId: recommendedMock.id,
+            mockTestName: recommendedMock.title,
+          });
+        } else {
+          recommendations.push({
+            id: 'rec-weak-subject',
+            type: 'WARNING',
+            message: `${weakest.subjectName} accuracy (${weakest.accuracy}%) is below target. Focus revision on key concepts.`,
+            actionLabel: null,
+            actionType: 'PRACTICE_MOCK',
+            targetUrl: null,
+            subjectId: weakest.subjectId,
+            subjectName: weakest.subjectName,
+            mockTestId: null,
+            mockTestName: null,
+            fallbackMessage: 'No subject mock test is currently available.',
+          });
+        }
       }
 
       if (strongest && strongest.accuracy >= 80) {
@@ -451,8 +509,8 @@ export class StudentDashboardService {
           : new Date(att.createdAt).toISOString().split('T')[0],
         score: res?.totalScore || 0,
         maxScore: res?.maxScore || att.exam.totalMarks || 720,
-        percentage: res?.percentage || 0,
-        accuracy: res?.accuracy || 0,
+        percentage: Math.round(Number(res?.percentage || 0) * 100) / 100,
+        accuracy: Math.round(Number(res?.accuracy || 0) * 100) / 100,
         rank: rankRecord ? rankRecord.rank : null,
         totalCandidates: rankRecord ? rankRecord.totalCandidates : null,
         percentile: rankRecord ? rankRecord.percentile : null,
@@ -479,6 +537,7 @@ export class StudentDashboardService {
         avatar: student.user?.avatarUrl,
       },
       nextExam,
+      upcomingExams,
       activeAttempt,
       latestPerformance,
       rank,

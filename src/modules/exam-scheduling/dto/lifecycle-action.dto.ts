@@ -15,3 +15,8 @@ export class CancelExamDto {
   @IsString()
   reason?: string;
 }
+
+export class RejectExamDto {
+  @IsString()
+  reason: string;
+}

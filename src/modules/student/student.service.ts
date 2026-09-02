@@ -197,6 +197,11 @@ export class StudentService {
         where: { id: dto.classId },
       });
       if (!cls) throw new NotFoundException('Selected class not found.');
+      if (cls.name === 'FOUNDATION') {
+        throw new BadRequestException(
+          'Class FOUNDATION is no longer available.',
+        );
+      }
     }
 
     if (dto.examTargetId) {
@@ -217,8 +222,10 @@ export class StudentService {
         throw new BadRequestException('Selected language is not active.');
     }
 
-    let stateName = currentStudent.state;
-    let districtName = currentStudent.district;
+    let stateName = dto.state !== undefined ? dto.state.trim() : currentStudent.state;
+    let districtName = dto.district !== undefined ? dto.district.trim() : currentStudent.district;
+    let finalStateId = dto.stateId || currentStudent.stateId;
+    let finalDistrictId = dto.districtId || currentStudent.districtId;
 
     if (dto.stateId) {
       const state = await this.prisma.state.findUnique({
@@ -228,22 +235,60 @@ export class StudentService {
       if (!state.isActive)
         throw new BadRequestException('Selected state is not active.');
       stateName = state.name;
+      finalStateId = state.id;
+    } else if (dto.state) {
+      const state = await this.prisma.state.findFirst({
+        where: { name: { equals: dto.state.trim(), mode: 'insensitive' } },
+      });
+      if (state) {
+        stateName = state.name;
+        finalStateId = state.id;
+      }
     }
 
     if (dto.districtId) {
       const district = await this.prisma.district.findUnique({
         where: { id: dto.districtId },
+        include: { state: true },
       });
       if (!district)
-        throw new NotFoundException('Selected district not found.');
+        throw new NotFoundException('Selected district/city not found.');
 
-      const effectiveStateId = dto.stateId || currentStudent.stateId;
-      if (effectiveStateId && district.stateId !== effectiveStateId) {
+      if (finalStateId && district.stateId !== finalStateId) {
         throw new BadRequestException(
-          'Selected district does not belong to the selected state.',
+          'Selected city/district does not belong to the selected state.',
         );
       }
       districtName = district.name;
+      finalDistrictId = district.id;
+      if (!finalStateId) {
+        finalStateId = district.stateId;
+        stateName = district.state?.name || stateName;
+      }
+    } else if (dto.district) {
+      const matchingDistricts = await this.prisma.district.findMany({
+        where: { name: { equals: dto.district.trim(), mode: 'insensitive' } },
+        include: { state: true },
+      });
+      if (matchingDistricts.length > 0) {
+        const belongsToState = matchingDistricts.find(
+          (d) =>
+            (finalStateId && d.stateId === finalStateId) ||
+            (stateName && d.state?.name?.toLowerCase() === stateName.toLowerCase()),
+        );
+        if (!belongsToState && stateName) {
+          const otherStateNames = matchingDistricts.map((d) => d.state?.name).filter(Boolean);
+          if (otherStateNames.length > 0 && !otherStateNames.some((s) => s?.toLowerCase() === stateName.toLowerCase())) {
+            throw new BadRequestException(
+              `Selected city/district '${dto.district}' does not belong to state '${stateName}'.`,
+            );
+          }
+        }
+        if (belongsToState) {
+          districtName = belongsToState.name;
+          finalDistrictId = belongsToState.id;
+        }
+      }
     }
 
     // Update profile
@@ -258,8 +303,8 @@ export class StudentService {
         classId: dto.classId,
         examTargetId: dto.examTargetId,
         preferredLanguageId: dto.preferredLanguageId,
-        stateId: dto.stateId,
-        districtId: dto.districtId,
+        stateId: finalStateId,
+        districtId: finalDistrictId,
         state: stateName,
         district: districtName,
       },
@@ -531,5 +576,690 @@ export class StudentService {
       },
       orderBy: { lastActivityAt: 'desc' },
     });
+  }
+
+  /**
+   * ─── Student Exams Discovery API ──────────────────────────────────────────
+   * Returns official scheduled and synchronized live exams for the student.
+   * Categorized by dynamic lifecycle: UPCOMING, LIVE, COMPLETED.
+   */
+  async getStudentExams(userId: string, query: any) {
+    const student = await this.prisma.student.findFirst({
+      where: { OR: [{ userId }, { id: userId }] },
+      select: { id: true, examTargetId: true, classId: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(`Student profile not found for user '${userId}'`);
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
+    const now = new Date();
+
+    // Base criteria: Exclude DRAFT, CANCELLED, GENERATING, and un-scheduled APPROVED exams
+    const where: any = {
+      OR: [
+        { status: { name: { in: ['SCHEDULED', 'ACTIVE', 'COMPLETED', 'ENDED'] } } },
+        { attempts: { some: { studentId: student.id } } },
+      ],
+    };
+
+    // Filter by Exam Target if student has one or if query specified
+    if (query.examTargetId) {
+      where.examTargetId = query.examTargetId;
+    } else if (student.examTargetId) {
+      where.OR = [
+        { examTargetId: student.examTargetId },
+        { examTarget: { name: 'General' } },
+      ];
+    }
+
+    // Search by title or target name
+    if (query.search && query.search.trim()) {
+      const term = query.search.trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { title: { contains: term, mode: 'insensitive' } },
+            { description: { contains: term, mode: 'insensitive' } },
+            { examTarget: { name: { contains: term, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
+
+    // Fetch matching exams with schedules, target, and student's attempts + results
+    const rawExams = await this.prisma.exam.findMany({
+      where,
+      include: {
+        examTarget: { select: { id: true, name: true } },
+        status: { select: { id: true, name: true } },
+        schedules: {
+          where: { status: { in: ['SCHEDULED', 'ACTIVE', 'ENDED'] } },
+          orderBy: { startTime: 'desc' },
+          take: 1,
+        },
+        sections: {
+          include: {
+            subject: { select: { id: true, name: true } },
+          },
+        },
+        attempts: {
+          where: { studentId: student.id },
+          include: {
+            status: true,
+            result: {
+              select: {
+                id: true,
+                totalScore: true,
+                maxScore: true,
+                percentage: true,
+                accuracy: true,
+                resultStatus: true,
+                publishedAt: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Map each exam to student view with calculated lifecycle status
+    const allItems = rawExams.map((exam) => {
+      const schedule = exam.schedules?.[0] || null;
+      const attempt = exam.attempts?.[0] || null;
+      const attemptStatus = attempt?.status?.name || 'NOT_STARTED';
+
+      const startTime = schedule?.startTime || exam.startTime || null;
+      const endTime = schedule?.endTime || exam.endTime || null;
+
+      // Determine dynamic lifecycle status
+      let calculatedStatus: 'UPCOMING' | 'LIVE' | 'COMPLETED' = 'UPCOMING';
+      let canStart = false;
+
+      const isAttemptCompleted = ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(
+        attemptStatus,
+      );
+      const isInProgress = attemptStatus === 'IN_PROGRESS';
+
+      if (isAttemptCompleted) {
+        calculatedStatus = 'COMPLETED';
+      } else if (isInProgress) {
+        calculatedStatus = 'LIVE';
+      } else if (
+        (startTime && endTime && startTime <= now && endTime >= now) ||
+        exam.status?.name === 'ACTIVE'
+      ) {
+        calculatedStatus = 'LIVE';
+        canStart = true;
+      } else if (startTime && startTime > now) {
+        calculatedStatus = 'UPCOMING';
+      } else if (endTime && endTime < now) {
+        // Expired without attempt
+        calculatedStatus = 'COMPLETED';
+      } else {
+        calculatedStatus = exam.status?.name === 'ACTIVE' ? 'LIVE' : 'UPCOMING';
+        canStart = calculatedStatus === 'LIVE';
+      }
+
+      return {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        examTarget: exam.examTarget?.name || 'General',
+        totalQuestions: exam.totalQuestions,
+        totalMarks: exam.totalMarks,
+        durationMinutes: exam.durationMinutes,
+        status: calculatedStatus,
+        rawStatus: exam.status?.name,
+        canStart: canStart && !isAttemptCompleted && !isInProgress,
+        canResume: isInProgress,
+        isInProgress,
+        activeAttemptId: isInProgress ? attempt?.id : null,
+        startTime: startTime ? startTime.toISOString() : null,
+        endTime: endTime ? endTime.toISOString() : null,
+        scheduleId: schedule?.id || null,
+        attempt: attempt
+          ? {
+              id: attempt.id,
+              status: attemptStatus,
+              startedAt: attempt.startedAt,
+              submittedAt: attempt.submittedAt,
+              result: attempt.result || null,
+            }
+          : null,
+        subjects: exam.sections.map((sec) => sec.subject?.name).filter(Boolean),
+        createdAt: exam.createdAt,
+      };
+    });
+
+    // Filter by tab if requested
+    let filtered = allItems;
+    if (query.status && query.status !== 'ALL') {
+      filtered = allItems.filter((e) => e.status === query.status);
+    }
+
+    // Sort
+    const sort = query.sort || 'UPCOMING_SOONEST';
+    filtered.sort((a, b) => {
+      if (sort === 'UPCOMING_SOONEST') {
+        const timeA = a.startTime ? new Date(a.startTime).getTime() : Infinity;
+        const timeB = b.startTime ? new Date(b.startTime).getTime() : Infinity;
+        return timeA - timeB;
+      } else if (sort === 'NEWEST') {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      } else if (sort === 'OLDEST') {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sort === 'NAME_ASC') {
+        return a.title.localeCompare(b.title);
+      } else if (sort === 'NAME_DESC') {
+        return b.title.localeCompare(a.title);
+      }
+      return 0;
+    });
+
+    // Paginate
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const items = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    };
+  }
+
+  /**
+   * ─── Student Mock Tests Discovery API ─────────────────────────────────────
+   * Returns practice tests and mock exams with attempt history, best score,
+   * difficulty rating, and subject filters.
+   */
+  async getStudentMockTests(userId: string, query: any) {
+    const student = await this.prisma.student.findFirst({
+      where: { OR: [{ userId }, { id: userId }] },
+      select: { id: true, examTargetId: true, classId: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(`Student profile not found for user '${userId}'`);
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
+
+    // Base criteria: Approved, non-draft mock exams
+    const where: any = {
+      status: {
+        name: { in: ['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'ENDED'] },
+      },
+    };
+
+    // Filter by Exam Target
+    if (query.examTargetId) {
+      where.examTargetId = query.examTargetId;
+    } else if (student.examTargetId) {
+      where.OR = [
+        { examTargetId: student.examTargetId },
+        { examTarget: { name: 'General' } },
+      ];
+    }
+
+    // Search by title or target name
+    if (query.search && query.search.trim()) {
+      const term = query.search.trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { title: { contains: term, mode: 'insensitive' } },
+            { description: { contains: term, mode: 'insensitive' } },
+            { examTarget: { name: { contains: term, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
+
+    // Fetch exams with sections, subjects, questions count, and student attempts
+    const rawMocks = await this.prisma.exam.findMany({
+      where,
+      include: {
+        examTarget: { select: { id: true, name: true } },
+        status: { select: { id: true, name: true } },
+        sections: {
+          include: {
+            subject: { select: { id: true, name: true } },
+          },
+        },
+        attempts: {
+          where: { studentId: student.id },
+          include: {
+            status: true,
+            result: {
+              select: {
+                id: true,
+                totalScore: true,
+                maxScore: true,
+                percentage: true,
+                accuracy: true,
+                resultStatus: true,
+                publishedAt: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Map to mock test view
+    const allItems = rawMocks.map((exam) => {
+      const attempts = exam.attempts || [];
+      const completedAttempts = attempts.filter((a) =>
+        ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(a.status?.name),
+      );
+      const activeAttempt = attempts.find((a) => a.status?.name === 'IN_PROGRESS');
+
+      // Best score calculation
+      let bestScore: number | null = null;
+      let bestPercentage: number | null = null;
+      let latestResult: any = null;
+
+      for (const a of completedAttempts) {
+        if (a.result && a.result.totalScore !== undefined) {
+          if (bestScore === null || a.result.totalScore > bestScore) {
+            bestScore = a.result.totalScore;
+            bestPercentage = a.result.percentage;
+          }
+          if (!latestResult) {
+            latestResult = a.result;
+          }
+        }
+      }
+
+      // Infer difficulty from negative marks or title
+      const negMarks = exam.defaultNegativeMarks || 0;
+      let difficulty = 'MEDIUM';
+      if (negMarks <= 0) difficulty = 'EASY';
+      else if (negMarks >= 1) difficulty = 'HARD';
+
+      // Primary subject
+      const subjectNames = exam.sections
+        .map((s) => s.subject?.name)
+        .filter(Boolean);
+      const primarySubject = subjectNames[0] || 'General';
+
+      const isAttempted = completedAttempts.length > 0;
+      const attemptStatus = activeAttempt
+        ? 'IN_PROGRESS'
+        : isAttempted
+          ? 'ATTEMPTED'
+          : 'NOT_ATTEMPTED';
+
+      return {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        examTarget: exam.examTarget?.name || 'General',
+        primarySubject,
+        subjects: subjectNames,
+        totalQuestions: exam.totalQuestions,
+        totalMarks: exam.totalMarks,
+        durationMinutes: exam.durationMinutes,
+        difficulty,
+        attemptStatus,
+        attemptsCount: completedAttempts.length,
+        activeAttemptId: activeAttempt?.id || null,
+        latestAttemptId: completedAttempts[0]?.id || null,
+        bestScore,
+        bestPercentage,
+        latestResult,
+        createdAt: exam.createdAt,
+      };
+    });
+
+    // Filter by attempt status tab
+    let filtered = allItems;
+    if (query.attemptStatus === 'NOT_ATTEMPTED') {
+      filtered = filtered.filter((m) => m.attemptStatus === 'NOT_ATTEMPTED');
+    } else if (query.attemptStatus === 'ATTEMPTED') {
+      filtered = filtered.filter(
+        (m) => m.attemptStatus === 'ATTEMPTED' || m.attemptStatus === 'IN_PROGRESS',
+      );
+    }
+
+    // Filter by subject
+    if (query.subjectId) {
+      filtered = filtered.filter((m) =>
+        m.subjects.some((s) => s.toLowerCase().includes(query.subjectId.toLowerCase())),
+      );
+    }
+
+    // Filter by difficulty
+    if (query.difficulty && query.difficulty !== 'ALL') {
+      filtered = filtered.filter(
+        (m) => m.difficulty.toUpperCase() === query.difficulty.toUpperCase(),
+      );
+    }
+
+    // Sort
+    const sort = query.sort || 'NEWEST';
+    filtered.sort((a, b) => {
+      if (sort === 'NEWEST') {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      } else if (sort === 'OLDEST') {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sort === 'NAME_ASC') {
+        return a.title.localeCompare(b.title);
+      } else if (sort === 'NAME_DESC') {
+        return b.title.localeCompare(a.title);
+      } else if (sort === 'MOST_ATTEMPTED') {
+        return b.attemptsCount - a.attemptsCount;
+      }
+      return 0;
+    });
+
+    // Paginate
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const items = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    };
+  }
+
+  /**
+   * Get student's mock test attempt history with full analytics details
+   */
+  async getStudentMockHistory(userId: string, query: any = {}) {
+    const student = await this.prisma.student.findFirst({
+      where: { OR: [{ userId }, { id: userId }] },
+      select: { id: true, examTargetId: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(`Student profile not found for user '${userId}'`);
+    }
+
+    const where: any = {
+      studentId: student.id,
+    };
+
+    if (query.status && query.status !== 'ALL') {
+      if (query.status === 'COMPLETED') {
+        where.status = { name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED', 'COMPLETED'] } };
+      } else {
+        where.status = { name: query.status };
+      }
+    }
+
+    if (query.search && query.search.trim()) {
+      where.exam = {
+        title: { contains: query.search.trim(), mode: 'insensitive' },
+      };
+    }
+
+    if (query.examTargetId) {
+      where.exam = {
+        ...(where.exam || {}),
+        examTargetId: query.examTargetId,
+      };
+    }
+
+    const attempts = await this.prisma.attempt.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        exam: {
+          select: {
+            id: true,
+            title: true,
+            totalQuestions: true,
+            totalMarks: true,
+            durationMinutes: true,
+            examTarget: { select: { id: true, name: true } },
+            sections: {
+              include: {
+                subject: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+        status: { select: { id: true, name: true } },
+        result: {
+          select: {
+            id: true,
+            totalScore: true,
+            maxScore: true,
+            percentage: true,
+            accuracy: true,
+            correctAnswers: true,
+            wrongAnswers: true,
+            unattempted: true,
+            timeUsedSeconds: true,
+            averageTimePerQuestion: true,
+            resultStatus: true,
+            subjectResults: {
+              select: {
+                id: true,
+                subjectId: true,
+                subject: { select: { id: true, name: true } },
+                score: true,
+                maxScore: true,
+                accuracy: true,
+                correctAnswers: true,
+                wrongAnswers: true,
+                unattempted: true,
+              },
+            },
+          },
+        },
+        candidateRanks: {
+          select: {
+            rank: true,
+            totalCandidates: true,
+            percentile: true,
+            rankType: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        timeAnalyses: {
+          select: {
+            averageTimePerQuestionSeconds: true,
+            timeUtilizationPercentage: true,
+            totalTimeUsedSeconds: true,
+          },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
+        strategyAnalyses: {
+          select: {
+            primaryClassification: true,
+            avoidableNegativeMarks: true,
+            projectedScore: true,
+          },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    return attempts;
+  }
+
+  /**
+   * Fetch all attempts for a specific mock test for the logged-in student,
+   * deterministically numbered and sorted newest first with persisted result metrics.
+   */
+  async getMockTestAttempts(userId: string, mockTestId: string, query: any) {
+    const student = await this.getProfile(userId);
+    if (!student) {
+      throw new NotFoundException('Student profile not found.');
+    }
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: mockTestId },
+      include: {
+        examTarget: { select: { id: true, name: true } },
+        sections: {
+          include: {
+            subject: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException('Mock test not found.');
+    }
+
+    // Fetch all attempts chronologically to assign deterministic attempt numbers
+    const allAttempts = await this.prisma.attempt.findMany({
+      where: {
+        studentId: student.id,
+        examId: mockTestId,
+      },
+      include: {
+        status: true,
+        result: true,
+        candidateRanks: {
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const totalAttempts = allAttempts.length;
+
+    let bestScore = 0;
+    let hasBestScore = false;
+    let latestScore: number | null = null;
+    let activeAttempt: any = null;
+
+    const mappedAttempts = allAttempts.map((attempt, index) => {
+      const attemptNumber = index + 1;
+      const isCompleted = ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED', 'COMPLETED'].includes(
+        attempt.status?.name,
+      );
+      const isInProgress = ['IN_PROGRESS', 'INTERRUPTED'].includes(attempt.status?.name);
+
+      if (isInProgress) {
+        activeAttempt = {
+          attemptId: attempt.id,
+          attemptNumber,
+          startedAt: attempt.createdAt,
+          serverEndTime: attempt.serverEndTime,
+        };
+      }
+
+      const score = attempt.result?.totalScore ?? null;
+      if (score !== null) {
+        if (!hasBestScore || score > bestScore) {
+          bestScore = score;
+          hasBestScore = true;
+        }
+        latestScore = score;
+      }
+
+      const maxScore = attempt.result?.maxScore ?? exam.totalMarks;
+      const rawPerc =
+        attempt.result?.percentage ??
+        (score !== null && maxScore > 0 ? (score / maxScore) * 100 : null);
+      const rawAcc = attempt.result?.accuracy ?? null;
+
+      const percentage = rawPerc !== null ? Math.round(Number(rawPerc) * 100) / 100 : null;
+      const accuracy = rawAcc !== null ? Math.round(Number(rawAcc) * 100) / 100 : null;
+
+      return {
+        attemptId: attempt.id,
+        attemptNumber,
+        status: attempt.status?.name || 'UNKNOWN',
+        isCompleted,
+        isInProgress,
+        startedAt: attempt.createdAt,
+        submittedAt: attempt.submittedAt || (attempt.result as any)?.publishedAt || attempt.updatedAt,
+        score,
+        maxScore,
+        percentage,
+        accuracy,
+        correctCount: attempt.result?.correctAnswers ?? null,
+        wrongCount: attempt.result?.wrongAnswers ?? null,
+        unattemptedCount: attempt.result?.unattempted ?? null,
+        timeUsedSeconds: attempt.result?.timeUsedSeconds ?? null,
+        rank: attempt.candidateRanks?.[0]?.rank ?? null,
+        percentile:
+          attempt.candidateRanks?.[0]?.percentile !== undefined
+            ? Math.round(Number(attempt.candidateRanks[0].percentile) * 100) / 100
+            : null,
+        isResultAvailable: isCompleted && attempt.result !== null,
+      };
+    });
+
+    // Mark isBest & isLatest
+    mappedAttempts.forEach((a) => {
+      (a as any).isBest = hasBestScore && a.score === bestScore;
+      (a as any).isLatest = a.attemptNumber === totalAttempts;
+    });
+
+    // Default sorting: Newest first (submittedAt/createdAt DESC)
+    const sortedAttempts = [...mappedAttempts].sort((a, b) => {
+      const timeA = new Date(a.submittedAt || a.startedAt).getTime();
+      const timeB = new Date(b.submittedAt || b.startedAt).getTime();
+      return timeB - timeA;
+    });
+
+    const page = Math.max(1, parseInt(query?.page || '1', 10));
+    const limit = Math.max(1, Math.min(50, parseInt(query?.limit || '10', 10)));
+    const startIndex = (page - 1) * limit;
+    const paginatedAttempts = sortedAttempts.slice(startIndex, startIndex + limit);
+
+    const subjects = exam.sections?.map((s) => s.subject?.name).filter(Boolean) || [];
+
+    const summary = {
+      mockTestId: exam.id,
+      title: exam.title,
+      description: exam.description,
+      examTarget: exam.examTarget?.name || 'General',
+      subjects: Array.from(new Set(subjects)),
+      totalQuestions: exam.totalQuestions,
+      totalMarks: exam.totalMarks,
+      durationMinutes: exam.durationMinutes,
+      totalAttempts,
+      completedAttempts: mappedAttempts.filter((a) => a.isCompleted).length,
+      bestScore: hasBestScore ? bestScore : null,
+      latestScore,
+      activeAttempt,
+      canTakeAgain: !activeAttempt,
+    };
+
+    return {
+      attempts: paginatedAttempts,
+      summary,
+      pagination: {
+        page,
+        limit,
+        total: totalAttempts,
+        totalPages: Math.ceil(totalAttempts / limit) || 1,
+      },
+    };
   }
 }

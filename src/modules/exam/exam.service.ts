@@ -598,8 +598,8 @@ export class ExamService {
       include: { status: true },
     });
     if (!exam) throw new NotFoundException('Exam not found');
-    if (exam.status.name !== 'DRAFT') {
-      throw new BadRequestException('Can only edit DRAFT exams');
+    if (exam.status.name !== 'DRAFT' && exam.status.name !== 'REJECTED') {
+      throw new BadRequestException('Can only edit DRAFT or REJECTED exams');
     }
 
     const updateData: any = {};
