@@ -126,4 +126,10 @@ export class UpdateBlueprintDto {
   @Min(1)
   @Type(() => Number)
   totalQuestions?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBlueprintRuleDto)
+  rules?: CreateBlueprintRuleDto[];
 }

@@ -126,14 +126,52 @@ export class BlueprintService {
   async updateBlueprint(id: string, dto: UpdateBlueprintDto) {
     await this.getBlueprintById(id);
 
-    return this.prisma.examBlueprint.update({
-      where: { id },
-      data: {
-        name: dto.name !== undefined ? dto.name.trim() : undefined,
-        totalQuestions:
-          dto.totalQuestions !== undefined ? dto.totalQuestions : undefined,
-      },
-      include: { rules: true },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.examBlueprint.update({
+        where: { id },
+        data: {
+          name: dto.name !== undefined ? dto.name.trim() : undefined,
+          totalQuestions:
+            dto.totalQuestions !== undefined ? dto.totalQuestions : undefined,
+        },
+      });
+
+      if (dto.rules !== undefined) {
+        await tx.blueprintRule.deleteMany({ where: { blueprintId: id } });
+        if (dto.rules.length > 0) {
+          for (const rule of dto.rules) {
+            await tx.blueprintRule.create({
+              data: {
+                blueprintId: id,
+                subjectId: rule.subjectId || null,
+                chapterId: rule.chapterId || null,
+                topicId: rule.topicId || null,
+                subTopicId: rule.subTopicId || null,
+                difficultyLevel: rule.difficultyLevel || null,
+                type: rule.type || null,
+                selectionCount: rule.selectionCount || null,
+                selectionPercentage: rule.selectionPercentage || null,
+                priority: rule.priority ?? 0,
+              },
+            });
+          }
+        }
+      }
+
+      return tx.examBlueprint.findUnique({
+        where: { id },
+        include: {
+          rules: {
+            include: {
+              subject: { select: { id: true, name: true } },
+              chapter: { select: { id: true, name: true } },
+              topic: { select: { id: true, name: true } },
+            },
+          },
+          createdBy: { select: { id: true, email: true } },
+          _count: { select: { generatedVersions: true } },
+        },
+      });
     });
   }
 

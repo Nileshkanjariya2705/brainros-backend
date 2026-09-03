@@ -16,6 +16,7 @@ import {
   SaveAnswerDto,
   BulkSaveAnswersDto,
   SaveTimeLogDto,
+  LeaveAttemptDto,
 } from './dto/attempt.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -126,10 +127,21 @@ export class ExamAttemptController {
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
   async leaveAttempt(
     @Param('id') attemptId: string,
+    @Body() dto: LeaveAttemptDto,
     @CurrentUser() user: any,
   ) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.submitAttempt(attemptId, studentId, 'USER_LEAVE');
+    const reason = dto?.reason || 'USER_LEAVE';
+    return this.attemptService.submitAttempt(attemptId, studentId, reason);
+  }
+
+  @Post(':id/auto-submit')
+  @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  async autoSubmitAttempt(
+    @Param('id') attemptId: string,
+    @CurrentUser() _user: any,
+  ) {
+    return this.attemptService.autoSubmitAttempt(attemptId);
   }
 
   /**

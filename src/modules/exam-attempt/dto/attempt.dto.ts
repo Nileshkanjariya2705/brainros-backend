@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsArray,
   IsDateString,
+  IsString,
   ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -78,3 +79,12 @@ export class SaveTimeLogDto {
   @Type(() => Number)
   timeSpentSeconds?: number;
 }
+
+// ─── Leave / Force Close Attempt ──────────────────────────────
+
+export class LeaveAttemptDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
