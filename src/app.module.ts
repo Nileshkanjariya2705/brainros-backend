@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
@@ -25,23 +25,6 @@ import { RegionalLanguageModule } from './modules/regional-language/regional-lan
 import { ExamSecurityModule } from './modules/exam-security/exam-security.module';
 import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { BullModule } from '@nestjs/bullmq';
-import Redis from 'ioredis';
-
-const bullRedisClient = new Redis({
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: parseInt(process.env.REDIS_PORT || '6379', 10),
-  password: process.env.REDIS_PASSWORD || undefined,
-  maxRetriesPerRequest: null,
-  enableOfflineQueue: false,
-  retryStrategy: (times) => {
-    if (times > 2) return null;
-    return 1000;
-  },
-});
-
-bullRedisClient.on('error', (err) => {
-  // Gracefully handle Redis connection errors during development
-});
 
 @Module({
   imports: [
@@ -49,8 +32,55 @@ bullRedisClient.on('error', (err) => {
       isGlobal: true,
       envFilePath: '.env',
     }),
-    BullModule.forRoot({
-      connection: bullRedisClient,
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const redisUrl =
+          configService.get<string>('REDIS_URL') || process.env.REDIS_URL;
+        if (redisUrl) {
+          try {
+            const parsed = new URL(redisUrl);
+            return {
+              connection: {
+                host: parsed.hostname,
+                port: parseInt(parsed.port || '6379', 10),
+                username: parsed.username
+                  ? decodeURIComponent(parsed.username)
+                  : undefined,
+                password: parsed.password
+                  ? decodeURIComponent(parsed.password)
+                  : undefined,
+                tls: redisUrl.startsWith('rediss://')
+                  ? { rejectUnauthorized: false }
+                  : undefined,
+                maxRetriesPerRequest: null,
+                enableReadyCheck: false,
+                keepAlive: 30000,
+                retryStrategy: (times: number) => {
+                  return Math.min(times * 200, 3000);
+                },
+              },
+            };
+          } catch (e) {
+            // Fallback if URL parsing fails
+          }
+        }
+
+        return {
+          connection: {
+            host: process.env.REDIS_HOST || '127.0.0.1',
+            port: parseInt(process.env.REDIS_PORT || '6379', 10),
+            password: process.env.REDIS_PASSWORD || undefined,
+            maxRetriesPerRequest: null,
+            enableReadyCheck: false,
+            keepAlive: 30000,
+            retryStrategy: (times: number) => {
+              return Math.min(times * 200, 3000);
+            },
+          },
+        };
+      },
     }),
     ThrottlerModule.forRoot([
       {

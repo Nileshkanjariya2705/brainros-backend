@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TwoFactorConfig } from '../config/two-factor.config';
 import {
   ITwoFactorProvider,
   OtpPurpose,
@@ -16,170 +17,121 @@ import {
 export class RealTwoFactorProvider implements ITwoFactorProvider {
   readonly providerName = 'REAL' as const;
   private readonly logger = new Logger(RealTwoFactorProvider.name);
-  private readonly baseUrl = 'https://verify.twilio.com/v2';
-  private cachedServiceSid: string | null = null;
+  private readonly baseUrl = 'https://control.msg91.com/api/v5/otp';
 
-  constructor(private readonly configService: ConfigService) {}
-
-  private getAuthHeader(): string {
-    const sid =
-      this.configService.get<string>('TWILIO_API_KEY_SID') ||
-      this.configService.get<string>('TWILIO_ACCOUNT_SID') ||
-      this.configService.get<string>('TWO_FACTOR_API_KEY');
-
-    const secret =
-      this.configService.get<string>('TWILIO_API_KEY_SECRET') ||
-      this.configService.get<string>('TWILIO_AUTH_TOKEN');
-
-    if (!sid || !secret) {
-      this.logger.error(
-        'Twilio credentials (TWILIO_API_KEY_SID / TWILIO_ACCOUNT_SID and secret) are missing.',
-      );
-      throw new InternalServerErrorException(
-        'Real 2FA provider is not properly configured.',
-      );
-    }
-    const token = Buffer.from(`${sid}:${secret}`).toString('base64');
-    return `Basic ${token}`;
-  }
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly config: TwoFactorConfig,
+  ) {}
 
   /**
-   * Retrieves or auto-creates a Twilio Verify Service SID
+   * Retrieves MSG91 Auth Key from config or environment.
    */
-  private async getOrCreateServiceSid(): Promise<string> {
-    if (this.cachedServiceSid) return this.cachedServiceSid;
+  private getAuthKey(): string {
+    const authKey =
+      this.config.msg91AuthKey ||
+      this.configService.get<string>('MSG91_AUTH_KEY') ||
+      this.configService.get<string>('OTP_API_KEY') ||
+      process.env.MSG91_AUTH_KEY ||
+      '567446A9gJtDpx6a9a2e53P1';
 
-    const envServiceSid = this.configService.get<string>(
-      'TWILIO_VERIFY_SERVICE_SID',
-    );
-    if (envServiceSid) {
-      this.cachedServiceSid = envServiceSid;
-      return envServiceSid;
-    }
-
-    const authHeader = this.getAuthHeader();
-
-    // 1. Try listing existing Twilio Verify services
-    try {
-      const listResponse = await fetch(`${this.baseUrl}/Services`, {
-        headers: { Authorization: authHeader },
-      });
-      const listData = (await listResponse.json()) as {
-        services?: { sid: string; friendly_name: string }[];
-      };
-
-      if (
-        listResponse.ok &&
-        listData.services &&
-        listData.services.length > 0
-      ) {
-        this.cachedServiceSid = listData.services[0].sid;
-        this.logger.log(
-          `Using existing Twilio Verify Service SID: ${this.cachedServiceSid}`,
-        );
-        return this.cachedServiceSid;
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Failed to list Twilio Verify services: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    // 2. Auto-create a new Twilio Verify service if none exists
-    try {
-      const createResponse = await fetch(`${this.baseUrl}/Services`, {
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          FriendlyName: 'Exam Management System',
-        }).toString(),
-      });
-
-      const createData = (await createResponse.json()) as {
-        sid?: string;
-        message?: string;
-      };
-      if (createResponse.ok && createData.sid) {
-        this.cachedServiceSid = createData.sid;
-        this.logger.log(
-          `Created new Twilio Verify Service SID: ${this.cachedServiceSid}`,
-        );
-        return this.cachedServiceSid;
-      }
-      throw new Error(
-        createData.message || 'Failed to create Twilio Verify service',
-      );
-    } catch (err) {
-      this.logger.error(
-        `Error configuring Twilio Verify Service: ${err instanceof Error ? err.message : String(err)}`,
-      );
+    if (!authKey) {
+      this.logger.error('MSG91 Auth Key is missing in configuration.');
       throw new InternalServerErrorException(
-        'Failed to initialize Twilio Verify Service.',
+        'MSG91 OTP provider is not properly configured.',
       );
     }
+    return authKey.trim();
   }
 
   /**
-   * Triggers SMS OTP verification via Twilio Verify API
-   * POST https://verify.twilio.com/v2/Services/{ServiceSid}/Verifications
+   * Formats a mobile number for MSG91 (sanitizes and requires country code without +, default 91 if missing).
+   */
+  public formatMobileForMsg91(mobileNumber: string): string {
+    const digits = mobileNumber.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `91${digits}`;
+    }
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return digits;
+    }
+    if (digits.startsWith('91')) {
+      return digits;
+    }
+    return digits.length > 10 ? digits : `91${digits}`;
+  }
+
+  /**
+   * Sends OTP via MSG91 OTP v5 API
+   * POST https://control.msg91.com/api/v5/otp
    */
   async sendOtp(
     mobileNumber: string,
     purpose: OtpPurpose,
   ): Promise<TwoFactorProviderResult> {
-    const serviceSid = await this.getOrCreateServiceSid();
-    const authHeader = this.getAuthHeader();
+    const authKey = this.getAuthKey();
+    const formattedMobile = this.formatMobileForMsg91(mobileNumber);
 
-    const body = new URLSearchParams({
-      To: mobileNumber,
-      Channel: 'sms',
-    }).toString();
+    const queryParams = new URLSearchParams({
+      mobile: formattedMobile,
+      otp_length: String(this.config.otpLength || 5),
+      otp_expiry: String(Math.ceil((this.config.otpTtl || 300) / 60)),
+      realTimeResponse: '1',
+    });
+
+    if (this.config.msg91TemplateId) {
+      queryParams.set('template_id', this.config.msg91TemplateId);
+    }
+
+    const url = `${this.baseUrl}?${queryParams.toString()}`;
 
     try {
       this.logger.log(
-        `[REAL 2FA] Sending OTP via Twilio to destination with purpose: ${purpose}`,
+        `[MSG91 OTP] Sending OTP via MSG91 to destination with purpose: ${purpose}`,
       );
 
-      const response = await fetch(
-        `${this.baseUrl}/Services/${serviceSid}/Verifications`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body,
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          authkey: authKey,
+          'Content-Type': 'application/json',
         },
-      );
+        body: JSON.stringify({}),
+      });
 
       const resData = (await response.json()) as {
-        sid?: string;
-        status?: string;
+        type?: string;
         message?: string;
+        request_id?: string;
       };
 
-      if (!response.ok || (resData.status !== 'pending' && !resData.sid)) {
+      const isSuccess =
+        response.ok &&
+        (resData.type === 'success' ||
+          (resData.message &&
+            resData.message.toLowerCase().includes('success')));
+
+      if (!isSuccess) {
         this.logger.error(
-          `[2FA_SEND_FAILED] Twilio Send OTP failed for destination. Message: ${resData.message || resData.status}`,
+          `[MSG91_SEND_FAILED] MSG91 Send OTP failed. Response: ${JSON.stringify(resData)}`,
         );
         throw new BadRequestException(
-          resData.message ||
-            'Failed to send OTP via Twilio. Check mobile number.',
+          resData.message || 'Failed to send OTP via MSG91. Check mobile number.',
         );
       }
 
-      this.logger.log(`[REAL 2FA] OTP SMS sent successfully via Twilio.`);
+      this.logger.log(
+        `[MSG91 OTP] OTP SMS sent successfully via MSG91 (Request ID: ${resData.request_id || 'N/A'}).`,
+      );
+
       return {
-        sessionId: mobileNumber,
+        sessionId: formattedMobile,
         providerManaged: true,
       };
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
       this.logger.error(
-        `[2FA_SEND_FAILED] Twilio connection error: ${err instanceof Error ? err.message : String(err)}`,
+        `[MSG91_SEND_FAILED] Connection error: ${err instanceof Error ? err.message : String(err)}`,
       );
       throw new InternalServerErrorException(
         'OTP service unavailable. Please try again.',
@@ -188,11 +140,10 @@ export class RealTwoFactorProvider implements ITwoFactorProvider {
   }
 
   /**
-   * Verifies the user-entered OTP code via Twilio Verify API
-   * POST https://verify.twilio.com/v2/Services/{ServiceSid}/VerificationCheck
+   * Verifies OTP code via MSG91 OTP v5 API
+   * GET https://control.msg91.com/api/v5/otp/verify
    *
-   * SECURITY RULE: NEVER accepts 12345 or any development bypass in REAL mode.
-   * If Twilio fails, throws error — NEVER falls back to 12345.
+   * SECURITY RULE: Never accepts bypass codes in real mode.
    */
   async verifyOtp(
     targetMobileOrSession: string,
@@ -200,56 +151,106 @@ export class RealTwoFactorProvider implements ITwoFactorProvider {
     purpose: OtpPurpose,
     sessionData?: TwoFactorSessionData,
   ): Promise<boolean> {
-    const serviceSid = await this.getOrCreateServiceSid();
-    const authHeader = this.getAuthHeader();
+    const authKey = this.getAuthKey();
+    const formattedMobile = this.formatMobileForMsg91(targetMobileOrSession);
 
-    const body = new URLSearchParams({
-      To: targetMobileOrSession,
-      Code: otp,
-    }).toString();
+    const queryParams = new URLSearchParams({
+      mobile: formattedMobile,
+      otp: otp.trim(),
+    });
+
+    const url = `${this.baseUrl}/verify?${queryParams.toString()}`;
 
     try {
       this.logger.log(
-        `[REAL 2FA] Verifying OTP with Twilio for purpose: ${purpose}`,
+        `[MSG91 OTP] Verifying OTP with MSG91 for purpose: ${purpose}`,
       );
 
-      const response = await fetch(
-        `${this.baseUrl}/Services/${serviceSid}/VerificationCheck`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body,
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          authkey: authKey,
         },
-      );
+      });
 
       const resData = (await response.json()) as {
-        status?: string;
-        valid?: boolean;
+        type?: string;
         message?: string;
       };
 
-      if (
+      const isSuccess =
         response.ok &&
-        (resData.status === 'approved' || resData.valid === true)
-      ) {
-        this.logger.log(`[REAL 2FA] Twilio verification succeeded.`);
+        (resData.type === 'success' ||
+          (resData.message &&
+            (resData.message.toLowerCase().includes('success') ||
+              resData.message.toLowerCase().includes('verified'))));
+
+      if (isSuccess) {
+        this.logger.log(`[MSG91 OTP] Verification succeeded.`);
         return true;
       }
 
       this.logger.warn(
-        `[2FA_VERIFY_FAILED] Twilio verification rejected. Status: ${resData.status}, Message: ${resData.message}`,
+        `[MSG91_VERIFY_FAILED] Verification rejected. Type: ${resData.type}, Message: ${resData.message}`,
       );
       return false;
     } catch (err) {
       this.logger.error(
-        `[2FA_VERIFY_FAILED] Twilio VerificationCheck connection error: ${err instanceof Error ? err.message : String(err)}`,
+        `[MSG91_VERIFY_FAILED] MSG91 Verification error: ${err instanceof Error ? err.message : String(err)}`,
       );
       throw new InternalServerErrorException(
         'OTP service unavailable. Please try again.',
       );
     }
+  }
+
+  /**
+   * Retries / Resends OTP via MSG91 OTP Retry API
+   * GET https://control.msg91.com/api/v5/otp/retry
+   */
+  async retryOtp(
+    mobileNumber: string,
+    retryType: 'text' | 'voice' = 'text',
+  ): Promise<boolean> {
+    const authKey = this.getAuthKey();
+    const formattedMobile = this.formatMobileForMsg91(mobileNumber);
+
+    const queryParams = new URLSearchParams({
+      mobile: formattedMobile,
+      retrytype: retryType,
+    });
+
+    const url = `${this.baseUrl}/retry?${queryParams.toString()}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          authkey: authKey,
+        },
+      });
+
+      const resData = (await response.json()) as {
+        type?: string;
+        message?: string;
+      };
+
+      return response.ok && resData.type === 'success';
+    } catch (err) {
+      this.logger.warn(
+        `[MSG91_RETRY_FAILED] Retry failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Resend OTP via MSG91 (alias for retryOtp)
+   */
+  async resendOtp(
+    mobileNumber: string,
+    retryType: 'text' | 'voice' = 'text',
+  ): Promise<boolean> {
+    return this.retryOtp(mobileNumber, retryType);
   }
 }

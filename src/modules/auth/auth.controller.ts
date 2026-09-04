@@ -27,6 +27,11 @@ import {
   RequestPasswordlessLoginOtpDto,
   VerifyPasswordlessLoginOtpDto,
 } from './dto/passwordless-login.dto';
+import {
+  RegisterSendOtpDto,
+  RegisterVerifyOtpDto,
+} from './dto/register-otp.dto';
+import { LoginSendOtpDto, LoginVerifyOtpDto } from './dto/login-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
@@ -44,11 +49,46 @@ export class AuthController {
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
-  // 1. REGISTRATION ENDPOINTS
+  // 1. REGISTRATION ENDPOINTS (MSG91 / OTP)
   // ═══════════════════════════════════════════════════════════════
 
   /**
-   * Submit registration data: creates pending registration state in Redis,
+   * Step A: Check if mobile already registered. If yes, reject. If new, trigger sendOtp(mobileNumber).
+   * POST /auth/register/send-otp
+   */
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('register/send-otp')
+  @HttpCode(HttpStatus.OK)
+  async registerSendOtp(
+    @Body() dto: RegisterSendOtpDto,
+    @Request() req: any,
+  ) {
+    return this.authService.registerSendOtp(dto, req);
+  }
+
+  /**
+   * Step B: Verify OTP using verifyOtp(mobileNumber, otp).
+   * If valid, save new user record in DB, issue session/JWT token, return user details.
+   * POST /auth/register/verify-otp
+   */
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @Post('register/verify-otp')
+  @HttpCode(HttpStatus.CREATED)
+  async registerVerifyOtp(
+    @Body() dto: RegisterVerifyOtpDto,
+    @Request() req: any,
+    @Response({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.registerVerifyOtp(dto, req);
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
+    return result;
+  }
+
+  /**
+   * Full Student Registration: creates pending registration state in Redis,
    * sends OTP to mobile number, and returns requiresOtp.
    * POST /auth/register
    */
@@ -60,7 +100,7 @@ export class AuthController {
   }
 
   /**
-   * Verify registration OTP: activates User, creates Student profile,
+   * Verify full student registration OTP: activates User, creates Student profile,
    * generates Student ID, creates session, and sets HttpOnly refresh cookie.
    * POST /auth/verify-registration-otp
    */
@@ -80,27 +120,68 @@ export class AuthController {
     return result;
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // 2. LOGIN ENDPOINTS (MSG91 / OTP)
+  // ═══════════════════════════════════════════════════════════════
+
   /**
-   * Alias: POST /auth/register/verify-otp
+   * Step A: Check if user exists in database. If not, reject with "User not found".
+   * If found, trigger sendOtp(mobileNumber).
+   * POST /auth/login/send-otp
+   */
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @Post('login/send-otp')
+  @HttpCode(HttpStatus.OK)
+  async loginSendOtp(@Body() dto: LoginSendOtpDto, @Request() req: any) {
+    return this.authService.loginSendOtp(dto, req);
+  }
+
+  /**
+   * Step B: Verify the OTP using verifyOtp(mobileNumber, otp).
+   * If valid, generate and return session/JWT token and user profile.
+   * POST /auth/login/verify-otp
    */
   @Throttle({ default: { limit: 10, ttl: 60 } })
-  @Post('register/verify-otp')
-  @HttpCode(HttpStatus.CREATED)
-  async verifyRegistrationOtpAlias(
-    @Body() dto: VerifyRegistrationOtpDto,
+  @Post('login/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async loginVerifyOtp(
+    @Body() dto: LoginVerifyOtpDto,
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    return this.verifyRegistrationOtp(dto, req, res);
+    const result =
+      dto.loginRequestId && this.authService.verifyPasswordlessLoginOtp
+        ? await this.authService.verifyPasswordlessLoginOtp(dto as any, req)
+        : await this.authService.loginVerifyOtp(dto, req);
+
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
+    return result;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // 2. UNIFIED PASSWORDLESS LOGIN ENDPOINTS
-  // ═══════════════════════════════════════════════════════════════
+  /**
+   * Backward-compatible alias: verifyPasswordlessLoginOtp
+   */
+  async verifyPasswordlessLoginOtp(
+    dto: VerifyPasswordlessLoginOtpDto,
+    req: any,
+    res: ExpressResponse,
+  ) {
+    const result = this.authService.verifyPasswordlessLoginOtp
+      ? await this.authService.verifyPasswordlessLoginOtp(dto, req)
+      : await this.authService.loginVerifyOtp(dto as any, req);
+
+    setAuthCookies(res, this.configService, {
+      accessToken: result.data?.accessToken,
+      refreshToken: result.data?.refreshToken,
+    });
+    return result;
+  }
 
   /**
-   * Request passwordless login OTP: Accepts Email, Student ID, or Mobile number.
-   * Sends OTP to the verified mobile number associated with the account.
+   * Unified request login OTP (accepts email, student ID, or mobile number)
    * POST /auth/login/request-otp
    */
   @Throttle({ default: { limit: 5, ttl: 60 } })
@@ -111,27 +192,6 @@ export class AuthController {
     @Request() req: any,
   ) {
     return this.authService.requestPasswordlessLoginOtp(dto, req);
-  }
-
-  /**
-   * Verify passwordless login OTP: Validates OTP, creates LoginSession,
-   * sets HttpOnly refresh cookie, and returns access token + user details.
-   * POST /auth/login/verify-otp
-   */
-  @Throttle({ default: { limit: 10, ttl: 60 } })
-  @Post('login/verify-otp')
-  @HttpCode(HttpStatus.OK)
-  async verifyPasswordlessLoginOtp(
-    @Body() dto: VerifyPasswordlessLoginOtpDto,
-    @Request() req: any,
-    @Response({ passthrough: true }) res: ExpressResponse,
-  ) {
-    const result = await this.authService.verifyPasswordlessLoginOtp(dto, req);
-    setAuthCookies(res, this.configService, {
-      accessToken: result.data?.accessToken,
-      refreshToken: result.data?.refreshToken,
-    });
-    return result;
   }
 
   // ═══════════════════════════════════════════════════════════════

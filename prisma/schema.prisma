@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -2076,8 +2077,9 @@ model BatchStudent {
 
 model BulkUpload {
   id                String           @id @default(uuid()) @db.Uuid
-  institutionId     String           @map("institution_id") @db.Uuid
+  institutionId     String?          @map("institution_id") @db.Uuid
   batchId           String?          @map("batch_id") @db.Uuid
+  uploadType        String           @default("SUPER_ADMIN_STUDENTS") @map("upload_type")
   fileName          String           @map("file_name")
   fileType          String           @map("file_type")
   storageKey        String?          @map("storage_key")
@@ -2102,7 +2104,7 @@ model BulkUpload {
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
-  institution       Institution      @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  institution       Institution?     @relation(fields: [institutionId], references: [id], onDelete: Cascade)
   batch             InstitutionBatch? @relation(fields: [batchId], references: [id])
   rows              BulkUploadRow[]
   errors            BulkUploadError[]
@@ -2110,6 +2112,7 @@ model BulkUpload {
 
   @@index([institutionId])
   @@index([status])
+  @@index([uploadType])
   @@map("bulk_uploads")
 }
 

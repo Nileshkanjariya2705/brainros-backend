@@ -116,7 +116,7 @@ export class BulkUploadActivationService {
   private async activateRow(
     row: any,
     batchId: string | null,
-    institutionId: string,
+    institutionId: string | null,
   ): Promise<void> {
     const data = row.normalizedData;
 

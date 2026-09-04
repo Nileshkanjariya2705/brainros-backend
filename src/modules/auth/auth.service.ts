@@ -21,6 +21,8 @@ import {
   RequestPasswordlessLoginOtpDto,
   VerifyPasswordlessLoginOtpDto,
 } from './dto/passwordless-login.dto';
+import { RegisterSendOtpDto, RegisterVerifyOtpDto } from './dto/register-otp.dto';
+import { LoginSendOtpDto, LoginVerifyOtpDto } from './dto/login-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { RedisService } from '../redis/redis.service';
 import * as crypto from 'crypto';
@@ -702,6 +704,410 @@ export class AuthService {
     });
 
     return this.buildAuthResponse(user, session.id, tokens, 'Login successful');
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // DEDICATED MSG91/OTP FLOWS (REGISTRATION & LOGIN)
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Dedicated Registration Step A: POST /auth/register/send-otp
+   * Check if mobile is already registered. If yes, reject. If new, trigger sendOtp(mobileNumber).
+   */
+  async registerSendOtp(dto: RegisterSendOtpDto, req?: any) {
+    const ctx = this.extractRequestContext(req);
+    const rawMobile = dto.mobileNumber || dto.mobile || dto.phone;
+    if (!rawMobile) {
+      throw new BadRequestException('Mobile number is required.');
+    }
+
+    const normalizedMobile = this.otpService.normalizeMobileNumber(rawMobile);
+
+    // 1. Check if mobile number is already registered
+    const existingUserByMobile = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
+      },
+    });
+
+    if (existingUserByMobile) {
+      throw new BadRequestException(
+        'A user with this mobile number already exists.',
+      );
+    }
+
+    if (dto.email) {
+      const normalizedEmail = dto.email.toLowerCase().trim();
+      const existingUserByEmail = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+      if (existingUserByEmail) {
+        throw new BadRequestException('A user with this email already exists.');
+      }
+    }
+
+    // Cache metadata in Redis for registration completion
+    const registrationData = {
+      mobile: normalizedMobile,
+      name: dto.name ? dto.name.trim() : 'Student',
+      email: dto.email ? dto.email.toLowerCase().trim() : null,
+      createdAt: new Date().toISOString(),
+    };
+    await this.redisService.set(
+      `registration:${normalizedMobile}`,
+      JSON.stringify(registrationData),
+      900,
+    );
+
+    // 2. Trigger sendOtp(mobileNumber)
+    await this.otpService.sendOtp(normalizedMobile, 'REGISTER', ctx);
+
+    await this.securityEventService.log('OTP_REQUESTED', {
+      ...ctx,
+      metadata: {
+        purpose: 'REGISTER',
+        mobile: normalizedMobile,
+      },
+    });
+
+    return {
+      message: 'OTP sent successfully to your mobile number.',
+      data: {
+        requiresOtp: true,
+        purpose: 'REGISTER',
+        mobile: normalizedMobile,
+        mobileMasked: this.maskMobile(normalizedMobile),
+        expiresIn: 300,
+        resendAvailableIn: 60,
+      },
+    };
+  }
+
+  /**
+   * Dedicated Registration Step B: POST /auth/register/verify-otp
+   * Verify OTP. If valid, save new user record in database, issue session/JWT token, return user details.
+   */
+  async registerVerifyOtp(dto: RegisterVerifyOtpDto, req?: any) {
+    const ctx = this.extractRequestContext(req);
+    const { otp } = dto;
+    if (!otp) {
+      throw new BadRequestException('OTP is required.');
+    }
+
+    let mobile = dto.mobileNumber || dto.mobile || dto.phone;
+    let cachedData: any = null;
+
+    if (dto.registrationId) {
+      const raw = await this.redisService.get(
+        `registration:${dto.registrationId}`,
+      );
+      if (raw) {
+        cachedData = JSON.parse(raw);
+        mobile = mobile || cachedData.mobile;
+      }
+    }
+
+    if (!mobile && cachedData?.mobile) {
+      mobile = cachedData.mobile;
+    }
+
+    if (mobile) {
+      const raw = await this.redisService.get(
+        `registration:${this.otpService.normalizeMobileNumber(mobile)}`,
+      );
+      if (raw) {
+        cachedData = { ...JSON.parse(raw), ...(cachedData || {}) };
+      }
+    }
+
+    if (!mobile) {
+      throw new BadRequestException(
+        'Mobile number or registrationId is required.',
+      );
+    }
+
+    const normalizedMobile = this.otpService.normalizeMobileNumber(mobile);
+
+    // 1. Verify OTP using verifyOtp(mobileNumber, otp)
+    await this.otpService.verifyOtp(
+      normalizedMobile,
+      otp.trim(),
+      'REGISTER',
+      ctx,
+    );
+
+    // Clean up cached registration state
+    if (dto.registrationId) {
+      await this.redisService.del(`registration:${dto.registrationId}`);
+    }
+    await this.redisService.del(`registration:${normalizedMobile}`);
+
+    // 2. Save the new user record in database
+    const resolvedName = dto.name || cachedData?.name || 'Student';
+    const resolvedEmail = dto.email || cachedData?.email || null;
+
+    // Pre-resolve lookups outside transaction to minimize interactive lock duration over cloud DB
+    let studentRole = await this.prisma.role.findUnique({
+      where: { name: 'STUDENT' },
+    });
+    if (!studentRole) {
+      studentRole = await this.prisma.role.create({ data: { name: 'STUDENT' } });
+    }
+
+    let resolvedClassId = dto.classId || cachedData?.classId;
+    if (!resolvedClassId) {
+      const fallbackClass = await this.prisma.studentClass.findFirst();
+      resolvedClassId = fallbackClass?.id;
+    }
+
+    let resolvedLanguageId =
+      dto.preferredLanguageId || cachedData?.preferredLanguageId;
+    if (!resolvedLanguageId) {
+      const fallbackLang = await this.prisma.preferredLanguage.findFirst();
+      resolvedLanguageId = fallbackLang?.id;
+    }
+
+    let resolvedExamTargetId = dto.examTargetId || cachedData?.examTargetId;
+    if (!resolvedExamTargetId) {
+      const fallbackTarget = await this.prisma.examTarget.findFirst();
+      resolvedExamTargetId = fallbackTarget?.id;
+    }
+
+    const year = new Date().getFullYear();
+    const count = await this.prisma.student.count();
+    let studentIdStr = `STU${String(count + 1001).padStart(6, '0')}`;
+    let studentCode = `BRN-${year}-${String(count + 1).padStart(6, '0')}`;
+
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        // Concurrency duplicate check
+        const existingUser = await tx.user.findFirst({
+          where: {
+            OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
+          },
+        });
+        if (existingUser) {
+          throw new BadRequestException(
+            'A user with this mobile number already exists.',
+          );
+        }
+
+        // Create User
+        const newUser = await tx.user.create({
+          data: {
+            phone: normalizedMobile,
+            mobileNumber: normalizedMobile,
+            email: resolvedEmail,
+            status: 'ACTIVE',
+            isVerified: true,
+            isActive: true,
+            mobileVerifiedAt: new Date(),
+            emailVerifiedAt: resolvedEmail ? new Date() : null,
+            lastLoginAt: new Date(),
+          },
+        });
+
+        await tx.userRole.create({
+          data: { userId: newUser.id, roleId: studentRole.id },
+        });
+
+        const student = await tx.student.create({
+          data: {
+            userId: newUser.id,
+            studentId: studentIdStr,
+            studentCode,
+            name: resolvedName,
+            state: dto.state || cachedData?.state || 'Default State',
+            district: dto.district || cachedData?.district || 'Default District',
+            stateId: dto.stateId || cachedData?.stateId || null,
+            districtId: dto.districtId || cachedData?.districtId || null,
+            schoolCollege:
+              dto.schoolCollege || cachedData?.schoolCollege || 'Default School',
+            classId: resolvedClassId,
+            preferredLanguageId: resolvedLanguageId,
+            examTargetId: resolvedExamTargetId,
+            status: 'ACTIVE',
+          },
+        });
+
+        return { user: newUser, student };
+      },
+      { timeout: 25000, maxWait: 10000 },
+    );
+
+    // 3. Issue session & JWT token
+    const { session, tokens } = await this.createSessionAndTokens(
+      result.user.id,
+      req,
+    );
+
+    await this.securityEventService.log('REGISTER_SUCCESS', {
+      userId: result.user.id,
+      ...ctx,
+      metadata: {
+        mobile: normalizedMobile,
+        studentId: result.student.studentId,
+      },
+    });
+
+    const fullUser = await this.loadUserWithRoles(result.user.id);
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Registration completed successfully.',
+    );
+  }
+
+  /**
+   * Dedicated Login Step A: POST /auth/login/send-otp
+   * Check if user exists in database. If not, reject with "User not found". If found, trigger sendOtp(mobileNumber).
+   */
+  async loginSendOtp(dto: LoginSendOtpDto, req?: any) {
+    const ctx = this.extractRequestContext(req);
+    const rawIdentifier =
+      dto.mobileNumber || dto.mobile || dto.phone || dto.identifier;
+    if (!rawIdentifier) {
+      throw new BadRequestException('Mobile number or identifier is required.');
+    }
+
+    const normalizedMobile = this.otpService.normalizeMobileNumber(
+      rawIdentifier.trim(),
+    );
+
+    // 1. Check if user exists in database. If not, reject with "User not found".
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
+      },
+      include: { userRoles: { include: { role: true } }, student: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    this.verifyAccountActive(user);
+
+    const targetMobile = user.mobileNumber || user.phone || normalizedMobile;
+
+    // Cache temporary login state in Redis
+    await this.redisService.set(
+      `login:${targetMobile}`,
+      JSON.stringify({
+        userId: user.id,
+        mobile: targetMobile,
+        createdAt: new Date().toISOString(),
+      }),
+      300,
+    );
+
+    // 2. Trigger sendOtp(mobileNumber)
+    await this.otpService.sendOtp(targetMobile, 'LOGIN', {
+      ...ctx,
+      userId: user.id,
+    });
+
+    await this.securityEventService.log('OTP_REQUESTED', {
+      userId: user.id,
+      ...ctx,
+      metadata: { purpose: 'LOGIN', mobile: targetMobile },
+    });
+
+    return {
+      message: 'OTP sent to your registered mobile number.',
+      data: {
+        requiresOtp: true,
+        purpose: 'LOGIN',
+        mobile: targetMobile,
+        mobileMasked: this.maskMobile(targetMobile),
+        expiresIn: 300,
+        resendAvailableIn: 60,
+      },
+    };
+  }
+
+  /**
+   * Dedicated Login Step B: POST /auth/login/verify-otp
+   * Verify the OTP using verifyOtp(mobileNumber, otp). If valid, generate and return session/JWT token and user profile.
+   */
+  async loginVerifyOtp(dto: LoginVerifyOtpDto, req?: any) {
+    const ctx = this.extractRequestContext(req);
+    const { otp } = dto;
+    if (!otp) {
+      throw new BadRequestException('OTP is required.');
+    }
+
+    // Support existing loginRequestId flow as well
+    if (dto.loginRequestId) {
+      return this.verifyPasswordlessLoginOtp(
+        { loginRequestId: dto.loginRequestId, otp },
+        req,
+      );
+    }
+
+    const rawMobile = dto.mobileNumber || dto.mobile || dto.phone;
+    if (!rawMobile) {
+      throw new BadRequestException(
+        'Mobile number or loginRequestId is required.',
+      );
+    }
+
+    const normalizedMobile = this.otpService.normalizeMobileNumber(
+      rawMobile.trim(),
+    );
+
+    // 1. Check if user exists
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
+      },
+      include: { userRoles: { include: { role: true } }, student: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    this.verifyAccountActive(user);
+
+    // 2. Verify OTP using verifyOtp(mobileNumber, otp)
+    await this.otpService.verifyOtp(normalizedMobile, otp.trim(), 'LOGIN', {
+      ...ctx,
+      userId: user.id,
+    });
+
+    // Invalidate cached login request
+    await this.redisService.del(`login:${normalizedMobile}`);
+
+    // Update lastLoginAt
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        status: user.status === 'PENDING' ? 'ACTIVE' : user.status,
+      },
+    });
+
+    // 3. Generate and return session/JWT token and user profile
+    const { session, tokens } = await this.createSessionAndTokens(
+      user.id,
+      req,
+    );
+
+    await this.securityEventService.log('LOGIN_SUCCESS', {
+      userId: user.id,
+      ...ctx,
+      metadata: { method: 'MSG91_OTP', sessionId: session.id },
+    });
+
+    const fullUser = await this.loadUserWithRoles(user.id);
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Login successful.',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════

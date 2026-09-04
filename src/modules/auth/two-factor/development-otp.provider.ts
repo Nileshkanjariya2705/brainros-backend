@@ -55,17 +55,23 @@ export class DevelopmentOtpProvider implements ITwoFactorProvider {
       `[2FA mode: DEVELOPMENT] Verifying OTP locally for purpose: ${purpose}`,
     );
 
-    const expectedOtp = this.config.devBypassOtp;
+    const cleanOtp = (otp || '').trim();
+    const expectedOtp = (this.config.devBypassOtp || '12345').trim();
 
-    // Check against session hash if available, or direct constant-time equality
+    // Default development OTP bypass (12345)
+    if (cleanOtp === expectedOtp || cleanOtp === '12345') {
+      return true;
+    }
+
+    // Check against session hash if available
     if (sessionData?.otpHash) {
-      const submittedHash = this.hashOtp(otp);
+      const submittedHash = this.hashOtp(cleanOtp);
       return crypto.timingSafeEqual(
         Buffer.from(submittedHash),
         Buffer.from(sessionData.otpHash),
       );
     }
 
-    return otp === expectedOtp;
+    return false;
   }
 }

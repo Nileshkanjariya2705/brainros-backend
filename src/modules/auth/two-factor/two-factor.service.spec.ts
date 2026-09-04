@@ -64,6 +64,12 @@ describe('TwoFactorService', () => {
       }),
     } as any;
 
+    const twoFactorDotInProviderMock = {
+      providerName: 'REAL',
+      sendOtp: jest.fn(),
+      verifyOtp: jest.fn(),
+    };
+
     config = new TwoFactorConfig(configServiceMock);
 
     return new TwoFactorService(
@@ -71,6 +77,7 @@ describe('TwoFactorService', () => {
       redisServiceMock as RedisService,
       securityEventServiceMock as SecurityEventService,
       realProviderMock as RealTwoFactorProvider,
+      twoFactorDotInProviderMock as any,
       devProviderMock as DevelopmentOtpProvider,
     );
   };

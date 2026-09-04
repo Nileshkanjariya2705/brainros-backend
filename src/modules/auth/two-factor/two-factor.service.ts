@@ -3,6 +3,7 @@ import { RedisService } from '../../redis/redis.service';
 import { SecurityEventService } from '../services/security-event.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
 import { RealTwoFactorProvider } from './real-two-factor.provider';
+import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
 import {
   ITwoFactorProvider,
@@ -19,15 +20,19 @@ export class TwoFactorService {
     private readonly redisService: RedisService,
     private readonly securityEventService: SecurityEventService,
     private readonly realProvider: RealTwoFactorProvider,
+    private readonly twoFactorDotInProvider: TwoFactorDotInProvider,
     private readonly devProvider: DevelopmentOtpProvider,
   ) {}
 
   /**
    * Deterministically returns the active 2FA/OTP provider based solely
-   * on the centralized server-side ENABLE_2FA configuration.
+   * on server-side ENABLE_2FA and OTP_PROVIDER configurations.
    */
   getActiveProvider(): ITwoFactorProvider {
     if (this.config.enable2FA) {
+      if (this.config.otpProvider === '2FACTOR') {
+        return this.twoFactorDotInProvider;
+      }
       return this.realProvider;
     }
     return this.devProvider;
@@ -106,29 +111,32 @@ export class TwoFactorService {
       `[2FA] sendOtp requested for destination with purpose: ${purpose} [mode=${provider.providerName}]`,
     );
 
-    // 1. Check per-mobile rate limit (max requests per hour)
+    // 1. Check rate limits (hourly request limits apply to live SMS gateways)
+    let currentRequests: string | null = null;
     const rateLimitKeyStr = this.rateLimitKey(mobileNumber);
-    const currentRequests = await this.redisService.get(rateLimitKeyStr);
-    if (
-      currentRequests &&
-      parseInt(currentRequests, 10) >= this.config.maxRequestsPerHour
-    ) {
-      throw new BadRequestException(
-        'Too many OTP requests. Please try again later.',
-      );
-    }
-
-    // 2. Check per-IP rate limit (if IP available)
-    if (requestContext?.ipAddress) {
-      const ipKey = this.ipRateLimitKey(requestContext.ipAddress);
-      const ipRequests = await this.redisService.get(ipKey);
+    if (this.config.enable2FA) {
+      currentRequests = await this.redisService.get(rateLimitKeyStr);
       if (
-        ipRequests &&
-        parseInt(ipRequests, 10) >= this.config.maxRequestsPerHour * 2
+        currentRequests &&
+        parseInt(currentRequests, 10) >= this.config.maxRequestsPerHour
       ) {
         throw new BadRequestException(
-          'Too many OTP requests from this address. Please try again later.',
+          'Too many OTP requests. Please try again later.',
         );
+      }
+
+      // 2. Check per-IP rate limit (if IP available)
+      if (requestContext?.ipAddress) {
+        const ipKey = this.ipRateLimitKey(requestContext.ipAddress);
+        const ipRequests = await this.redisService.get(ipKey);
+        if (
+          ipRequests &&
+          parseInt(ipRequests, 10) >= this.config.maxRequestsPerHour * 2
+        ) {
+          throw new BadRequestException(
+            'Too many OTP requests from this address. Please try again later.',
+          );
+        }
       }
     }
 
@@ -169,22 +177,24 @@ export class TwoFactorService {
     // 7. Reset attempts
     await this.redisService.del(this.attemptsKey(purpose, mobileNumber));
 
-    // 8. Increment rate limit counters
-    const currentCount = currentRequests ? parseInt(currentRequests, 10) : 0;
-    await this.redisService.set(
-      rateLimitKeyStr,
-      String(currentCount + 1),
-      3600,
-    );
-
-    if (requestContext?.ipAddress) {
-      const ipKey = this.ipRateLimitKey(requestContext.ipAddress);
-      const ipCount = await this.redisService.get(ipKey);
+    // 8. Increment rate limit counters (real SMS mode only)
+    if (this.config.enable2FA) {
+      const currentCount = currentRequests ? parseInt(currentRequests, 10) : 0;
       await this.redisService.set(
-        ipKey,
-        String((ipCount ? parseInt(ipCount, 10) : 0) + 1),
+        rateLimitKeyStr,
+        String(currentCount + 1),
         3600,
       );
+
+      if (requestContext?.ipAddress) {
+        const ipKey = this.ipRateLimitKey(requestContext.ipAddress);
+        const ipCount = await this.redisService.get(ipKey);
+        await this.redisService.set(
+          ipKey,
+          String((ipCount ? parseInt(ipCount, 10) : 0) + 1),
+          3600,
+        );
+      }
     }
 
     // 9. Log security event (NEVER log the OTP value!)
@@ -318,6 +328,7 @@ export class TwoFactorService {
     // 4. Verification succeeded — invalidate OTP immediately (single-use enforcement)
     await this.redisService.del(otpKeyStr);
     await this.redisService.del(attemptsKeyStr);
+    await this.redisService.del(this.cooldownKey(purpose, mobileNumber));
 
     // 5. Log success (NEVER log the OTP value!)
     await this.securityEventService.log('OTP_VERIFIED', {
@@ -331,6 +342,26 @@ export class TwoFactorService {
       },
     });
 
+    return true;
+  }
+
+  /**
+   * Resends OTP via active provider (e.g. MSG91 retry / 2Factor retry)
+   */
+  async resendOtp(
+    rawMobileNumber: string,
+    retryType: 'text' | 'voice' = 'text',
+  ): Promise<boolean> {
+    const mobileNumber = this.normalizeMobileNumber(rawMobileNumber);
+    const provider = this.getActiveProvider();
+    if (provider.providerName === 'REAL') {
+      if ('resendOtp' in provider && typeof (provider as any).resendOtp === 'function') {
+        return (provider as any).resendOtp(mobileNumber, retryType);
+      }
+      if ('retryOtp' in provider && typeof (provider as any).retryOtp === 'function') {
+        return (provider as any).retryOtp(mobileNumber, retryType);
+      }
+    }
     return true;
   }
 }

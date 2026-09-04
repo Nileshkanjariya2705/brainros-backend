@@ -41,7 +41,11 @@ export class TwoFactorConfig {
   private readonly logger = new Logger(TwoFactorConfig.name);
 
   readonly enable2FA: boolean;
+  readonly otpProvider: '2FACTOR' | 'MSG91';
+  readonly twoFactorApiKey: string;
   readonly devBypassOtp: string;
+  readonly msg91AuthKey: string;
+  readonly msg91TemplateId: string;
   readonly otpTtl: number;
   readonly resendCooldown: number;
   readonly maxAttempts: number;
@@ -49,18 +53,54 @@ export class TwoFactorConfig {
   readonly maxRequestsPerHour: number;
 
   constructor(private readonly configService: ConfigService) {
-    const rawEnable2FA =
+    const rawEnable =
+      this.configService.get<string | boolean>('ENABLE_REAL_OTP') ??
       this.configService.get<string | boolean>('ENABLE_2FA') ??
-      process.env.ENABLE_2FA;
+      this.configService.get<string | boolean>('ENABLE_OTP') ??
+      process.env.ENABLE_REAL_OTP ??
+      process.env.ENABLE_2FA ??
+      process.env.ENABLE_OTP;
 
-    this.enable2FA = parseSafeBoolean(rawEnable2FA, 'ENABLE_2FA', false);
+    this.enable2FA = parseSafeBoolean(rawEnable, 'ENABLE_REAL_OTP', false);
+
+    // OTP Gateway provider selector: "2FACTOR" | "MSG91"
+    const rawProvider = (
+      this.configService.get<string>('OTP_PROVIDER') ??
+      process.env.OTP_PROVIDER ??
+      '2FACTOR'
+    ).trim().toUpperCase();
+
+    this.otpProvider = rawProvider === 'MSG91' ? 'MSG91' : '2FACTOR';
+
+    // 2Factor.in API Key
+    this.twoFactorApiKey =
+      this.configService.get<string>('TWO_FACTOR_API_KEY') ??
+      this.configService.get<string>('TWOFACTOR_API_KEY') ??
+      process.env.TWO_FACTOR_API_KEY ??
+      process.env.TWOFACTOR_API_KEY ??
+      '749e2f32-9fd7-11f1-9cb1-0200cd936042';
 
     // Development bypass OTP code (default: 12345)
     // Only used when enable2FA === false. Strictly ignored when enable2FA === true.
     this.devBypassOtp =
-      this.configService.get<string>('DEV_BYPASS_OTP') ||
-      process.env.DEV_BYPASS_OTP ||
+      this.configService.get<string>('DEV_BYPASS_OTP') ??
+      this.configService.get<string>('DEV_OTP_CODE') ??
+      process.env.DEV_BYPASS_OTP ??
+      process.env.DEV_OTP_CODE ??
       '12345';
+
+    // MSG91 API configuration
+    this.msg91AuthKey =
+      this.configService.get<string>('MSG91_AUTH_KEY') ??
+      this.configService.get<string>('OTP_API_KEY') ??
+      process.env.MSG91_AUTH_KEY ??
+      process.env.OTP_API_KEY ??
+      '567446TwYGGZ8O6a9ab826P1';
+
+    this.msg91TemplateId =
+      this.configService.get<string>('MSG91_TEMPLATE_ID') ??
+      process.env.MSG91_TEMPLATE_ID ??
+      '6a9a366caea18f1a81002b07';
 
     this.otpTtl =
       Number(
@@ -92,7 +132,7 @@ export class TwoFactorConfig {
       ) || 5;
 
     this.logger.log(
-      `TwoFactorConfig initialized: [ENABLE_2FA = ${this.enable2FA ? 'TRUE (Real Provider)' : 'FALSE (Development Bypass)'}]`,
+      `TwoFactorConfig initialized: [ENABLE_REAL_OTP = ${this.enable2FA ? 'TRUE (Active Gateway: ' + this.otpProvider + ')' : 'FALSE (Development Bypass: ' + this.devBypassOtp + ')'}]`,
     );
   }
 }

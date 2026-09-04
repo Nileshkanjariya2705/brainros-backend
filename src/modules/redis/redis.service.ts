@@ -19,25 +19,39 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const host = this.configService.get<string>('REDIS_HOST') || 'localhost';
-    const port = this.configService.get<number>('REDIS_PORT') || 6379;
-    const password =
-      this.configService.get<string>('REDIS_PASSWORD') || undefined;
+    const redisUrl = this.configService.get<string>('REDIS_URL');
+    if (redisUrl) {
+      this.redisClient = new Redis(redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        tls: redisUrl.startsWith('rediss://') ? {} : undefined,
+        retryStrategy: (times) => {
+          if (times > 2) {
+            return null;
+          }
+          return 1000;
+        },
+      });
+    } else {
+      const host = this.configService.get<string>('REDIS_HOST') || 'localhost';
+      const port = this.configService.get<number>('REDIS_PORT') || 6379;
+      const password =
+        this.configService.get<string>('REDIS_PASSWORD') || undefined;
 
-    this.redisClient = new Redis({
-      host,
-      port,
-      password,
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-      retryStrategy: (times) => {
-        // Fast fail on connection retry to trigger fallback immediately
-        if (times > 1) {
-          return null;
-        }
-        return 1000;
-      },
-    });
+      this.redisClient = new Redis({
+        host,
+        port,
+        password,
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => {
+          if (times > 1) {
+            return null;
+          }
+          return 1000;
+        },
+      });
+    }
 
     // Handle connection failures gracefully
     this.redisClient.on('error', (err) => {
