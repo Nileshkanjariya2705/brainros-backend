@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -14,6 +14,11 @@ export class NotificationProcessor extends WorkerHost {
 
   constructor(private readonly prisma: PrismaService) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Notification worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<ExamNotificationJobData>): Promise<any> {

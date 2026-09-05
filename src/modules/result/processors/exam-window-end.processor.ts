@@ -1,4 +1,4 @@
-import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -28,6 +28,11 @@ export class ExamWindowEndProcessor extends WorkerHost {
     private readonly evaluationQueue: Queue,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Exam window end worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<ExamWindowEndJobPayload>): Promise<any> {

@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,6 +26,11 @@ export class ExamGenerationProcessor extends WorkerHost {
     private readonly randomizationService: ExamRandomizationService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Exam generation worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<ExamGenJobData>): Promise<any> {

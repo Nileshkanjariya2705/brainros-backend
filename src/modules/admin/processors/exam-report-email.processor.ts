@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -30,6 +30,11 @@ export class ExamReportEmailProcessor extends WorkerHost {
     private readonly auditLogService: AuditLogService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Exam report email worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<ExamReportEmailJobData>): Promise<any> {

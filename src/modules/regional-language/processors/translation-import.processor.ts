@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExamTranslationService } from '../services/exam-translation.service';
@@ -24,6 +24,11 @@ export class TranslationImportProcessor extends WorkerHost {
     private readonly redisService: RedisService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Translation import worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<ExamTranslationImportJobData>): Promise<any> {

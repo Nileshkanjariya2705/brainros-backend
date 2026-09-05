@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import {
@@ -21,6 +21,11 @@ export class RankingProcessor extends WorkerHost {
     private readonly readinessService: ResultReadinessService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Ranking worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<RankingJobPayload>): Promise<any> {

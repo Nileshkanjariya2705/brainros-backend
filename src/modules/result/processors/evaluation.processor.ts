@@ -1,4 +1,4 @@
-import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { ResultService } from '../result.service';
@@ -23,6 +23,11 @@ export class EvaluationProcessor extends WorkerHost {
     private readonly analyticsQueue: Queue,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Evaluation worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<EvaluationJobPayload>): Promise<any> {

@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { QuestionImportService } from '../services/question-import.service';
@@ -18,6 +18,11 @@ export class QuestionImportProcessor extends WorkerHost {
     private readonly questionImportService: QuestionImportService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Question import worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<QuestionImportJobData>): Promise<any> {

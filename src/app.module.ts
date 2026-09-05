@@ -64,10 +64,9 @@ import { BullModule } from '@nestjs/bullmq';
                 maxRetriesPerRequest: null,
                 connectTimeout: 10000,
                 keepAlive: 30000,
-                // Give up after 3 retries (~6s total) instead of retrying forever
+                // Auto-reconnect with backoff instead of terminating connection
                 retryStrategy: (times: number) => {
-                  if (times > 3) return null; // stop retrying
-                  return Math.min(times * 500, 2000);
+                  return Math.min(times * 200, 2000);
                 },
               },
             };
@@ -88,10 +87,9 @@ import { BullModule } from '@nestjs/bullmq';
             maxRetriesPerRequest: null,
             connectTimeout: 10000,
             keepAlive: 30000,
-            // Give up after 3 retries (~6s total) instead of retrying forever
+            // Auto-reconnect with backoff instead of terminating connection
             retryStrategy: (times: number) => {
-              if (times > 3) return null; // stop retrying
-              return Math.min(times * 500, 2000);
+              return Math.min(times * 200, 2000);
             },
           },
         };

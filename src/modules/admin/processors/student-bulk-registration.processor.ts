@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { StudentBulkRegistrationService } from '../services/student-bulk-registration.service';
@@ -20,6 +20,11 @@ export class StudentBulkRegistrationProcessor extends WorkerHost {
     private readonly bulkRegistrationService: StudentBulkRegistrationService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('error')
+  onError(err: Error) {
+    this.logger.warn(`Student bulk registration worker connection/runtime error: ${err.message}`);
   }
 
   async process(job: Job<StudentBulkRegistrationJobData>): Promise<any> {
