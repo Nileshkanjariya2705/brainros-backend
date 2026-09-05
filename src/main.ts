@@ -62,7 +62,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   const port = process.env.PORT || 3000;
- 
+
 
   const appLogger = app.get(AppLoggerService);
   app.useLogger(appLogger);
@@ -124,7 +124,7 @@ async function bootstrap() {
   });
 
 
-   await app.listen(port);
+  await app.listen(port);
 
   app.useGlobalPipes(
     new ValidationPipe({

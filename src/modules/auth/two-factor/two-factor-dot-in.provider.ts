@@ -22,7 +22,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
   constructor(
     private readonly configService: ConfigService,
     private readonly config: TwoFactorConfig,
-  ) {}
+  ) { }
 
   /**
    * Retrieves the 2Factor.in API Key from config or environment.
@@ -63,7 +63,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
     const apiKey = this.getApiKey();
     const formattedMobile = this.formatMobileFor2Factor(mobileNumber);
     const templateName = this.config.twoFactorTemplateName ? this.config.twoFactorTemplateName.trim() : '';
-    const url = templateName 
+    const url = templateName
       ? `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN/${templateName}`
       : `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;
 
