@@ -93,6 +93,7 @@ export class ResendEmailService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000),
       });
 
       const responseData = await response.json().catch(() => ({}));

@@ -24,10 +24,12 @@ import { ParentDashboardModule } from './modules/parent-dashboard/parent-dashboa
 import { RegionalLanguageModule } from './modules/regional-language/regional-language.module';
 import { ExamSecurityModule } from './modules/exam-security/exam-security.module';
 import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
+import { HealthModule } from './modules/health/health.module';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
+    HealthModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

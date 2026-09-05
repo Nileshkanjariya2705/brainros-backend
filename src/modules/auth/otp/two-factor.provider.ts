@@ -75,6 +75,7 @@ export class TwoFactorProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(8000),
       });
 
       const resData = (await response.json()) as {
@@ -141,6 +142,7 @@ export class TwoFactorProvider {
           headers: {
             authkey: authKey,
           },
+          signal: AbortSignal.timeout(8000),
         },
       );
 

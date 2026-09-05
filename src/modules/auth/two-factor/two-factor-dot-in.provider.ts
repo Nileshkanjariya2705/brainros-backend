@@ -77,6 +77,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
 
       const response = await fetch(url, {
         method: 'GET',
+        signal: AbortSignal.timeout(8000),
       });
 
       const resData = (await response.json()) as {
@@ -151,6 +152,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
 
       const response = await fetch(url, {
         method: 'GET',
+        signal: AbortSignal.timeout(8000),
       });
 
       const resData = (await response.json()) as {
@@ -205,6 +207,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
     try {
       const response = await fetch(url, {
         method: 'GET',
+        signal: AbortSignal.timeout(8000),
       });
 
       const resData = (await response.json()) as {
