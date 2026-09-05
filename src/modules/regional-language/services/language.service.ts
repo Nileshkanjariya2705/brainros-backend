@@ -1,6 +1,5 @@
 import {
   Injectable,
-  OnModuleInit,
   NotFoundException,
   BadRequestException,
   Logger,
@@ -10,17 +9,10 @@ import { CreateLanguageDto, UpdateLanguageDto } from '../dto/language.dto';
 import { SUPPORTED_NINE_REGIONAL_LANGUAGES } from '../constants/supported-languages.constant';
 
 @Injectable()
-export class LanguageService implements OnModuleInit {
+export class LanguageService {
   private readonly logger = new Logger(LanguageService.name);
 
   constructor(private readonly prisma: PrismaService) {}
-
-  /**
-   * Automatically seed and synchronize 9 Regional Languages on application startup
-   */
-  async onModuleInit() {
-    await this.seedNineRegionalLanguages();
-  }
 
   async seedNineRegionalLanguages() {
     for (const lang of SUPPORTED_NINE_REGIONAL_LANGUAGES) {

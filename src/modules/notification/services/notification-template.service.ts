@@ -1,17 +1,13 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateNotificationTemplateDto } from '../dto/notification.dto';
 
 @Injectable()
-export class NotificationTemplateService implements OnModuleInit {
+export class NotificationTemplateService {
   private readonly logger = new Logger(NotificationTemplateService.name);
 
   constructor(private readonly prisma: PrismaService) {}
-
-  async onModuleInit() {
-    await this.seedDefaultTemplates();
-  }
 
   /**
    * Resolves the latest active template for a given type, channel, and language.
@@ -102,9 +98,10 @@ export class NotificationTemplateService implements OnModuleInit {
   }
 
   /**
-   * Seed core system templates if missing
+   * Seed core system templates if missing.
+   * Called from the seed script, NOT on application startup.
    */
-  private async seedDefaultTemplates() {
+  async seedDefaultTemplates() {
     try {
       const count = await this.prisma.notificationTemplate.count();
       if (count > 0) return;

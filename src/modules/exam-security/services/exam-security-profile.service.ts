@@ -1,15 +1,13 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamSecurityLevel, SecurityActionType } from '@prisma/client';
 import { CreateSecurityProfileDto } from '../dto/security.dto';
 
 @Injectable()
-export class ExamSecurityProfileService implements OnModuleInit {
-  constructor(private readonly prisma: PrismaService) {}
+export class ExamSecurityProfileService {
+  private readonly logger = new Logger(ExamSecurityProfileService.name);
 
-  async onModuleInit() {
-    await this.seedDefaultProfiles();
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Seed default 4 tier profiles if missing
@@ -154,7 +152,7 @@ export class ExamSecurityProfileService implements OnModuleInit {
         }
       }
     } catch (err) {
-      console.warn('Could not seed default security profiles:', err?.message || err);
+      this.logger.warn('Could not seed default security profiles: ' + (err?.message || err));
     }
   }
 
