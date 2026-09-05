@@ -54,11 +54,18 @@ import { BullModule } from '@nestjs/bullmq';
                 tls: redisUrl.startsWith('rediss://')
                   ? { rejectUnauthorized: false }
                   : undefined,
-                maxRetriesPerRequest: null,
+                // Do not block startup — connect lazily after app.listen()
+                lazyConnect: true,
+                // Fail fast if Redis is down; don't queue commands during outage
                 enableReadyCheck: false,
+                enableOfflineQueue: false,
+                maxRetriesPerRequest: null,
+                connectTimeout: 10000,
                 keepAlive: 30000,
+                // Give up after 3 retries (~6s total) instead of retrying forever
                 retryStrategy: (times: number) => {
-                  return Math.min(times * 200, 3000);
+                  if (times > 3) return null; // stop retrying
+                  return Math.min(times * 500, 2000);
                 },
               },
             };
@@ -72,11 +79,17 @@ import { BullModule } from '@nestjs/bullmq';
             host: process.env.REDIS_HOST || '127.0.0.1',
             port: parseInt(process.env.REDIS_PORT || '6379', 10),
             password: process.env.REDIS_PASSWORD || undefined,
-            maxRetriesPerRequest: null,
+            // Do not block startup — connect lazily after app.listen()
+            lazyConnect: true,
             enableReadyCheck: false,
+            enableOfflineQueue: false,
+            maxRetriesPerRequest: null,
+            connectTimeout: 10000,
             keepAlive: 30000,
+            // Give up after 3 retries (~6s total) instead of retrying forever
             retryStrategy: (times: number) => {
-              return Math.min(times * 200, 3000);
+              if (times > 3) return null; // stop retrying
+              return Math.min(times * 500, 2000);
             },
           },
         };
