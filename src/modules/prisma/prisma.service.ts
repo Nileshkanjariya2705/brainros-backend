@@ -15,14 +15,14 @@ export class PrismaService
 {
   private readonly logger = new Logger(PrismaService.name);
   private readonly pool: Pool;
+  private _isReady = false;
 
   constructor() {
     const pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      // Allow Neon cold-start (compute wake-up) time
       connectionTimeoutMillis: 30000,
       idleTimeoutMillis: 30000,
-      max: 5, // Keep low for shared hosting
+      max: 5,
     });
 
     const adapter = new PrismaPg(pool);
@@ -35,21 +35,33 @@ export class PrismaService
           : ['error', 'warn'],
     });
 
-    // Store pool reference for cleanup
     this.pool = pool;
   }
 
-  async onModuleInit() {
-    try {
-      await this.$connect();
-      this.logger.log('Database connected successfully via Prisma (pg adapter).');
-    } catch (error) {
-      this.logger.error(
-        'Failed to connect to database during initialization',
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw error;
-    }
+  get isReady(): boolean {
+    return this._isReady;
+  }
+
+  onModuleInit() {
+    // Fire-and-forget: do NOT await this here.
+    // Awaiting would block Nest's bootstrap (and app.listen())
+    // until the DB responds, which is what caused the
+    // "did not call listen() within 3 seconds" failure.
+    this.$connect()
+      .then(() => {
+        this._isReady = true;
+        this.logger.log('Database connected successfully via Prisma (pg adapter).');
+      })
+      .catch((error) => {
+        this._isReady = false;
+        this.logger.error(
+          'Failed to connect to database during initialization',
+          error instanceof Error ? error.stack : String(error),
+        );
+        // Intentionally NOT rethrown - a slow/failed initial connection
+        // should not crash the whole app or block listen().
+        // Prisma will also lazily retry on the next actual query.
+      });
   }
 
   async onModuleDestroy() {
