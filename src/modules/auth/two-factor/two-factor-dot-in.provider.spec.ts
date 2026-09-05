@@ -34,19 +34,19 @@ describe('TwoFactorDotInProvider (2Factor.in)', () => {
   });
 
   describe('formatMobileFor2Factor', () => {
-    it('should format 10-digit Indian numbers properly', () => {
+    it('should strip non-digits but keep all numbers (including country code)', () => {
       expect(provider.formatMobileFor2Factor('9876543210')).toBe('9876543210');
     });
 
-    it('should extract 10 digits from +91 numbers', () => {
+    it('should keep country code from +91 numbers', () => {
       expect(provider.formatMobileFor2Factor('+919876543210')).toBe(
-        '9876543210',
+        '919876543210',
       );
     });
 
-    it('should extract 10 digits from 91 prefixed numbers', () => {
+    it('should keep country code from 91 prefixed numbers', () => {
       expect(provider.formatMobileFor2Factor('919876543210')).toBe(
-        '9876543210',
+        '919876543210',
       );
     });
   });
@@ -68,7 +68,7 @@ describe('TwoFactorDotInProvider (2Factor.in)', () => {
         providerManaged: true,
       });
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://2factor.in/API/V1/749e2f32-9fd7-11f1-9cb1-0200cd936042/SMS/9876543210/AUTOGEN',
+        'https://2factor.in/API/V1/749e2f32-9fd7-11f1-9cb1-0200cd936042/SMS/919876543210/AUTOGEN',
         expect.objectContaining({ method: 'GET' }),
       );
     });

@@ -2,7 +2,6 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { RedisService } from '../../redis/redis.service';
 import { SecurityEventService } from '../services/security-event.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
-import { RealTwoFactorProvider } from './real-two-factor.provider';
 import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
 import {
@@ -19,7 +18,6 @@ export class TwoFactorService {
     private readonly config: TwoFactorConfig,
     private readonly redisService: RedisService,
     private readonly securityEventService: SecurityEventService,
-    private readonly realProvider: RealTwoFactorProvider,
     private readonly twoFactorDotInProvider: TwoFactorDotInProvider,
     private readonly devProvider: DevelopmentOtpProvider,
   ) {}
@@ -30,10 +28,7 @@ export class TwoFactorService {
    */
   getActiveProvider(): ITwoFactorProvider {
     if (this.config.enable2FA) {
-      if (this.config.otpProvider === '2FACTOR') {
-        return this.twoFactorDotInProvider;
-      }
-      return this.realProvider;
+      return this.twoFactorDotInProvider;
     }
     return this.devProvider;
   }
@@ -355,9 +350,6 @@ export class TwoFactorService {
     const mobileNumber = this.normalizeMobileNumber(rawMobileNumber);
     const provider = this.getActiveProvider();
     if (provider.providerName === 'REAL') {
-      if ('resendOtp' in provider && typeof (provider as any).resendOtp === 'function') {
-        return (provider as any).resendOtp(mobileNumber, retryType);
-      }
       if ('retryOtp' in provider && typeof (provider as any).retryOtp === 'function') {
         return (provider as any).retryOtp(mobileNumber, retryType);
       }

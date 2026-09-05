@@ -10,13 +10,50 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Security middlewares
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(cookieParser());
 
+  // CORS Configuration
+  const allowedOrigins = [
+    'https://brainros.com',
+    'https://www.brainros.com',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+  ];
+
+  if (process.env.FRONTEND_URL) {
+    const envOrigins = process.env.FRONTEND_URL.split(',').map((o) => o.trim());
+    for (const o of envOrigins) {
+      if (o && !allowedOrigins.includes(o)) {
+        allowedOrigins.push(o);
+      }
+    }
+  }
+
   app.enableCors({
-  origin: process.env.FRONTEND_URL,
-  credentials: true,
-});
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'X-Requested-With',
+      'Cookie',
+    ],
+    credentials: true,
+    optionsSuccessStatus: 204,
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

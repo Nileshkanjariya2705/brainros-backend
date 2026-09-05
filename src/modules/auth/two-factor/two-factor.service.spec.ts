@@ -1,7 +1,7 @@
 import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { TwoFactorService } from './two-factor.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
-import { RealTwoFactorProvider } from './real-two-factor.provider';
+import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
 import { RedisService } from '../../redis/redis.service';
 import { SecurityEventService } from '../services/security-event.service';
@@ -11,6 +11,7 @@ describe('TwoFactorService', () => {
   let redisStorage: Map<string, string>;
   let redisServiceMock: any;
   let securityEventServiceMock: any;
+  let twoFactorDotInProviderMock: any;
   let realProviderMock: any;
   let devProviderMock: any;
   let config: TwoFactorConfig;
@@ -32,14 +33,12 @@ describe('TwoFactorService', () => {
       log: jest.fn().mockResolvedValue(undefined),
     };
 
-    realProviderMock = {
+    twoFactorDotInProviderMock = {
       providerName: 'REAL',
-      sendOtp: jest.fn().mockResolvedValue({
-        sessionId: '+919876543210',
-        providerManaged: true,
-      }),
+      sendOtp: jest.fn().mockResolvedValue({ sessionId: 'session-uuid-123', providerManaged: true }),
       verifyOtp: jest.fn(),
     };
+    realProviderMock = twoFactorDotInProviderMock;
 
     devProviderMock = {
       providerName: 'DEVELOPMENT',
@@ -64,20 +63,13 @@ describe('TwoFactorService', () => {
       }),
     } as any;
 
-    const twoFactorDotInProviderMock = {
-      providerName: 'REAL',
-      sendOtp: jest.fn(),
-      verifyOtp: jest.fn(),
-    };
-
     config = new TwoFactorConfig(configServiceMock);
 
     return new TwoFactorService(
       config,
       redisServiceMock as RedisService,
       securityEventServiceMock as SecurityEventService,
-      realProviderMock as RealTwoFactorProvider,
-      twoFactorDotInProviderMock as any,
+      twoFactorDotInProviderMock as TwoFactorDotInProvider,
       devProviderMock as DevelopmentOtpProvider,
     );
   };
@@ -89,10 +81,10 @@ describe('TwoFactorService', () => {
       expect(service.getActiveProvider()).toBe(devProviderMock);
     });
 
-    it('should select RealTwoFactorProvider when ENABLE_2FA=true', () => {
+    it('should select TwoFactorDotInProvider when ENABLE_2FA=true', () => {
       service = createService(true);
       expect(service.isRealMode()).toBe(true);
-      expect(service.getActiveProvider()).toBe(realProviderMock);
+      expect(service.getActiveProvider()).toBe(twoFactorDotInProviderMock);
     });
   });
 

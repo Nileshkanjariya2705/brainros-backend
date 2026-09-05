@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TwoFactorService } from '../two-factor/two-factor.service';
 import { OtpPurpose } from '../two-factor/two-factor.provider.interface';
-import { RealTwoFactorProvider } from '../two-factor/real-two-factor.provider';
 
 export type { OtpPurpose };
 
@@ -17,7 +16,6 @@ export type { OtpPurpose };
 export class OtpService {
   constructor(
     private readonly twoFactorService: TwoFactorService,
-    private readonly realTwoFactorProvider: RealTwoFactorProvider,
   ) {}
 
   /**
@@ -76,33 +74,4 @@ export class OtpService {
   ): Promise<boolean> {
     return this.twoFactorService.resendOtp(rawMobileNumber, retryType);
   }
-
-  /**
-   * Direct MSG91 OTP sender (formats mobile with default 91 and calls MSG91 API).
-   */
-  async sendMsg91Otp(mobileNumber: string, purpose: OtpPurpose = 'LOGIN') {
-    return this.realTwoFactorProvider.sendOtp(mobileNumber, purpose);
-  }
-
-  /**
-   * Direct MSG91 OTP verifier.
-   */
-  async verifyMsg91Otp(
-    mobileNumber: string,
-    otp: string,
-    purpose: OtpPurpose = 'LOGIN',
-  ) {
-    return this.realTwoFactorProvider.verifyOtp(mobileNumber, otp, purpose);
-  }
-
-  /**
-   * Direct MSG91 OTP resend helper.
-   */
-  async resendMsg91Otp(
-    mobileNumber: string,
-    retryType: 'text' | 'voice' = 'text',
-  ) {
-    return this.realTwoFactorProvider.resendOtp(mobileNumber, retryType);
-  }
 }
-

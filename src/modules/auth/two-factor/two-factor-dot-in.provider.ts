@@ -45,18 +45,15 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
   }
 
   /**
-   * Formats a mobile number for 2Factor.in (10 digits).
+   * Formats a mobile number for 2Factor.in (digits only, including country code).
+   * E.g., +919876543210 becomes 919876543210
    */
   public formatMobileFor2Factor(mobileNumber: string): string {
-    const digits = mobileNumber.replace(/\D/g, '');
-    if (digits.length > 10) {
-      return digits.slice(-10);
-    }
-    return digits;
+    return mobileNumber.replace(/\D/g, '');
   }
 
   /**
-   * Sends OTP via 2Factor.in API
+   * Sends OTP via 2Factor.in SMS API
    * GET https://2factor.in/API/V1/{api_key}/SMS/{phone_number}/AUTOGEN
    */
   async sendOtp(
@@ -65,11 +62,17 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
   ): Promise<TwoFactorProviderResult> {
     const apiKey = this.getApiKey();
     const formattedMobile = this.formatMobileFor2Factor(mobileNumber);
-    const url = `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;
+    const templateName = this.config.twoFactorTemplateName ? this.config.twoFactorTemplateName.trim() : '';
+    const url = templateName 
+      ? `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN/${templateName}`
+      : `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;
+
+    const maskedUrl = url.replace(apiKey, 'HIDDEN_API_KEY');
+    this.logger.log(`[2Factor.in OTP] Initiating SMS OTP Request: ${maskedUrl}`);
 
     try {
       this.logger.log(
-        `[2Factor.in OTP] Sending OTP via 2Factor to destination with purpose: ${purpose}`,
+        `[2Factor.in OTP] Sending SMS OTP to destination with purpose: ${purpose}`,
       );
 
       const response = await fetch(url, {
@@ -80,6 +83,8 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
         Status?: string;
         Details?: string;
       };
+
+      this.logger.log(`[2Factor.in OTP] Raw Response: ${JSON.stringify(resData)}`);
 
       const isSuccess =
         response.ok &&
@@ -136,6 +141,9 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
       url = `${this.baseUrl}/${apiKey}/SMS/VERIFY3/${formattedMobile}/${cleanOtp}`;
     }
 
+    const maskedUrl = url.replace(apiKey, 'HIDDEN_API_KEY');
+    this.logger.log(`[2Factor.in OTP] Initiating Verification Request: ${maskedUrl}`);
+
     try {
       this.logger.log(
         `[2Factor.in OTP] Verifying OTP with 2Factor for purpose: ${purpose}`,
@@ -177,16 +185,22 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
   }
 
   /**
-   * Retries / Resends OTP via 2Factor.in Voice or SMS API
+   * Retries / Resends OTP explicitly via 2Factor.in SMS API
    */
   async retryOtp(
     mobileNumber: string,
-    retryType: 'text' | 'voice' = 'text',
+    _retryType: 'text' | 'voice' = 'text',
   ): Promise<boolean> {
     const apiKey = this.getApiKey();
     const formattedMobile = this.formatMobileFor2Factor(mobileNumber);
-    const endpoint = retryType === 'voice' ? 'VOICE' : 'SMS';
-    const url = `${this.baseUrl}/${apiKey}/${endpoint}/${formattedMobile}/AUTOGEN`;
+    // Explicitly call SMS AUTOGEN endpoint to prevent voice calls
+    const templateName = this.config.twoFactorTemplateName ? this.config.twoFactorTemplateName.trim() : '';
+    const url = templateName
+      ? `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN/${templateName}`
+      : `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;
+
+    const maskedUrl = url.replace(apiKey, 'HIDDEN_API_KEY');
+    this.logger.log(`[2Factor.in OTP] Initiating Retry SMS Request: ${maskedUrl}`);
 
     try {
       const response = await fetch(url, {

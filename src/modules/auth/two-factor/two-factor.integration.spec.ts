@@ -3,7 +3,7 @@ import { BadRequestException, InternalServerErrorException } from '@nestjs/commo
 import { AuthService } from '../auth.service';
 import { TwoFactorService } from './two-factor.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
-import { RealTwoFactorProvider } from './real-two-factor.provider';
+import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
 import { OtpService } from '../services/otp.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -19,6 +19,7 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
   let twoFactorService: TwoFactorService;
   let redisStorage: Map<string, string>;
   let redisServiceMock: any;
+  let twoFactorDotInProviderMock: any;
   let realProviderMock: any;
   let devProviderMock: any;
   let prismaMock: any;
@@ -52,14 +53,13 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
       }),
     };
 
-    realProviderMock = {
+    twoFactorDotInProviderMock = {
+      sendOtp: jest.fn().mockResolvedValue({ sessionId: 'session123', providerManaged: true }),
+      verifyOtp: jest.fn().mockResolvedValue(true),
+      retryOtp: jest.fn().mockResolvedValue(true),
       providerName: 'REAL',
-      sendOtp: jest.fn().mockResolvedValue({
-        sessionId: '+919876543210',
-        providerManaged: true,
-      }),
-      verifyOtp: jest.fn(),
     };
+    realProviderMock = twoFactorDotInProviderMock;
 
     devProviderMock = {
       providerName: 'DEVELOPMENT',
@@ -90,12 +90,11 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
       twoFactorConfig,
       redisServiceMock as RedisService,
       { log: jest.fn().mockResolvedValue(undefined) } as any,
-      realProviderMock as RealTwoFactorProvider,
-      realProviderMock as any,
+      twoFactorDotInProviderMock as TwoFactorDotInProvider,
       devProviderMock as DevelopmentOtpProvider,
     );
 
-    const otpService = new OtpService(twoFactorService, realProviderMock as any);
+    const otpService = new OtpService(twoFactorService);
 
     prismaMock = {
       user: {
