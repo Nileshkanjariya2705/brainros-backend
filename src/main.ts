@@ -1,29 +1,32 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
+import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { AppLoggerService } from './common/logger/logger.service';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
 // Global error handlers to prevent silent process death
+const bootstrapLogger = new AppLoggerService();
+bootstrapLogger.setContext('Bootstrap');
+
 process.on('unhandledRejection', (reason: any) => {
-  const logger = new Logger('UnhandledRejection');
-  logger.error(
+  bootstrapLogger.error(
     `Unhandled Promise Rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
     reason instanceof Error ? reason.stack : undefined,
+    'UnhandledRejection',
   );
 });
 
 process.on('uncaughtException', (error: Error) => {
-  const logger = new Logger('UncaughtException');
-  logger.error(`Uncaught Exception: ${error.message}`, error.stack);
+  bootstrapLogger.fatal(`Uncaught Exception: ${error.message}`, error.stack, 'UncaughtException');
 });
 
 /**
  * Validates critical environment variables at startup.
  */
-function validateEnvironment(logger: Logger) {
+function validateEnvironment(logger: AppLoggerService) {
   const required = ['DATABASE_URL'];
   const missing: string[] = [];
 
@@ -36,6 +39,8 @@ function validateEnvironment(logger: Logger) {
   if (missing.length > 0) {
     logger.error(
       `[FATAL CONFIG ERROR] Missing required environment variable(s): ${missing.join(', ')}. Please check your .env configuration.`,
+      undefined,
+      'ConfigValidation',
     );
   }
 
@@ -46,15 +51,17 @@ function validateEnvironment(logger: Logger) {
   ) {
     logger.warn(
       '[SECURITY WARNING] Running in production with default/missing JWT_SECRET. Please set a dedicated JWT_SECRET in environment variables.',
+      'ConfigValidation',
     );
   }
 }
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
-  validateEnvironment(logger);
+  validateEnvironment(bootstrapLogger);
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const appLogger = app.get(AppLoggerService);
+  app.useLogger(appLogger);
 
   // Enable graceful shutdown hooks for SIGTERM / SIGINT
   app.enableShutdownHooks();
@@ -134,11 +141,11 @@ async function bootstrap() {
   // Register global HTTP response formatting interceptor
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  // Register global unhandled exception and database error filter
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // Register global unhandled exception and database error filter with centralized logger
+  app.useGlobalFilters(new GlobalExceptionFilter(appLogger));
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  logger.log(`Application is running on port ${port}`);
+  appLogger.log(`Application started successfully on port ${port} (env: ${process.env.NODE_ENV || 'development'})`, 'Bootstrap');
 }
 bootstrap();

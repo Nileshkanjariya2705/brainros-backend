@@ -25,10 +25,12 @@ import { RegionalLanguageModule } from './modules/regional-language/regional-lan
 import { ExamSecurityModule } from './modules/exam-security/exam-security.module';
 import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { HealthModule } from './modules/health/health.module';
+import { LoggerModule } from './common/logger/logger.module';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
+    LoggerModule,
     HealthModule,
     ConfigModule.forRoot({
       isGlobal: true,

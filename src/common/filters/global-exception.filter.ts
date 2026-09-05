@@ -4,14 +4,17 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
+  Injectable,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ApiErrorResponse } from '../interfaces/api-error.interface';
+import { AppLoggerService } from '../logger/logger.service';
+import { RequestContext } from '../logger/request-context';
 
 @Catch()
+@Injectable()
 export class GlobalExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(GlobalExceptionFilter.name);
+  constructor(private readonly appLogger: AppLoggerService = new AppLoggerService()) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -23,15 +26,25 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let error = 'Internal Server Error';
     let code: string | undefined = undefined;
     let details: any = null;
+    let errorName = 'UnhandledException';
 
     const path = request.url;
+    const method = request.method;
     const timestamp = new Date().toISOString();
     const requestId =
-      request.headers['x-request-id'] || request.id || undefined;
+      request.id ||
+      request.headers['x-request-id'] ||
+      RequestContext.getRequestId() ||
+      undefined;
 
-    // 1. Handle NestJS HttpException (BadRequest, NotFound, etc.)
+    const user = request.user;
+    const userId = user?.userId || user?.id || user?.sub || RequestContext.getUserId() || undefined;
+    const role = user?.role || user?.roles?.[0]?.name || user?.userRoles?.[0]?.role?.name || RequestContext.getRole() || undefined;
+
+    // 1. Handle NestJS HttpException (BadRequest, NotFound, Unauthorized, etc.)
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
+      errorName = exception.name;
       const resBody = exception.getResponse();
 
       if (typeof resBody === 'object' && resBody !== null) {
@@ -45,29 +58,48 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
     // 2. Handle Prisma Known Request Database Exceptions (Unique constraint, record missing, etc.)
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      errorName = 'PrismaClientKnownRequestError';
+      code = exception.code;
       const prismaMapping = this.handlePrismaError(exception);
       statusCode = prismaMapping.statusCode;
       message = prismaMapping.message;
       error = prismaMapping.error;
       details = prismaMapping.details;
     }
-    // 3. Handle Other Prisma validation/parsing errors
+    // 3. Handle Other Prisma validation/initialization errors
     else if (exception instanceof Prisma.PrismaClientValidationError) {
+      errorName = 'PrismaClientValidationError';
       statusCode = HttpStatus.BAD_REQUEST;
       message = 'Database validation failed';
       error = 'Bad Request';
+    } else if (exception instanceof Prisma.PrismaClientInitializationError) {
+      errorName = 'PrismaClientInitializationError';
+      statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+      message = 'Database service temporarily unavailable';
+      error = 'Service Unavailable';
     }
     // 4. Handle Unhandled/Generic code exceptions (e.g. TypeError, SyntaxError)
     else {
-      this.logger.error(
-        `Unhandled Exception: ${exception instanceof Error ? exception.message : String(exception)}`,
-        exception instanceof Error ? exception.stack : undefined,
-      );
+      errorName = exception instanceof Error ? exception.name : 'UnknownError';
+      message = exception instanceof Error ? exception.message : String(exception);
     }
 
-    // Log general request details safely (omitting personal sensitive details or passwords)
-    this.logRequestFailure(request, statusCode, exception);
+    // 5. Centralized Structured Logging
+    const stack = exception instanceof Error ? exception.stack : undefined;
+    this.appLogger.logError({
+      message: `[${method}] ${path} ${statusCode} - ${message}`,
+      errorName,
+      errorCode: code,
+      statusCode,
+      method,
+      path,
+      userId,
+      role,
+      requestId,
+      stack: statusCode >= 500 ? stack : undefined,
+    });
 
+    // 6. Safe response to client (NEVER returns stack traces or internal queries)
     const errorResponse: ApiErrorResponse = {
       success: false,
       statusCode,
@@ -116,26 +148,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           error: 'Internal Server Error',
           details: { code: err.code },
         };
-    }
-  }
-
-  /**
-   * Log request context securely on the server
-   */
-  private logRequestFailure(request: any, status: number, exception: any) {
-    const { method, url } = request;
-    const userContext = request.user
-      ? `User ID: ${request.user.userId}`
-      : 'Unauthenticated';
-    const exceptionMessage =
-      exception instanceof Error ? exception.message : String(exception);
-
-    const logMsg = `[${method}] ${url} - Status: ${status} - ${userContext} - Exception: ${exceptionMessage}`;
-
-    if (status >= 500) {
-      this.logger.error(logMsg);
-    } else {
-      this.logger.warn(logMsg);
     }
   }
 }

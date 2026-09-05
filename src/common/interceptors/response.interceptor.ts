@@ -7,6 +7,7 @@ import {
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ApiResponse } from '../interfaces/api-response.interface';
+import { RequestContext } from '../logger/request-context';
 
 @Injectable()
 export class ResponseInterceptor<T> implements NestInterceptor<
@@ -27,7 +28,10 @@ export class ResponseInterceptor<T> implements NestInterceptor<
         const path = request.url;
         const timestamp = new Date().toISOString();
         const requestId =
-          request.headers['x-request-id'] || request.id || undefined;
+          request.id ||
+          request.headers['x-request-id'] ||
+          RequestContext.getRequestId() ||
+          undefined;
 
         // If the status code is 204 (No Content), bypass response formatting to maintain correct HTTP protocol
         if (statusCode === 204) {
