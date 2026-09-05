@@ -60,9 +60,9 @@ async function bootstrap() {
   validateEnvironment(bootstrapLogger);
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  
+
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+ 
 
   const appLogger = app.get(AppLoggerService);
   app.useLogger(appLogger);
@@ -123,6 +123,9 @@ async function bootstrap() {
     optionsSuccessStatus: 204,
   });
 
+
+   await app.listen(port);
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -148,7 +151,7 @@ async function bootstrap() {
   // Register global unhandled exception and database error filter with centralized logger
   app.useGlobalFilters(new GlobalExceptionFilter(appLogger));
 
-  
+
   appLogger.log(`Application started successfully on port ${port} (env: ${process.env.NODE_ENV || 'development'})`, 'Bootstrap');
 }
 bootstrap();
