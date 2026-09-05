@@ -80,6 +80,6 @@ async function bootstrap() {
   // Register global unhandled exception and database error filter
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(process.env.PORT || 3000);
 }
 bootstrap();
