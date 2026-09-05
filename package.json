@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node prisma/seed.ts",
     "seed:verify": "ts-node prisma/verify-seed.ts",
-    "seed:startup": "ts-node prisma/seed-startup.ts"
+    "seed:startup": "ts-node prisma/seed-startup.ts",
+    "diagnose": "node scripts/diagnostics/run-all.js"
   },
   "engines": {
     "node": "20.x"
