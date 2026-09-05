@@ -27,7 +27,11 @@ export class PrismaService
       await this.$connect();
       this.logger.log('Database connected successfully via Prisma.');
     } catch (error) {
-      this.logger.error('Failed to connect to database during initialization:', error);
+      this.logger.error(
+        'Failed to connect to database during initialization',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw error;
     }
   }
 
