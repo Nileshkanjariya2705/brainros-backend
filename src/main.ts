@@ -58,6 +58,14 @@ async function bootstrap() {
   );
   app.use(cookieParser());
 
+  // Normalize duplicate slashes in request URLs (e.g. //auth/refresh -> /auth/refresh)
+  app.use((req: any, _res: any, next: any) => {
+    if (req.url && req.url.includes('//')) {
+      req.url = req.url.replace(/\/{2,}/g, '/');
+    }
+    next();
+  });
+
   // CORS Configuration
   const allowedOrigins = [
     'https://brainros.com',

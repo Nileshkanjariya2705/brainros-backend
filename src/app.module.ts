@@ -1,9 +1,7 @@
 import './common/infrastructure/init-bullmq';
 import 'dotenv/config';
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
 import { MockQueue, MockWorker } from './common/infrastructure/mock-queue';
 import { InfrastructureModule } from './common/infrastructure/infrastructure.module';
@@ -113,12 +111,6 @@ import { LoggerModule } from './common/logger/logger.module';
         };
       },
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: parseInt(process.env.THROTTLE_TTL || '60', 10) * 1000,
-        limit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
-      },
-    ]),
     PrismaModule,
     RedisModule,
     AuthModule,
@@ -143,11 +135,6 @@ import { LoggerModule } from './common/logger/logger.module';
     RegionalLanguageModule,
     FeatureFlagModule,
   ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
-  ],
+  providers: [],
 })
 export class AppModule {}

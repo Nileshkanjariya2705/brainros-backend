@@ -26,7 +26,6 @@ import {
   StudentMockTestsQueryDto,
 } from './dto/student-exams.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Throttle } from '@nestjs/throttler';
 
 @Controller('students')
 @UseGuards(JwtAuthGuard)
@@ -158,7 +157,6 @@ export class StudentController {
   // SENSITIVE CONTACT CHANGE ENDPOINTS (OTP VERIFIED)
   // ═══════════════════════════════════════════════════════════════
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('me/mobile/request-otp')
   @HttpCode(HttpStatus.OK)
   async requestChangeMobile(
@@ -171,7 +169,6 @@ export class StudentController {
     });
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Patch('me/mobile')
   @HttpCode(HttpStatus.OK)
   async patchMobileDirect(
@@ -184,7 +181,6 @@ export class StudentController {
     });
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('me/mobile/verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyChangeMobile(
@@ -197,7 +193,6 @@ export class StudentController {
     });
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('me/email/request-otp')
   @HttpCode(HttpStatus.OK)
   async requestChangeEmail(
@@ -210,7 +205,6 @@ export class StudentController {
     });
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Patch('me/email')
   @HttpCode(HttpStatus.OK)
   async patchEmailDirect(
@@ -223,7 +217,6 @@ export class StudentController {
     });
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('me/email/verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyChangeEmail(

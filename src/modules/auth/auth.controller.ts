@@ -34,7 +34,6 @@ import {
 import { LoginSendOtpDto, LoginVerifyOtpDto } from './dto/login-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { Throttle } from '@nestjs/throttler';
 import {
   REFRESH_COOKIE_NAME,
   setAuthCookies,
@@ -56,7 +55,6 @@ export class AuthController {
    * Step A: Check if mobile already registered. If yes, reject. If new, trigger sendOtp(mobileNumber).
    * POST /auth/register/send-otp
    */
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('register/send-otp')
   @HttpCode(HttpStatus.OK)
   async registerSendOtp(
@@ -71,7 +69,6 @@ export class AuthController {
    * If valid, save new user record in DB, issue session/JWT token, return user details.
    * POST /auth/register/verify-otp
    */
-  @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('register/verify-otp')
   @HttpCode(HttpStatus.CREATED)
   async registerVerifyOtp(
@@ -92,7 +89,6 @@ export class AuthController {
    * sends OTP to mobile number, and returns requiresOtp.
    * POST /auth/register
    */
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('register')
   @HttpCode(HttpStatus.OK)
   async register(@Body() dto: RegisterStudentDto, @Request() req: any) {
@@ -104,7 +100,6 @@ export class AuthController {
    * generates Student ID, creates session, and sets HttpOnly refresh cookie.
    * POST /auth/verify-registration-otp
    */
-  @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('verify-registration-otp')
   @HttpCode(HttpStatus.CREATED)
   async verifyRegistrationOtp(
@@ -129,7 +124,6 @@ export class AuthController {
    * If found, trigger sendOtp(mobileNumber).
    * POST /auth/login/send-otp
    */
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('login/send-otp')
   @HttpCode(HttpStatus.OK)
   async loginSendOtp(@Body() dto: LoginSendOtpDto, @Request() req: any) {
@@ -141,7 +135,6 @@ export class AuthController {
    * If valid, generate and return session/JWT token and user profile.
    * POST /auth/login/verify-otp
    */
-  @Throttle({ default: { limit: 10, ttl: 60 } })
   @Post('login/verify-otp')
   @HttpCode(HttpStatus.OK)
   async loginVerifyOtp(
@@ -184,7 +177,6 @@ export class AuthController {
    * Unified request login OTP (accepts email, student ID, or mobile number)
    * POST /auth/login/request-otp
    */
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('login/request-otp')
   @HttpCode(HttpStatus.OK)
   async requestPasswordlessLoginOtp(
@@ -202,7 +194,6 @@ export class AuthController {
    * Resend OTP (with cooldown and attempt protection)
    * POST /auth/otp/resend
    */
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('otp/resend')
   @HttpCode(HttpStatus.OK)
   async resendOtp(@Body() dto: ResendOtpDto, @Request() req: any) {
@@ -243,7 +234,6 @@ export class AuthController {
   // 5. LEGACY PASSWORD & OAUTH ENDPOINTS
   // ═══════════════════════════════════════════════════════════════
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('login/email')
   @HttpCode(HttpStatus.OK)
   async loginWithEmail(
@@ -263,7 +253,6 @@ export class AuthController {
     return result;
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('login/student-id')
   @HttpCode(HttpStatus.OK)
   async loginWithStudentId(

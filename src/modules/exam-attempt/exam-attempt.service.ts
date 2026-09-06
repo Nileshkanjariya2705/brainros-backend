@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ExamService } from '../exam/exam.service';
@@ -247,59 +248,96 @@ export class ExamAttemptService {
       }
     }
 
-    const attempt = await this.prisma.$transaction(async (tx) => {
-      const newAttempt = await tx.attempt.create({
-        data: {
-          studentId,
-          examId: dto.examId,
-          statusId: inProgressStatus.id,
-          languageId: resolvedLanguage.id,
-          displayLanguageId: resolvedLanguage.id,
-          randomSeed,
-          securityProfileId: securityProfileId || null,
-          securityProfileVersion,
-          riskScore: 0,
-          riskLevel: 'LOW',
-          isFlagged: false,
-          startedAt: now,
-          serverStartTime: now,
-          serverEndTime,
-          ipAddress,
-          scheduleId: access.scheduleId ?? null,
-          examVersionId: access.examVersionId ?? null,
-        },
+    // Pre-generate attempt and question IDs to batch insert in bulk
+    const attemptId = randomUUID();
+    const attemptQuestionsToInsert: {
+      id: string;
+      attemptId: string;
+      examQuestionId: string;
+      displayOrder: number;
+      sectionId: string | null;
+    }[] = [];
+
+    const attemptQuestionOptionsToInsert: {
+      id: string;
+      attemptQuestionId: string;
+      examQuestionOptionId: string;
+      displayOrder: number;
+    }[] = [];
+
+    for (let qIdx = 0; qIdx < shuffledQuestions.length; qIdx++) {
+      const sq = shuffledQuestions[qIdx];
+      const aqId = randomUUID();
+
+      attemptQuestionsToInsert.push({
+        id: aqId,
+        attemptId,
+        examQuestionId: sq.id,
+        displayOrder: qIdx + 1,
+        sectionId: sq.sectionId ?? null,
       });
 
-      for (let qIdx = 0; qIdx < shuffledQuestions.length; qIdx++) {
-        const sq = shuffledQuestions[qIdx];
-        const aq = await tx.attemptQuestion.create({
+      const shuffledOpts = this.questionShuffleService.shuffleOptions(
+        sq.question?.options || [],
+        randomSeed,
+        sq.id,
+      );
+
+      for (let optIdx = 0; optIdx < shuffledOpts.length; optIdx++) {
+        const opt = shuffledOpts[optIdx];
+        attemptQuestionOptionsToInsert.push({
+          id: randomUUID(),
+          attemptQuestionId: aqId,
+          examQuestionOptionId: opt.id,
+          displayOrder: optIdx + 1,
+        });
+      }
+    }
+
+    const attempt = await this.prisma.$transaction(
+      async (tx) => {
+        const newAttempt = await tx.attempt.create({
           data: {
-            attemptId: newAttempt.id,
-            examQuestionId: sq.id,
-            displayOrder: qIdx + 1,
-            sectionId: sq.sectionId ?? null,
+            id: attemptId,
+            studentId,
+            examId: dto.examId,
+            statusId: inProgressStatus.id,
+            languageId: resolvedLanguage.id,
+            displayLanguageId: resolvedLanguage.id,
+            randomSeed,
+            securityProfileId: securityProfileId || null,
+            securityProfileVersion,
+            riskScore: 0,
+            riskLevel: 'LOW',
+            isFlagged: false,
+            startedAt: now,
+            serverStartTime: now,
+            serverEndTime,
+            ipAddress,
+            scheduleId: access.scheduleId ?? null,
+            examVersionId: access.examVersionId ?? null,
           },
         });
 
-        const shuffledOpts = this.questionShuffleService.shuffleOptions(
-          sq.question?.options || [],
-          randomSeed,
-          sq.id,
-        );
-
-        if (shuffledOpts.length > 0) {
-          await tx.attemptQuestionOption.createMany({
-            data: shuffledOpts.map((opt, optIdx) => ({
-              attemptQuestionId: aq.id,
-              examQuestionOptionId: opt.id,
-              displayOrder: optIdx + 1,
-            })),
+        if (attemptQuestionsToInsert.length > 0) {
+          await tx.attemptQuestion.createMany({
+            data: attemptQuestionsToInsert,
           });
         }
-      }
 
-      return newAttempt;
-    });
+        if (attemptQuestionOptionsToInsert.length > 0) {
+          await tx.attemptQuestionOption.createMany({
+            data: attemptQuestionOptionsToInsert,
+          });
+        }
+
+        return newAttempt;
+      },
+      {
+        maxWait: 15000,
+        timeout: 30000,
+      },
+    );
 
     // ── 7. Warm Active State Cache in Redis ──────────────────────────────
     try {

@@ -3,7 +3,7 @@ import { InfrastructureStateService } from '../../common/infrastructure/infrastr
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
-@Controller(['health', 'status'])
+@Controller(['health', 'status', ''])
 export class HealthController {
   constructor(
     private readonly infrastructureState: InfrastructureStateService,
