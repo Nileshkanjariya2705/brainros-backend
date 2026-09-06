@@ -71,7 +71,13 @@ export class TwoFactorConfig {
       this.configService.get<string>('TWOFACTOR_API_KEY') ??
       process.env.TWO_FACTOR_API_KEY ??
       process.env.TWOFACTOR_API_KEY ??
-      '749e2f32-9fd7-11f1-9cb1-0200cd936042';
+      '';
+
+    if (this.enable2FA && !this.twoFactorApiKey) {
+      this.logger.warn(
+        '[SECURITY] ENABLE_REAL_OTP is true but TWO_FACTOR_API_KEY is missing in environment variables.',
+      );
+    }
 
     this.twoFactorTemplateName =
       this.configService.get<string>('TWO_FACTOR_TEMPLATE_NAME') ??

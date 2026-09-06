@@ -6,89 +6,178 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis, { RedisOptions } from 'ioredis';
+import { InfrastructureStateService } from '../../common/infrastructure/infrastructure-state.service';
+import { parseBooleanFlag } from '../feature-flag/feature-flag.constants';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private redisClient: Redis | null = null;
   private _isReady = false;
+  private isExplicitlyDisabled = false;
 
-  // In-memory database fallback to handle offline/disconnected environment
+  private lastErrorLogTime = 0;
+  private lastReconnectLogTime = 0;
+
+  // In-memory key-value database fallback to handle offline/disconnected environment
   private memoryDb = new Map<string, { value: string; expiresAt: number }>();
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly infrastructureState: InfrastructureStateService,
+  ) {}
 
   public get isReady(): boolean {
     return this._isReady;
   }
 
+  public get isEnabled(): boolean {
+    return !this.isExplicitlyDisabled;
+  }
+
   onModuleInit() {
+    const redisEnabledRaw =
+      this.configService.get<string>('REDIS_ENABLED') ??
+      process.env.REDIS_ENABLED;
+
+    // Default to true if not specified, but respect explicit false/0/off
+    const redisEnabled =
+      redisEnabledRaw !== undefined
+        ? parseBooleanFlag(redisEnabledRaw)
+        : true;
+
+    if (!redisEnabled) {
+      this.isExplicitlyDisabled = true;
+      this._isReady = false;
+      this.infrastructureState.setRedisState('DISABLED');
+      this.logger.log(
+        '[Redis] Disabled by configuration (REDIS_ENABLED=false). Operating in resilient in-memory mode.',
+      );
+      return;
+    }
+
+    this.infrastructureState.setRedisState('CONNECTING');
     const redisUrl = this.configService.get<string>('REDIS_URL');
 
     const commonOptions: RedisOptions = {
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
-      enableOfflineQueue: false, // Prevents queuing commands when disconnected which causes connectionCloseHandler errors
-      retryStrategy(times) {
-        const delay = Math.min(times * 200, 2000);
+      maxRetriesPerRequest: 1,
+      connectTimeout: 5000,
+      enableOfflineQueue: false, // Prevents queuing commands when disconnected
+      retryStrategy: (times) => {
+        // Controlled exponential backoff: 1s, 2s, 3s... max 15s
+        const delay = Math.min(times * 1000, 15000);
         return delay;
       },
     };
 
-    if (redisUrl) {
-      this.redisClient = new Redis(redisUrl, {
-        ...commonOptions,
-        tls: redisUrl.startsWith('rediss://')
-          ? { rejectUnauthorized: false }
-          : undefined,
+    try {
+      if (redisUrl) {
+        this.redisClient = new Redis(redisUrl, {
+          ...commonOptions,
+          tls: redisUrl.startsWith('rediss://')
+            ? { rejectUnauthorized: false }
+            : undefined,
+        });
+      } else {
+        const host = this.configService.get<string>('REDIS_HOST') || 'localhost';
+        const port = this.configService.get<number>('REDIS_PORT') || 6379;
+        const password =
+          this.configService.get<string>('REDIS_PASSWORD') || undefined;
+
+        this.redisClient = new Redis({
+          ...commonOptions,
+          host,
+          port,
+          password,
+        });
+      }
+
+      // Attach all event listeners immediately to prevent unhandled errors
+      this.redisClient.on('error', (err) => {
+        this._isReady = false;
+        this.infrastructureState.setRedisState('DOWN', err.message);
+        this.infrastructureState.setQueueState('DOWN', err.message);
+
+        // Throttle error logs to once every 10 seconds to avoid console flooding
+        const now = Date.now();
+        if (now - this.lastErrorLogTime > 10000) {
+          this.logger.warn(`[Redis] Connection error: ${err.message}. In-memory fallback active.`);
+          this.lastErrorLogTime = now;
+        }
       });
-    } else {
-      const host = this.configService.get<string>('REDIS_HOST') || 'localhost';
-      const port = this.configService.get<number>('REDIS_PORT') || 6379;
-      const password =
-        this.configService.get<string>('REDIS_PASSWORD') || undefined;
 
-      this.redisClient = new Redis({
-        ...commonOptions,
-        host,
-        port,
-        password,
+      this.redisClient.on('connect', () => {
+        this._isReady = true;
+        this.infrastructureState.setRedisState('UP');
+        this.infrastructureState.setQueueState('UP');
+        this.logger.log('[Redis] Connected successfully.');
       });
-    }
 
-    // Attach all event listeners immediately to prevent unhandled errors
-    this.redisClient.on('error', (err) => {
+      this.redisClient.on('ready', () => {
+        this._isReady = true;
+        this.infrastructureState.setRedisState('UP');
+        this.infrastructureState.setQueueState('UP');
+        this.logger.log('[Redis] Ready to accept commands.');
+      });
+
+      this.redisClient.on('close', () => {
+        this._isReady = false;
+        this.infrastructureState.setRedisState('DOWN', 'Connection closed');
+        this.infrastructureState.setQueueState('DOWN', 'Connection closed');
+
+        const now = Date.now();
+        if (now - this.lastErrorLogTime > 10000) {
+          this.logger.warn('[Redis] Connection closed. In-memory fallback active.');
+          this.lastErrorLogTime = now;
+        }
+      });
+
+      this.redisClient.on('reconnecting', (delay) => {
+        this._isReady = false;
+        this.infrastructureState.setRedisState('CONNECTING');
+
+        const now = Date.now();
+        if (now - this.lastReconnectLogTime > 10000) {
+          this.logger.warn(`[Redis] Reconnecting in ${delay}ms...`);
+          this.lastReconnectLogTime = now;
+        }
+      });
+
+      // Hard timeout for initial startup connection attempt (5 seconds)
+      const connectPromise = this.redisClient.connect();
+      let timer: NodeJS.Timeout | null = null;
+      const timeoutPromise = new Promise<void>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Connection timed out after 5000ms'));
+        }, 5000);
+      });
+
+      Promise.race([connectPromise, timeoutPromise])
+        .then(() => {
+          this._isReady = true;
+          this.infrastructureState.setRedisState('UP');
+          this.infrastructureState.setQueueState('UP');
+        })
+        .catch((err: any) => {
+          this._isReady = false;
+          const msg = err instanceof Error ? err.message : String(err);
+          this.infrastructureState.setRedisState('DOWN', msg);
+          this.infrastructureState.setQueueState('DOWN', msg);
+          this.logger.error(
+            `[STARTUP] Redis connection failed after 5s (${msg}) - continuing in resilient in-memory mode.`,
+          );
+        })
+        .finally(() => {
+          if (timer) clearTimeout(timer);
+        });
+    } catch (err: any) {
       this._isReady = false;
-      this.logger.warn(`Redis connection error: ${err.message}`);
-    });
-
-    this.redisClient.on('connect', () => {
-      this._isReady = true;
-      this.logger.log('Redis connected successfully.');
-    });
-
-    this.redisClient.on('ready', () => {
-      this._isReady = true;
-      this.logger.log('Redis is ready to accept commands.');
-    });
-
-    this.redisClient.on('close', () => {
-      this._isReady = false;
-      this.logger.warn('Redis connection closed.');
-    });
-
-    this.redisClient.on('reconnecting', (delay) => {
-      this._isReady = false;
-      this.logger.warn(`Redis reconnecting in ${delay}ms...`);
-    });
-
-    // Fire-and-forget connection attempt
-    this.redisClient.connect().catch((err) => {
-      this._isReady = false;
-      this.logger.warn(
-        `Initial Redis connection failed: ${err.message}. Operating with in-memory fallback.`,
+      this.infrastructureState.setRedisState('DOWN', err.message);
+      this.logger.error(
+        `[STARTUP] Redis client initialization error: ${err.message}. Operating in resilient in-memory mode.`,
       );
-    });
+    }
   }
 
   async onModuleDestroy() {
@@ -99,6 +188,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         this.redisClient.disconnect();
       }
     }
+    this.memoryDb.clear();
   }
 
   getClient(): Redis | null {
@@ -142,9 +232,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       return await this.redisClient.get(key);
     } catch (err: any) {
-      this.logger.warn(
-        `Redis get failed for '${key}': ${err.message}. Using in-memory fallback.`,
-      );
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] get failed for '${key}': ${err.message}. Using in-memory fallback.`,
+        );
+        this.lastErrorLogTime = now;
+      }
       return this.getFromMemory(key);
     }
   }
@@ -161,9 +255,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         await this.redisClient.set(key, value);
       }
     } catch (err: any) {
-      this.logger.warn(
-        `Redis set failed for '${key}': ${err.message}. Saving in-memory instead.`,
-      );
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] set failed for '${key}': ${err.message}. Saving in-memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
       this.setInMemory(key, value, ttlSeconds);
     }
   }
@@ -176,9 +274,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.redisClient.del(key);
     } catch (err: any) {
-      this.logger.warn(
-        `Redis del failed for '${key}': ${err.message}. Deleting from memory instead.`,
-      );
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] del failed for '${key}': ${err.message}. Deleting from memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
       this.deleteFromMemory(key);
     }
   }
@@ -190,9 +292,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       return (await this.redisClient.keys(pattern)) || [];
     } catch (err: any) {
-      this.logger.warn(
-        `Redis keys failed for pattern '${pattern}': ${err.message}. Searching memory instead.`,
-      );
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] keys failed for pattern '${pattern}': ${err.message}. Searching memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
       return this.getKeysFromMemory(pattern);
     }
   }

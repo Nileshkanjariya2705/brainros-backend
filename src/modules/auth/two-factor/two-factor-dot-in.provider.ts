@@ -32,8 +32,7 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
       this.config.twoFactorApiKey ||
       this.configService.get<string>('TWO_FACTOR_API_KEY') ||
       this.configService.get<string>('TWOFACTOR_API_KEY') ||
-      process.env.TWO_FACTOR_API_KEY ||
-      '749e2f32-9fd7-11f1-9cb1-0200cd936042';
+      process.env.TWO_FACTOR_API_KEY;
 
     if (!apiKey) {
       this.logger.error('2Factor.in API Key is missing in configuration.');

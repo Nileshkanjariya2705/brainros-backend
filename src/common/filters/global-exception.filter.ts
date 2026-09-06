@@ -10,11 +10,15 @@ import { Prisma } from '@prisma/client';
 import { ApiErrorResponse } from '../interfaces/api-error.interface';
 import { AppLoggerService } from '../logger/logger.service';
 import { RequestContext } from '../logger/request-context';
+import { InfrastructureStateService } from '../infrastructure/infrastructure-state.service';
 
 @Catch()
 @Injectable()
 export class GlobalExceptionFilter implements ExceptionFilter {
-  constructor(private readonly appLogger: AppLoggerService = new AppLoggerService()) {}
+  constructor(
+    private readonly appLogger: AppLoggerService = new AppLoggerService(),
+    private readonly infrastructureState?: InfrastructureStateService,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -56,7 +60,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exception.message || String(resBody);
       }
     }
-    // 2. Handle Prisma Known Request Database Exceptions (Unique constraint, record missing, etc.)
+    // 2. Handle Prisma Known Request Database Exceptions (Unique constraint, record missing, connection failures)
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       errorName = 'PrismaClientKnownRequestError';
       code = exception.code;
@@ -66,22 +70,62 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       error = prismaMapping.error;
       details = prismaMapping.details;
     }
-    // 3. Handle Other Prisma validation/initialization errors
+    // 3. Handle Other Prisma validation/initialization/panic errors
     else if (exception instanceof Prisma.PrismaClientValidationError) {
       errorName = 'PrismaClientValidationError';
       statusCode = HttpStatus.BAD_REQUEST;
       message = 'Database validation failed';
       error = 'Bad Request';
     } else if (exception instanceof Prisma.PrismaClientInitializationError) {
+      this.infrastructureState?.setDatabaseState('DOWN', exception.message);
       errorName = 'PrismaClientInitializationError';
       statusCode = HttpStatus.SERVICE_UNAVAILABLE;
-      message = 'Database service temporarily unavailable';
+      message = 'Database service temporarily unavailable. Please retry shortly.';
       error = 'Service Unavailable';
+    } else if (exception instanceof Prisma.PrismaClientRustPanicError) {
+      this.infrastructureState?.setDatabaseState('DOWN', exception.message);
+      errorName = 'PrismaClientRustPanicError';
+      statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+      message = 'Database engine error. Service temporarily unavailable.';
+      error = 'Service Unavailable';
+    } else if (exception instanceof Prisma.PrismaClientUnknownRequestError) {
+      errorName = 'PrismaClientUnknownRequestError';
+      const msg = exception.message || '';
+      if (
+        msg.includes('Connection') ||
+        msg.includes('connection') ||
+        msg.includes('socket') ||
+        msg.includes('timeout') ||
+        msg.includes('terminated')
+      ) {
+        this.infrastructureState?.setDatabaseState('DOWN', msg);
+        statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+        message = 'Database connection interrupted. Please try again shortly.';
+        error = 'Service Unavailable';
+      } else {
+        statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
+        message = 'A database request error occurred.';
+        error = 'Internal Server Error';
+      }
     }
-    // 4. Handle Unhandled/Generic code exceptions (e.g. TypeError, SyntaxError)
+    // 4. Handle Redis / BullMQ infrastructure errors gracefully
     else {
+      const exMessage = exception instanceof Error ? exception.message : String(exception);
       errorName = exception instanceof Error ? exception.name : 'UnknownError';
-      message = exception instanceof Error ? exception.message : String(exception);
+
+      if (
+        exMessage.includes('Connection is closed') ||
+        exMessage.includes('ECONNREFUSED') ||
+        exMessage.includes('enableOfflineQueue') ||
+        exMessage.includes('Redis connection lost') ||
+        exMessage.includes('connect ETIMEDOUT')
+      ) {
+        statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+        message = 'Infrastructure dependency temporarily unavailable. Please try again shortly.';
+        error = 'Service Unavailable';
+      } else {
+        message = exMessage;
+      }
     }
 
     // 5. Centralized Structured Logging
@@ -99,7 +143,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       stack: statusCode >= 500 ? stack : undefined,
     });
 
-    // 6. Safe response to client (NEVER returns stack traces or internal queries)
+    // 6. Safe response to client (NEVER returns stack traces, internal connection strings, or database hosts)
     const errorResponse: ApiErrorResponse = {
       success: false,
       statusCode,
@@ -120,6 +164,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
    */
   private handlePrismaError(err: Prisma.PrismaClientKnownRequestError) {
     switch (err.code) {
+      case 'P1000':
+      case 'P1001':
+      case 'P1002':
+      case 'P1008':
+      case 'P1011':
+      case 'P1017':
+        this.infrastructureState?.setDatabaseState('DOWN', err.message);
+        return {
+          statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+          message: 'Database service is temporarily unreachable. Please try again shortly.',
+          error: 'Service Unavailable',
+          details: null,
+        };
       case 'P2002': {
         const fields = err.meta?.target || 'fields';
         return {

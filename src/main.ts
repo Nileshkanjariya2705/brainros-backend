@@ -1,9 +1,13 @@
+import './common/infrastructure/init-bullmq';
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { AppLoggerService } from './common/logger/logger.service';
+import { InfrastructureStateService } from './common/infrastructure/infrastructure-state.service';
+import { parseBooleanFlag } from './modules/feature-flag/feature-flag.constants';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
@@ -20,49 +24,25 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 process.on('uncaughtException', (error: Error) => {
-  bootstrapLogger.fatal(`Uncaught Exception: ${error.message}`, error.stack, 'UncaughtException');
+  bootstrapLogger.fatal(
+    `Uncaught Exception: ${error.message}`,
+    error.stack,
+    'UncaughtException',
+  );
 });
 
-/**
- * Validates critical environment variables at startup.
- */
-function validateEnvironment(logger: AppLoggerService) {
-  const required = ['DATABASE_URL'];
-  const missing: string[] = [];
-
-  for (const envVar of required) {
-    if (!process.env[envVar] || process.env[envVar]!.trim() === '') {
-      missing.push(envVar);
-    }
-  }
-
-  if (missing.length > 0) {
-    logger.error(
-      `[FATAL CONFIG ERROR] Missing required environment variable(s): ${missing.join(', ')}. Please check your .env configuration.`,
-      undefined,
-      'ConfigValidation',
-    );
-  }
-
-  if (
-    process.env.NODE_ENV === 'production' &&
-    (!process.env.JWT_SECRET ||
-      process.env.JWT_SECRET === 'super-secret-jwt-key-replace-in-production')
-  ) {
-    logger.warn(
-      '[SECURITY WARNING] Running in production with default/missing JWT_SECRET. Please set a dedicated JWT_SECRET in environment variables.',
-      'ConfigValidation',
-    );
-  }
-}
+import { validateEnvironment } from './common/config/environment-validation';
+export { validateEnvironment };
 
 async function bootstrap() {
+  const bootstrapStartTime = Date.now();
+  bootstrapLogger.log('[STARTUP] Beginning application bootstrap...', 'Bootstrap');
+
   validateEnvironment(bootstrapLogger);
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { logger: bootstrapLogger });
 
-  const port = process.env.PORT || 3000;
-
+  const port = process.env.PORT ?? 3000;
 
   const appLogger = app.get(AppLoggerService);
   app.useLogger(appLogger);
@@ -123,9 +103,7 @@ async function bootstrap() {
     optionsSuccessStatus: 204,
   });
 
-
-  await app.listen(port);
-
+  // Register global validation pipe BEFORE listen
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -145,13 +123,68 @@ async function bootstrap() {
     }),
   );
 
-  // Register global HTTP response formatting interceptor
+  // Register global HTTP response formatting interceptor BEFORE listen
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  // Register global unhandled exception and database error filter with centralized logger
-  app.useGlobalFilters(new GlobalExceptionFilter(appLogger));
+  // Register global unhandled exception and database error filter with centralized logger BEFORE listen
+  const infrastructureState = app.get(InfrastructureStateService);
+  app.useGlobalFilters(new GlobalExceptionFilter(appLogger, infrastructureState));
 
+  // Handle termination signals cleanly
+  const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT'];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      appLogger.log(`Received ${signal}. Initiating graceful shutdown...`, 'Shutdown');
+      try {
+        await app.close();
+        appLogger.log('Application closed cleanly.', 'Shutdown');
+        appLogger.flush();
+        process.exit(0);
+      } catch (err: any) {
+        appLogger.error(`Error during graceful shutdown: ${err.message}`, err.stack, 'Shutdown');
+        appLogger.flush();
+        process.exit(1);
+      }
+    });
+  }
 
-  appLogger.log(`Application started successfully on port ${port} (env: ${process.env.NODE_ENV || 'development'})`, 'Bootstrap');
+  // Unconditionally listen on all interfaces
+  await app.listen(port, '0.0.0.0');
+
+  const bootstrapDuration = Date.now() - bootstrapStartTime;
+  appLogger.log(
+    `[STARTUP] HTTP server listening on port ${port} (0.0.0.0:${port}) [took ${bootstrapDuration}ms]`,
+    'Bootstrap',
+  );
+
+  // Evaluate and log startup status of dependent services
+  const healthReport = infrastructureState.getHealthReport();
+  const degradedServices: string[] = [];
+  if (healthReport.database !== 'up') {
+    degradedServices.push('database');
+  }
+  if (healthReport.redis === 'down') {
+    degradedServices.push('redis');
+  }
+  if (healthReport.queue === 'down') {
+    degradedServices.push('queue');
+  }
+
+  if (degradedServices.length > 0) {
+    appLogger.warn(
+      `[STARTUP WARNING] Started with degraded services: [${degradedServices.join(
+        ', ',
+      )}]. HTTP server is accepting traffic, and dependent services are reconnecting in the background.`,
+      'Bootstrap',
+    );
+  } else {
+    appLogger.log(
+      `[STARTUP] Application fully operational in ${process.env.NODE_ENV || 'development'} mode.`,
+      'Bootstrap',
+    );
+  }
+
+  appLogger.flush();
 }
+
 bootstrap();

@@ -1,6 +1,13 @@
+import './common/infrastructure/init-bullmq';
+import 'dotenv/config';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { BullModule } from '@nestjs/bullmq';
+import { MockQueue, MockWorker } from './common/infrastructure/mock-queue';
+import { InfrastructureModule } from './common/infrastructure/infrastructure.module';
+import { parseBooleanFlag } from './modules/feature-flag/feature-flag.constants';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -26,11 +33,11 @@ import { ExamSecurityModule } from './modules/exam-security/exam-security.module
 import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { HealthModule } from './modules/health/health.module';
 import { LoggerModule } from './common/logger/logger.module';
-import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
     LoggerModule,
+    InfrastructureModule,
     HealthModule,
     ConfigModule.forRoot({
       isGlobal: true,
@@ -40,6 +47,17 @@ import { BullModule } from '@nestjs/bullmq';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
+        const enabledRaw = configService.get<string>('REDIS_ENABLED') ?? process.env.REDIS_ENABLED;
+        const enabled = enabledRaw !== undefined ? parseBooleanFlag(enabledRaw) : true;
+
+        if (!enabled) {
+          BullModule.queueClass = MockQueue as any;
+          BullModule.workerClass = MockWorker as any;
+          return {
+            connection: {},
+          };
+        }
+
         const redisUrl =
           configService.get<string>('REDIS_URL') || process.env.REDIS_URL;
         if (redisUrl) {
@@ -58,17 +76,17 @@ import { BullModule } from '@nestjs/bullmq';
                 tls: redisUrl.startsWith('rediss://')
                   ? { rejectUnauthorized: false }
                   : undefined,
-                // Do not block startup — connect lazily after app.listen()
+                // Do not block startup — connect lazily
                 lazyConnect: true,
                 // Fail fast if Redis is down; don't queue commands during outage
                 enableReadyCheck: false,
                 enableOfflineQueue: false,
                 maxRetriesPerRequest: null,
-                connectTimeout: 10000,
+                connectTimeout: 5000,
                 keepAlive: 30000,
-                // Auto-reconnect with backoff instead of terminating connection
+                // Auto-reconnect with bounded exponential backoff
                 retryStrategy: (times: number) => {
-                  return Math.min(times * 200, 2000);
+                  return Math.min(times * 1000, 15000);
                 },
               },
             };
@@ -82,16 +100,14 @@ import { BullModule } from '@nestjs/bullmq';
             host: process.env.REDIS_HOST || '127.0.0.1',
             port: parseInt(process.env.REDIS_PORT || '6379', 10),
             password: process.env.REDIS_PASSWORD || undefined,
-            // Do not block startup — connect lazily after app.listen()
             lazyConnect: true,
             enableReadyCheck: false,
             enableOfflineQueue: false,
             maxRetriesPerRequest: null,
-            connectTimeout: 10000,
+            connectTimeout: 5000,
             keepAlive: 30000,
-            // Auto-reconnect with backoff instead of terminating connection
             retryStrategy: (times: number) => {
-              return Math.min(times * 200, 2000);
+              return Math.min(times * 1000, 15000);
             },
           },
         };
@@ -126,6 +142,12 @@ import { BullModule } from '@nestjs/bullmq';
     ParentDashboardModule,
     RegionalLanguageModule,
     FeatureFlagModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

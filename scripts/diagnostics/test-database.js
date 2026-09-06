@@ -1,6 +1,7 @@
 const { loadEnv } = require('./env-loader');
 loadEnv();
 const { Pool } = require('pg');
+const { parse } = require('pg-connection-string');
 
 async function testDatabase() {
   const timestamp = new Date().toISOString();
@@ -16,10 +17,23 @@ async function testDatabase() {
   const maskedUrl = dbUrl.replace(/:([^:@]+)@/, ':****@');
   console.log(`  Target: ${maskedUrl}`);
 
+  const needsSsl =
+    dbUrl.includes('sslmode=') ||
+    dbUrl.includes('aivencloud.com') ||
+    dbUrl.includes('supabase.com') ||
+    process.env.NODE_ENV === 'production';
+
+  const parsed = parse(dbUrl);
   const pool = new Pool({
-    connectionString: dbUrl,
+    ...parsed,
+    host: parsed.host || undefined,
+    port: parsed.port ? parseInt(parsed.port, 10) : undefined,
+    user: parsed.user || undefined,
+    password: parsed.password || undefined,
+    database: parsed.database || undefined,
     connectionTimeoutMillis: 10000,
     max: 1,
+    ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
   });
 
   const start = Date.now();

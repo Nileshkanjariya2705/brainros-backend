@@ -55,48 +55,51 @@ export class AppLoggerService implements LoggerService {
     const level = getLogLevel();
 
     if (isProduction) {
-      this.pinoLogger = pino({
-        level,
-        formatters: {
-          level: (label) => ({ level: label.toUpperCase() }),
-        },
-        timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
-        redact: {
-          paths: [
-            'password',
-            '*.password',
-            'token',
-            '*.token',
-            'otp',
-            '*.otp',
-            'secret',
-            '*.secret',
-            'apiKey',
-            '*.apiKey',
-            'authorization',
-            'headers.authorization',
-            'cookie',
-            'headers.cookie',
-            'set-cookie',
-            'headers.set-cookie',
-          ],
-          censor: '[REDACTED]',
-        },
-      });
-    } else {
-      // In development: use clean colorized pretty-printing
-      this.pinoLogger = pino({
-        level,
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
-            ignore: 'pid,hostname',
-            singleLine: false,
+      this.pinoLogger = pino(
+        {
+          level,
+          formatters: {
+            level: (label) => ({ level: label.toUpperCase() }),
+          },
+          timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
+          redact: {
+            paths: [
+              'password',
+              '*.password',
+              'token',
+              '*.token',
+              'otp',
+              '*.otp',
+              'secret',
+              '*.secret',
+              'apiKey',
+              '*.apiKey',
+              'authorization',
+              'headers.authorization',
+              'cookie',
+              'headers.cookie',
+              'set-cookie',
+              'headers.set-cookie',
+            ],
+            censor: '[REDACTED]',
           },
         },
-      });
+        pino.destination({ sync: true }),
+      );
+    } else {
+      // In development: use synchronous pino-pretty stream on main thread for instant log visibility
+      try {
+        const prettyStream = require('pino-pretty')({
+          colorize: true,
+          translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
+          ignore: 'pid,hostname',
+          singleLine: false,
+          sync: true,
+        });
+        this.pinoLogger = pino({ level }, prettyStream);
+      } catch {
+        this.pinoLogger = pino({ level }, pino.destination({ sync: true }));
+      }
     }
   }
 
@@ -228,5 +231,16 @@ export class AppLoggerService implements LoggerService {
     }, 'AuditEvent');
 
     this.pinoLogger[level](meta, `[EVENT] ${eventName}`);
+  }
+
+  /**
+   * Synchronously flushes log buffer to ensure logs are fully written to stdout
+   */
+  flush(): void {
+    if (this.pinoLogger && typeof (this.pinoLogger as any).flush === 'function') {
+      try {
+        (this.pinoLogger as any).flush();
+      } catch {}
+    }
   }
 }

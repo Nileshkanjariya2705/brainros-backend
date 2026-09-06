@@ -17,8 +17,7 @@ export class TwoFactorProvider {
     const authKey =
       this.configService.get<string>('MSG91_AUTH_KEY') ||
       this.configService.get<string>('OTP_API_KEY') ||
-      process.env.MSG91_AUTH_KEY ||
-      '567446A9gJtDpx6a9a2e53P1';
+      process.env.MSG91_AUTH_KEY;
 
     if (!authKey) {
       this.logger.error('MSG91 credentials missing.');
