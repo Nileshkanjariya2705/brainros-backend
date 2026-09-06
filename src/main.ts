@@ -98,6 +98,10 @@ async function bootstrap() {
       'X-Requested-With',
       'Cookie',
       'x-request-id',
+      'ngrok-skip-browser-warning',
+      'Origin',
+      'Cache-Control',
+      'Pragma',
     ],
     credentials: true,
     optionsSuccessStatus: 204,
@@ -182,6 +186,27 @@ async function bootstrap() {
       `[STARTUP] Application fully operational in ${process.env.NODE_ENV || 'development'} mode.`,
       'Bootstrap',
     );
+  }
+
+  // Start optional Ngrok tunnel if enabled
+  if (process.env.ENABLE_NGROK === 'true' || process.env.NGROK_AUTHTOKEN) {
+    try {
+      const ngrok = await import('@ngrok/ngrok');
+      const ngrokDomain = process.env.NGROK_DOMAIN || 'footing-gallon-radial.ngrok-free.dev';
+      const forwarder = await ngrok.forward({
+        addr: `localhost:${port}`,
+        domain: ngrokDomain,
+        authtoken_from_env: true,
+        request_header_add: ['ngrok-skip-browser-warning:true'],
+        ...(process.env.NGROK_AUTHTOKEN ? { authtoken: process.env.NGROK_AUTHTOKEN } : {}),
+      });
+      appLogger.log(
+        `[Ngrok] Public tunnel online: ${forwarder.url()} -> localhost:${port}`,
+        'Bootstrap',
+      );
+    } catch (err: any) {
+      appLogger.warn(`[Ngrok] Could not establish tunnel: ${err.message}`, 'Bootstrap');
+    }
   }
 
   appLogger.flush();

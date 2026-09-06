@@ -22,6 +22,7 @@
     "seed:verify": "npx ts-node prisma/verify-seed.ts",
     "seed:startup": "npx ts-node prisma/seed-startup.ts",
     "diagnose": "node scripts/diagnostics/run-all.js",
+    "tunnel": "node scripts/tunnel.js",
     "prisma:generate": "npx prisma generate",
     "prisma:migrate:deploy": "npx prisma migrate deploy",
     "prisma:migrate:status": "npx prisma migrate status"
@@ -43,6 +44,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/throttler": "^6.5.0",
+    "@ngrok/ngrok": "^1.7.0",
     "@prisma/adapter-pg": "6.19.3",
     "@prisma/client": "6.19.3",
     "@supabase/supabase-js": "^2.115.0",
