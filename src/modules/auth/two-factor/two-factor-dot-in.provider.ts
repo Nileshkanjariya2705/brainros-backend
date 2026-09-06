@@ -61,7 +61,9 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
   ): Promise<TwoFactorProviderResult> {
     const apiKey = this.getApiKey();
     const formattedMobile = this.formatMobileFor2Factor(mobileNumber);
-    const templateName = this.config.twoFactorTemplateName ? this.config.twoFactorTemplateName.trim() : '';
+    const templateName = this.config.twoFactorTemplateName
+      ? encodeURIComponent(this.config.twoFactorTemplateName.trim())
+      : '';
     const url = templateName
       ? `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN/${templateName}`
       : `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;
@@ -164,7 +166,10 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
         resData.Status &&
         resData.Status.toLowerCase() === 'success' &&
         resData.Details &&
-        resData.Details.toLowerCase().includes('match');
+        !resData.Details.toLowerCase().includes('mismatch') &&
+        (resData.Details.toLowerCase().includes('match') ||
+          resData.Details.toLowerCase().includes('verified') ||
+          resData.Details.toLowerCase().includes('success'));
 
       if (isSuccess) {
         this.logger.log(`[2Factor.in OTP] Verification succeeded.`);
@@ -195,7 +200,9 @@ export class TwoFactorDotInProvider implements ITwoFactorProvider {
     const apiKey = this.getApiKey();
     const formattedMobile = this.formatMobileFor2Factor(mobileNumber);
     // Explicitly call SMS AUTOGEN endpoint to prevent voice calls
-    const templateName = this.config.twoFactorTemplateName ? this.config.twoFactorTemplateName.trim() : '';
+    const templateName = this.config.twoFactorTemplateName
+      ? encodeURIComponent(this.config.twoFactorTemplateName.trim())
+      : '';
     const url = templateName
       ? `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN/${templateName}`
       : `${this.baseUrl}/${apiKey}/SMS/${formattedMobile}/AUTOGEN`;

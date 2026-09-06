@@ -197,7 +197,7 @@ async function bootstrap() {
   }
 
   // Start optional Ngrok tunnel if enabled
-  if (process.env.ENABLE_NGROK === 'true' || process.env.NGROK_AUTHTOKEN) {
+  if (process.env.ENABLE_NGROK === 'true' && process.env.NGROK_AUTHTOKEN) {
     try {
       const ngrok = await import('@ngrok/ngrok');
       const ngrokDomain = process.env.NGROK_DOMAIN || 'footing-gallon-radial.ngrok-free.dev';

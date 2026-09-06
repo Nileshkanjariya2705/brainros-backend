@@ -78,7 +78,7 @@ import { LoggerModule } from './common/logger/logger.module';
                 lazyConnect: true,
                 // Fail fast if Redis is down; don't queue commands during outage
                 enableReadyCheck: false,
-                enableOfflineQueue: false,
+                enableOfflineQueue: true,
                 maxRetriesPerRequest: null,
                 connectTimeout: 5000,
                 keepAlive: 30000,
@@ -100,7 +100,7 @@ import { LoggerModule } from './common/logger/logger.module';
             password: process.env.REDIS_PASSWORD || undefined,
             lazyConnect: true,
             enableReadyCheck: false,
-            enableOfflineQueue: false,
+            enableOfflineQueue: true,
             maxRetriesPerRequest: null,
             connectTimeout: 5000,
             keepAlive: 30000,
