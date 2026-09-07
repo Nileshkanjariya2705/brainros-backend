@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Body,
   Param,
   Query,
   UseGuards,
@@ -17,7 +19,10 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { StudentBulkRegistrationService } from '../services/student-bulk-registration.service';
-import { BulkStudentUploadQueryDto } from '../dto/student-bulk-upload.dto';
+import {
+  BulkStudentUploadQueryDto,
+  UpdateBulkStudentRowDto,
+} from '../dto/student-bulk-upload.dto';
 
 @Controller('admin/students')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -52,6 +57,8 @@ export class AdminStudentBulkController {
   @UseInterceptors(FileInterceptor('file'))
   async uploadStudents(
     @UploadedFile() file: Express.Multer.File,
+    @Body('institutionId') institutionId: string,
+    @Query('institutionId') queryInstId: string,
     @Req() req: any,
   ) {
     if (!file) {
@@ -63,7 +70,29 @@ export class AdminStudentBulkController {
       email: req.user?.email,
     };
 
-    return this.bulkRegistrationService.uploadAndValidate(file, actor);
+    const targetInstitutionId = institutionId || queryInstId;
+
+    return this.bulkRegistrationService.uploadAndValidate(file, actor, {
+      institutionId: targetInstitutionId,
+    });
+  }
+
+  /**
+   * Edit a single staged student row and re-run validation
+   */
+  @Patch('bulk-upload/rows/:rowId')
+  @Roles('SUPER_ADMIN')
+  async updateRow(
+    @Param('rowId') rowId: string,
+    @Body() dto: UpdateBulkStudentRowDto,
+    @Req() req: any,
+  ) {
+    const actor = {
+      userId: req.user?.userId || req.user?.id,
+      email: req.user?.email,
+    };
+
+    return this.bulkRegistrationService.updateStagedRow(rowId, dto, actor);
   }
 
   /**

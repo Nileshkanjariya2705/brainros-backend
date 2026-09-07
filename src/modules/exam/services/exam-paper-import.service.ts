@@ -1255,6 +1255,10 @@ export class ExamPaperImportService {
     }> = [],
     userId: string,
   ) {
+    if ((dto as any).examId) {
+      await this.validateQuestionPaperUploadWindow((dto as any).examId);
+    }
+
     const validation = await this.validateQuestionPaperAndTranslations(
       questionFile,
       dto.blueprintId,
@@ -1713,6 +1717,18 @@ export class ExamPaperImportService {
               subject: { select: { id: true, name: true } },
             },
           },
+          schedules: {
+            select: {
+              id: true,
+              status: true,
+              startTime: true,
+              endTime: true,
+              hasAnswerKey: true,
+              answerKeyUploadedAt: true,
+            },
+            orderBy: { startTime: 'desc' },
+            take: 1,
+          },
           _count: {
             select: { examQuestions: true, attempts: true, sections: true },
           },
@@ -1779,6 +1795,7 @@ export class ExamPaperImportService {
             name: exam.createdBy?.student?.name || exam.createdBy?.email || 'Admin',
           },
           translationCoverage,
+          schedule: exam.schedules?.[0] || null,
           languages: exam.languages.map((l) => ({
             id: l.language.id,
             name: l.language.name,
@@ -1818,5 +1835,52 @@ export class ExamPaperImportService {
       );
     }
   }
+
+  /**
+   * Enforces 24-hour upload window for Question Papers:
+   * Upload is strictly permitted only between [startTime - 24 hours, startTime]
+   * for exams that have a scheduled session.
+   */
+  async validateQuestionPaperUploadWindow(
+    examId?: string,
+    scheduleId?: string,
+  ): Promise<void> {
+    if (!examId && !scheduleId) return;
+
+    const schedule = await this.prisma.examSchedule.findFirst({
+      where: scheduleId
+        ? { id: scheduleId }
+        : { examId, status: { in: ['SCHEDULED', 'ACTIVE'] } },
+      orderBy: { startTime: 'asc' },
+    });
+
+    if (!schedule) {
+      // Exam is in draft / not yet scheduled. Permitted.
+      return;
+    }
+
+    const now = Date.now();
+    const startTimeMs = new Date(schedule.startTime).getTime();
+    const windowStartMs = startTimeMs - 24 * 60 * 60 * 1000; // 24 hours prior
+
+    if (now < windowStartMs) {
+      const formattedOpen = new Date(windowStartMs).toLocaleString('en-IN', {
+        timeZone: schedule.timezone || 'Asia/Kolkata',
+      });
+      throw new BadRequestException(
+        `Question paper upload window is not yet open. Uploads are strictly permitted only within 24 hours of exam start time. The 24-hour upload window opens at: ${formattedOpen} (${schedule.timezone || 'Asia/Kolkata'}).`,
+      );
+    }
+
+    if (now > startTimeMs) {
+      const formattedStart = new Date(startTimeMs).toLocaleString('en-IN', {
+        timeZone: schedule.timezone || 'Asia/Kolkata',
+      });
+      throw new BadRequestException(
+        `Question paper upload window is closed. Examination already commenced at: ${formattedStart} (${schedule.timezone || 'Asia/Kolkata'}).`,
+      );
+    }
+  }
 }
+
 

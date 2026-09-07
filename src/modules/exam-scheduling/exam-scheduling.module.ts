@@ -3,12 +3,16 @@ import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationModule } from '../notification/notification.module';
 import { AdminModule } from '../admin/admin.module';
-import { EXAM_WINDOW_END_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
+import {
+  EXAM_WINDOW_END_QUEUE_NAME,
+  EVALUATION_QUEUE_NAME,
+} from '../result/interfaces/result-lifecycle.interface';
 
 // Existing Services
 import { ExamLifecycleService } from './services/exam-lifecycle.service';
 import { ExamScheduleService } from './services/exam-schedule.service';
 import { ExamAccessService } from './services/exam-access.service';
+import { AnswerKeyService } from './services/answer-key.service';
 
 // New Calendar & Activation Services
 import { ExamCycleService } from './services/exam-cycle.service';
@@ -21,26 +25,34 @@ import { ExamSchedulingController } from './controllers/exam-scheduling.controll
 import { ExamCycleController } from './controllers/exam-cycle.controller';
 import { ExamCalendarController } from './controllers/exam-calendar.controller';
 import { FeatureActivationController } from './controllers/feature-activation.controller';
+import { AnswerKeyController } from './controllers/answer-key.controller';
 
 @Module({
   imports: [
     PrismaModule,
     NotificationModule,
     forwardRef(() => AdminModule),
-    BullModule.registerQueue({
-      name: EXAM_WINDOW_END_QUEUE_NAME,
-    }),
+    BullModule.registerQueue(
+      {
+        name: EXAM_WINDOW_END_QUEUE_NAME,
+      },
+      {
+        name: EVALUATION_QUEUE_NAME,
+      },
+    ),
   ],
   controllers: [
     ExamSchedulingController,
     ExamCycleController,
     ExamCalendarController,
     FeatureActivationController,
+    AnswerKeyController,
   ],
   providers: [
     ExamLifecycleService,
     ExamScheduleService,
     ExamAccessService,
+    AnswerKeyService,
     ExamCycleService,
     ExamCalendarService,
     ScheduleReminderService,
@@ -50,6 +62,7 @@ import { FeatureActivationController } from './controllers/feature-activation.co
     ExamLifecycleService,
     ExamScheduleService,
     ExamAccessService,
+    AnswerKeyService,
     ExamCycleService,
     ExamCalendarService,
     ScheduleReminderService,

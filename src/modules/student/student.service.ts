@@ -586,12 +586,24 @@ export class StudentService {
   async getStudentExams(userId: string, query: any) {
     const student = await this.prisma.student.findFirst({
       where: { OR: [{ userId }, { id: userId }] },
-      select: { id: true, examTargetId: true, classId: true },
+      select: {
+        id: true,
+        examTargetId: true,
+        classId: true,
+        studentExamTargets: { select: { examTargetId: true } },
+      },
     });
 
     if (!student) {
       throw new NotFoundException(`Student profile not found for user '${userId}'`);
     }
+
+    const targetIds = Array.from(
+      new Set([
+        ...(student.studentExamTargets?.map((st) => st.examTargetId) || []),
+        ...(student.examTargetId ? [student.examTargetId] : []),
+      ]),
+    );
 
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
@@ -608,9 +620,9 @@ export class StudentService {
     // Filter by Exam Target if student has one or if query specified
     if (query.examTargetId) {
       where.examTargetId = query.examTargetId;
-    } else if (student.examTargetId) {
+    } else if (targetIds.length > 0) {
       where.OR = [
-        { examTargetId: student.examTargetId },
+        { examTargetId: { in: targetIds } },
         { examTarget: { name: 'General' } },
       ];
     }
@@ -788,12 +800,24 @@ export class StudentService {
   async getStudentMockTests(userId: string, query: any) {
     const student = await this.prisma.student.findFirst({
       where: { OR: [{ userId }, { id: userId }] },
-      select: { id: true, examTargetId: true, classId: true },
+      select: {
+        id: true,
+        examTargetId: true,
+        classId: true,
+        studentExamTargets: { select: { examTargetId: true } },
+      },
     });
 
     if (!student) {
       throw new NotFoundException(`Student profile not found for user '${userId}'`);
     }
+
+    const targetIds = Array.from(
+      new Set([
+        ...(student.studentExamTargets?.map((st) => st.examTargetId) || []),
+        ...(student.examTargetId ? [student.examTargetId] : []),
+      ]),
+    );
 
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
@@ -808,9 +832,9 @@ export class StudentService {
     // Filter by Exam Target
     if (query.examTargetId) {
       where.examTargetId = query.examTargetId;
-    } else if (student.examTargetId) {
+    } else if (targetIds.length > 0) {
       where.OR = [
-        { examTargetId: student.examTargetId },
+        { examTargetId: { in: targetIds } },
         { examTarget: { name: 'General' } },
       ];
     }

@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { Response as ExpressResponse } from 'express';
 import { ConfigService } from '@nestjs/config';
@@ -54,6 +55,7 @@ export class AuthController {
   /**
    * Step A: Check if mobile already registered. If yes, reject. If new, trigger sendOtp(mobileNumber).
    * POST /auth/register/send-otp
+   * @deprecated B2B mode — public registration disabled
    */
   @Post('register/send-otp')
   @HttpCode(HttpStatus.OK)
@@ -61,13 +63,18 @@ export class AuthController {
     @Body() dto: RegisterSendOtpDto,
     @Request() req: any,
   ) {
-    return this.authService.registerSendOtp(dto, req);
+    throw new ForbiddenException(
+      'Public registration is no longer available. Students are registered through their school administration.',
+    );
   }
 
   /**
    * Step B: Verify OTP using verifyOtp(mobileNumber, otp).
    * If valid, save new user record in DB, issue session/JWT token, return user details.
    * POST /auth/register/verify-otp
+   */
+  /**
+   * @deprecated B2B mode — public registration disabled
    */
   @Post('register/verify-otp')
   @HttpCode(HttpStatus.CREATED)
@@ -76,12 +83,9 @@ export class AuthController {
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    const result = await this.authService.registerVerifyOtp(dto, req);
-    setAuthCookies(res, this.configService, {
-      accessToken: result.data?.accessToken,
-      refreshToken: result.data?.refreshToken,
-    });
-    return result;
+    throw new ForbiddenException(
+      'Public registration is no longer available. Students are registered through their school administration.',
+    );
   }
 
   /**
@@ -89,16 +93,24 @@ export class AuthController {
    * sends OTP to mobile number, and returns requiresOtp.
    * POST /auth/register
    */
+  /**
+   * @deprecated B2B mode — public registration disabled
+   */
   @Post('register')
   @HttpCode(HttpStatus.OK)
   async register(@Body() dto: RegisterStudentDto, @Request() req: any) {
-    return this.authService.registerStudent(dto, req);
+    throw new ForbiddenException(
+      'Public registration is no longer available. Students are registered through their school administration.',
+    );
   }
 
   /**
    * Verify full student registration OTP: activates User, creates Student profile,
    * generates Student ID, creates session, and sets HttpOnly refresh cookie.
    * POST /auth/verify-registration-otp
+   */
+  /**
+   * @deprecated B2B mode — public registration disabled
    */
   @Post('verify-registration-otp')
   @HttpCode(HttpStatus.CREATED)
@@ -107,12 +119,9 @@ export class AuthController {
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    const result = await this.authService.verifyRegistrationOtp(dto, req);
-    setAuthCookies(res, this.configService, {
-      accessToken: result.data?.accessToken,
-      refreshToken: result.data?.refreshToken,
-    });
-    return result;
+    throw new ForbiddenException(
+      'Public registration is no longer available. Students are registered through their school administration.',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -272,6 +281,9 @@ export class AuthController {
     return result;
   }
 
+  /**
+   * @deprecated B2B mode — Google login disabled
+   */
   @Post('google')
   @HttpCode(HttpStatus.OK)
   async loginWithGoogle(
@@ -279,12 +291,9 @@ export class AuthController {
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    const result = await this.authService.loginWithGoogle(dto.idToken, req);
-    setAuthCookies(res, this.configService, {
-      accessToken: result.data?.accessToken,
-      refreshToken: result.data?.refreshToken,
-    });
-    return result;
+    throw new ForbiddenException(
+      'Google login has been disabled. Please use your mobile number or Student ID to login.',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════

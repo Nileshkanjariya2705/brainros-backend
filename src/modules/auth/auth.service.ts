@@ -170,6 +170,11 @@ export class AuthService {
     if (!user.isActive) {
       throw new UnauthorizedException('User account is inactive.');
     }
+    if (user.status === 'PENDING') {
+      throw new UnauthorizedException(
+        'Your account is pending approval. Please contact your school administration.',
+      );
+    }
     if (user.status === 'SUSPENDED') {
       throw new UnauthorizedException('User account is suspended.');
     }
@@ -181,6 +186,18 @@ export class AuthService {
     }
     if (user.status === 'DELETED') {
       throw new UnauthorizedException('User account has been deleted.');
+    }
+    // B2B: Check student-specific status if student profile is loaded
+    if (user.student && user.student.status === 'PENDING') {
+      throw new UnauthorizedException(
+        'Your student account is pending approval. Please contact your school administration.',
+      );
+    }
+    if (user.student && user.student.status === 'SUSPENDED') {
+      throw new UnauthorizedException('Your student account has been suspended.');
+    }
+    if (user.student && user.student.status === 'INACTIVE') {
+      throw new UnauthorizedException('Your student account is inactive.');
     }
   }
 
@@ -637,6 +654,7 @@ export class AuthService {
         mobileMasked: this.maskMobile(targetMobile),
         expiresIn: 300,
         resendAvailableIn: 60,
+        otpLength: 6,
       },
     };
   }

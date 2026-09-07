@@ -91,9 +91,7 @@ export class TwoFactorConfig {
       this.configService.get<string>('DEV_OTP_CODE') ??
       process.env.DEV_BYPASS_OTP ??
       process.env.DEV_OTP_CODE ??
-      '12345';
-
-
+      '123456';
 
     this.otpTtl =
       Number(
@@ -116,7 +114,7 @@ export class TwoFactorConfig {
     this.otpLength =
       Number(
         this.configService.get('OTP_LENGTH') || process.env.OTP_LENGTH,
-      ) || 5;
+      ) || 6;
 
     this.maxRequestsPerHour =
       Number(

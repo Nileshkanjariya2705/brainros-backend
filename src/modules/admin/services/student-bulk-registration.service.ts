@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { SecurityEventService } from '../../auth/services/security-event.service';
 import { OtpService } from '../../auth/services/otp.service';
+import { UpdateBulkStudentRowDto } from '../dto/student-bulk-upload.dto';
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
 
@@ -68,9 +69,9 @@ export class StudentBulkRegistrationService {
       { header: 'State *', key: 'state', width: 20 },
       { header: 'City / District *', key: 'city', width: 22 },
       { header: 'Class / Grade * (e.g. 11th, 12th, Dropper)', key: 'class', width: 25 },
-      { header: 'Exam Target * (e.g. NEET, JEE_MAIN)', key: 'examTarget', width: 24 },
+      { header: 'Exam Target * (e.g. NEET, JEE, CET, or multi-target: NEET, CET)', key: 'examTarget', width: 34 },
       { header: 'Preferred Language * (e.g. ENGLISH, HINDI, GUJARATI)', key: 'preferredLanguage', width: 26 },
-      { header: 'School / College / Institution *', key: 'schoolCollege', width: 32 },
+      { header: 'School / College / Institution * (or School Code)', key: 'schoolCollege', width: 34 },
     ];
 
     sheet.columns = headers;
@@ -93,7 +94,7 @@ export class StudentBulkRegistrationService {
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
 
-    // Sample data rows
+    // Sample data rows (with multi-target examples)
     const sampleRows = [
       {
         name: 'Rahul Sharma',
@@ -102,7 +103,7 @@ export class StudentBulkRegistrationService {
         state: 'Gujarat',
         city: 'Ahmedabad',
         class: '12th',
-        examTarget: 'NEET',
+        examTarget: 'NEET, CET',
         preferredLanguage: 'ENGLISH',
         schoolCollege: 'Delhi Public School',
       },
@@ -113,7 +114,7 @@ export class StudentBulkRegistrationService {
         state: 'Gujarat',
         city: 'Surat',
         class: '11th',
-        examTarget: 'JEE_MAIN',
+        examTarget: 'JEE, CET',
         preferredLanguage: 'GUJARATI',
         schoolCollege: 'St. Xavier High School',
       },
@@ -287,6 +288,7 @@ export class StudentBulkRegistrationService {
   async uploadAndValidate(
     file: Express.Multer.File,
     actor: { userId: string; email?: string },
+    options?: { institutionId?: string },
   ) {
     this.validateFile(file);
 
@@ -316,12 +318,16 @@ export class StudentBulkRegistrationService {
     });
 
     // 2. Load Master Data for O(1) in-memory resolution & validation
-    const [states, districts, classes, examTargets, languages] = await Promise.all([
+    const [states, districts, classes, examTargets, languages, institutions] = await Promise.all([
       this.prisma.state.findMany({ where: { isActive: true } }),
       this.prisma.district.findMany({ where: { isActive: true } }),
       this.prisma.studentClass.findMany(),
       this.prisma.examTarget.findMany(),
       this.prisma.preferredLanguage.findMany({ where: { isActive: true } }),
+      this.prisma.institution.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true, name: true, code: true, stateId: true, districtId: true },
+      }),
     ]);
 
     // Lookup Maps
@@ -354,6 +360,17 @@ export class StudentBulkRegistrationService {
       languageMap.set(l.name.toLowerCase().trim(), l);
       if (l.code) languageMap.set(l.code.toLowerCase().trim(), l);
     });
+
+    const institutionMap = new Map<string, typeof institutions[0]>();
+    institutions.forEach((inst) => {
+      institutionMap.set(inst.id.toLowerCase(), inst);
+      institutionMap.set(inst.code.toLowerCase().trim(), inst);
+      institutionMap.set(inst.name.toLowerCase().trim(), inst);
+    });
+
+    const selectedInstitution = options?.institutionId
+      ? institutionMap.get(options.institutionId.toLowerCase())
+      : null;
 
     // 3. Batch query DB for existing users with any of the mobiles or emails
     const fileMobiles: string[] = [];
@@ -452,7 +469,6 @@ export class StudentBulkRegistrationService {
       let resolvedStateId: string | null = null;
       let resolvedDistrictId: string | null = null;
       let resolvedClassId: string | null = null;
-      let resolvedExamTargetId: string | null = null;
       let resolvedLanguageId: string | null = null;
 
       // State
@@ -528,23 +544,58 @@ export class StudentBulkRegistrationService {
         }
       }
 
-      // Exam Target
+      // Exam Target (Supports single or multi-target: e.g. "NEET, CET", "JEE, CET")
+      let resolvedExamTargetId: string | null = null;
+      const resolvedExamTargetIds: string[] = [];
+      const validTargetNames: string[] = [];
+
       if (!examTargetName) {
         rowErrors.push({
           field: 'examTarget',
           errorCode: 'MISSING_EXAM_TARGET',
-          message: 'Exam Target is required (e.g. NEET, JEE_MAIN).',
+          message: 'Exam Target is required (e.g. NEET, JEE, CET, or multi-target: NEET, CET).',
         });
       } else {
-        const examRecord = examTargetMap.get(examTargetName.toLowerCase()) || examTargetMap.get(examTargetName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-        if (!examRecord) {
+        const parts = examTargetName
+          .split(/[,/+]|\band\b/i)
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        if (parts.length === 0) {
           rowErrors.push({
             field: 'examTarget',
-            errorCode: 'UNKNOWN_EXAM_TARGET',
-            message: `Exam target '${examTargetName}' is not recognized.`,
+            errorCode: 'MISSING_EXAM_TARGET',
+            message: 'Exam Target is required.',
           });
         } else {
-          resolvedExamTargetId = examRecord.id;
+          let hasTargetError = false;
+          for (const part of parts) {
+            let lookupKey = part.toLowerCase();
+            if (lookupKey === 'jee_main' || lookupKey === 'jee-main' || lookupKey === 'jee main') {
+              lookupKey = 'jee';
+            }
+            const examRecord =
+              examTargetMap.get(lookupKey) ||
+              examTargetMap.get(part.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+
+            if (!examRecord) {
+              hasTargetError = true;
+              rowErrors.push({
+                field: 'examTarget',
+                errorCode: 'UNKNOWN_EXAM_TARGET',
+                message: `Exam target '${part}' is not recognized. Available targets: ${Array.from(new Set(examTargets.map((et) => et.name))).join(', ')}.`,
+              });
+            } else {
+              if (!resolvedExamTargetIds.includes(examRecord.id)) {
+                resolvedExamTargetIds.push(examRecord.id);
+                validTargetNames.push(examRecord.name);
+              }
+            }
+          }
+
+          if (!hasTargetError && resolvedExamTargetIds.length > 0) {
+            resolvedExamTargetId = resolvedExamTargetIds[0];
+          }
         }
       }
 
@@ -568,12 +619,30 @@ export class StudentBulkRegistrationService {
         }
       }
 
-      // School / College
-      if (!schoolCollege) {
+      // School / College / Institution Resolution
+      let resolvedInstitutionId: string | null = null;
+      let resolvedInstitutionName: string | null = null;
+
+      if (selectedInstitution) {
+        resolvedInstitutionId = selectedInstitution.id;
+        resolvedInstitutionName = selectedInstitution.name;
+      } else if (schoolCollege) {
+        const matchedInst =
+          institutionMap.get(schoolCollege.toLowerCase()) ||
+          institutionMap.get(schoolCollege.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+        if (matchedInst) {
+          resolvedInstitutionId = matchedInst.id;
+          resolvedInstitutionName = matchedInst.name;
+        }
+      }
+
+      if (!schoolCollege && resolvedInstitutionName) {
+        // Auto-filled from selected institution
+      } else if (!schoolCollege && !resolvedInstitutionName) {
         rowErrors.push({
           field: 'schoolCollege',
           errorCode: 'MISSING_SCHOOL_COLLEGE',
-          message: 'School / College / Institution name is required.',
+          message: 'School / College / Institution name or code is required.',
         });
       }
 
@@ -650,11 +719,14 @@ export class StudentBulkRegistrationService {
         districtId: resolvedDistrictId,
         class: className,
         classId: resolvedClassId,
-        examTarget: examTargetName,
+        examTarget: validTargetNames.length > 0 ? validTargetNames.join(', ') : examTargetName,
         examTargetId: resolvedExamTargetId,
+        examTargetIds: resolvedExamTargetIds,
         preferredLanguage: languageName,
         preferredLanguageId: resolvedLanguageId,
-        schoolCollege,
+        schoolCollege: schoolCollege || resolvedInstitutionName || 'Not Specified',
+        institutionId: resolvedInstitutionId,
+        institutionName: resolvedInstitutionName,
       };
 
       stagedRowsData.push({
@@ -1014,13 +1086,33 @@ export class StudentBulkRegistrationService {
                 district: data.city || 'Not Specified',
                 stateId: data.stateId || null,
                 districtId: data.districtId || null,
-                schoolCollege: data.schoolCollege || 'Not Specified',
+                schoolCollege: data.schoolCollege || data.institutionName || 'Not Specified',
+                institutionId: data.institutionId || null,
                 classId: data.classId,
                 examTargetId: data.examTargetId,
                 preferredLanguageId: data.preferredLanguageId,
                 status: 'ACTIVE',
               },
             });
+
+            // 5b. Create StudentExamTarget entries (supports multi-target e.g. NEET, CET)
+            const targetIds: string[] =
+              Array.isArray(data.examTargetIds) && data.examTargetIds.length > 0
+                ? data.examTargetIds
+                : data.examTargetId
+                  ? [data.examTargetId]
+                  : [];
+
+            if (targetIds.length > 0) {
+              await tx.studentExamTarget.createMany({
+                data: targetIds.map((tId: string, idx: number) => ({
+                  studentId: student.id,
+                  examTargetId: tId,
+                  isPrimary: idx === 0,
+                })),
+                skipDuplicates: true,
+              });
+            }
 
             // 6. Update Row status
             await tx.bulkUploadRow.update({
@@ -1182,5 +1274,324 @@ export class StudentBulkRegistrationService {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       };
     }
+  }
+
+  /**
+   * Update a staged row's values and re-run row-level validation
+   */
+  async updateStagedRow(
+    rowId: string,
+    patchData: UpdateBulkStudentRowDto,
+    actor?: { userId: string; email?: string },
+  ) {
+    const row = await this.prisma.bulkUploadRow.findUnique({
+      where: { id: rowId },
+      include: { upload: true },
+    });
+
+    if (!row) {
+      throw new NotFoundException(`Bulk upload row '${rowId}' not found.`);
+    }
+
+    if (row.upload.status === 'ACTIVATING' || row.upload.status === 'ACTIVATED') {
+      throw new BadRequestException(
+        `Cannot edit rows in a batch that is already in '${row.upload.status}' state.`,
+      );
+    }
+
+    const currentNormalized = (row.normalizedData || {}) as any;
+
+    const merged = {
+      ...currentNormalized,
+      ...patchData,
+    };
+
+    const rowErrors: { field: string; errorCode: string; message: string }[] = [];
+
+    const name = (merged.name || '').trim();
+    const rawMobile = (merged.mobile || '').replace(/\D/g, '');
+    const email = merged.email ? merged.email.toLowerCase().trim() : null;
+    const stateName = (merged.state || '').trim();
+    const cityName = (merged.city || '').trim();
+    const className = (merged.class || '').trim();
+    const examTargetName = (merged.examTarget || '').trim();
+    const languageName = (merged.preferredLanguage || '').trim();
+    const schoolCollege = (merged.schoolCollege || '').trim();
+    const institutionId = merged.institutionId || null;
+
+    if (!name || name.length < 2) {
+      rowErrors.push({
+        field: 'name',
+        errorCode: 'INVALID_NAME',
+        message: 'Student name is required (minimum 2 characters).',
+      });
+    }
+
+    if (!rawMobile) {
+      rowErrors.push({
+        field: 'mobile',
+        errorCode: 'MISSING_MOBILE',
+        message: 'Mobile number is required.',
+      });
+    } else {
+      const standardMobile =
+        rawMobile.length === 10
+          ? rawMobile
+          : rawMobile.startsWith('91') && rawMobile.length === 12
+            ? rawMobile.substring(2)
+            : rawMobile;
+      if (!MOBILE_REGEX.test(standardMobile)) {
+        rowErrors.push({
+          field: 'mobile',
+          errorCode: 'INVALID_MOBILE_FORMAT',
+          message: `Invalid mobile number '${rawMobile}'. Must be a 10-digit number starting with 6-9.`,
+        });
+      }
+    }
+
+    if (email && !EMAIL_REGEX.test(email)) {
+      rowErrors.push({
+        field: 'email',
+        errorCode: 'INVALID_EMAIL_FORMAT',
+        message: `Invalid email address format '${email}'.`,
+      });
+    }
+
+    // Load Master Data
+    const [states, districts, classes, examTargets, languages, institutions] = await Promise.all([
+      this.prisma.state.findMany({ where: { isActive: true } }),
+      this.prisma.district.findMany({ where: { isActive: true } }),
+      this.prisma.studentClass.findMany(),
+      this.prisma.examTarget.findMany(),
+      this.prisma.preferredLanguage.findMany({ where: { isActive: true } }),
+      this.prisma.institution.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true, name: true, code: true },
+      }),
+    ]);
+
+    const stateMap = new Map<string, any>();
+    states.forEach((s) => {
+      stateMap.set(s.name.toLowerCase().trim(), s);
+      stateMap.set(s.code.toLowerCase().trim(), s);
+    });
+
+    const districtMap = new Map<string, any>();
+    districts.forEach((d) => {
+      districtMap.set(`${d.name.toLowerCase().trim()}_${d.stateId}`, d);
+      districtMap.set(d.name.toLowerCase().trim(), d);
+    });
+
+    const classMap = new Map<string, any>();
+    classes.forEach((c) => {
+      classMap.set(c.name.toLowerCase().trim(), c);
+      classMap.set(c.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(), c);
+    });
+
+    const examTargetMap = new Map<string, any>();
+    examTargets.forEach((et) => {
+      examTargetMap.set(et.name.toLowerCase().trim(), et);
+      examTargetMap.set(et.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(), et);
+    });
+
+    const languageMap = new Map<string, any>();
+    languages.forEach((l) => {
+      languageMap.set(l.name.toLowerCase().trim(), l);
+      if (l.code) languageMap.set(l.code.toLowerCase().trim(), l);
+    });
+
+    const institutionMap = new Map<string, any>();
+    institutions.forEach((i) => {
+      institutionMap.set(i.id.toLowerCase(), i);
+      institutionMap.set(i.code.toLowerCase().trim(), i);
+      institutionMap.set(i.name.toLowerCase().trim(), i);
+    });
+
+    let resolvedStateId: string | null = null;
+    let resolvedDistrictId: string | null = null;
+    let resolvedClassId: string | null = null;
+    let resolvedLanguageId: string | null = null;
+    let resolvedExamTargetId: string | null = null;
+    const resolvedExamTargetIds: string[] = [];
+    const validTargetNames: string[] = [];
+    let resolvedInstitutionId: string | null = null;
+    let resolvedInstitutionName: string | null = null;
+
+    if (stateName) {
+      const stateRecord = stateMap.get(stateName.toLowerCase());
+      if (stateRecord) resolvedStateId = stateRecord.id;
+      else rowErrors.push({ field: 'state', errorCode: 'UNKNOWN_STATE', message: `State '${stateName}' not recognized.` });
+    }
+
+    if (cityName) {
+      const districtKey = resolvedStateId ? `${cityName.toLowerCase()}_${resolvedStateId}` : cityName.toLowerCase();
+      const districtRecord = districtMap.get(districtKey) || districtMap.get(cityName.toLowerCase());
+      if (districtRecord) resolvedDistrictId = districtRecord.id;
+      else rowErrors.push({ field: 'city', errorCode: 'UNKNOWN_CITY', message: `City '${cityName}' not found.` });
+    }
+
+    if (className) {
+      const classRecord = classMap.get(className.toLowerCase()) || classMap.get(className.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+      if (classRecord) resolvedClassId = classRecord.id;
+      else rowErrors.push({ field: 'class', errorCode: 'UNKNOWN_CLASS', message: `Class '${className}' not recognized.` });
+    }
+
+    if (languageName) {
+      const langRecord = languageMap.get(languageName.toLowerCase());
+      if (langRecord) resolvedLanguageId = langRecord.id;
+      else rowErrors.push({ field: 'preferredLanguage', errorCode: 'UNKNOWN_LANGUAGE', message: `Language '${languageName}' not supported.` });
+    }
+
+    // Exam Target validation (multi-target)
+    if (!examTargetName) {
+      rowErrors.push({ field: 'examTarget', errorCode: 'MISSING_EXAM_TARGET', message: 'Exam Target is required.' });
+    } else {
+      const parts = examTargetName.split(/[,/+]|\band\b/i).map((s) => s.trim()).filter(Boolean);
+      for (const part of parts) {
+        let lookupKey = part.toLowerCase();
+        if (lookupKey === 'jee_main' || lookupKey === 'jee-main' || lookupKey === 'jee main') lookupKey = 'jee';
+        const etRecord = examTargetMap.get(lookupKey) || examTargetMap.get(part.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+        if (!etRecord) {
+          rowErrors.push({ field: 'examTarget', errorCode: 'UNKNOWN_EXAM_TARGET', message: `Exam target '${part}' not recognized.` });
+        } else {
+          if (!resolvedExamTargetIds.includes(etRecord.id)) {
+            resolvedExamTargetIds.push(etRecord.id);
+            validTargetNames.push(etRecord.name);
+          }
+        }
+      }
+      if (resolvedExamTargetIds.length > 0) resolvedExamTargetId = resolvedExamTargetIds[0];
+    }
+
+    // Institution resolution
+    if (institutionId && institutionMap.has(institutionId.toLowerCase())) {
+      const inst = institutionMap.get(institutionId.toLowerCase());
+      resolvedInstitutionId = inst.id;
+      resolvedInstitutionName = inst.name;
+    } else if (schoolCollege) {
+      const inst = institutionMap.get(schoolCollege.toLowerCase()) || institutionMap.get(schoolCollege.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+      if (inst) {
+        resolvedInstitutionId = inst.id;
+        resolvedInstitutionName = inst.name;
+      }
+    }
+
+    // Deduplication check
+    const standardMobile =
+      rawMobile.length === 10
+        ? rawMobile
+        : rawMobile.startsWith('91') && rawMobile.length === 12
+          ? rawMobile.substring(2)
+          : rawMobile;
+    const normalizedMobile = standardMobile ? `+91${standardMobile}` : '';
+
+    let dedupStatus = 'UNIQUE';
+    if (standardMobile) {
+      const existingUser = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { mobileNumber: normalizedMobile },
+            { phone: normalizedMobile },
+            { mobileNumber: standardMobile },
+            { phone: standardMobile },
+          ],
+        },
+      });
+      if (existingUser) {
+        dedupStatus = 'EXISTING_STUDENT';
+        rowErrors.push({
+          field: 'mobile',
+          errorCode: 'MOBILE_ALREADY_REGISTERED',
+          message: `Mobile '${standardMobile}' is already registered in DB.`,
+        });
+      }
+    }
+
+    const isValid = rowErrors.length === 0;
+
+    const newNormalizedData = {
+      name,
+      mobile: normalizedMobile,
+      rawMobile: standardMobile,
+      email,
+      state: stateName,
+      city: cityName,
+      stateId: resolvedStateId,
+      districtId: resolvedDistrictId,
+      class: className,
+      classId: resolvedClassId,
+      examTarget: validTargetNames.length > 0 ? validTargetNames.join(', ') : examTargetName,
+      examTargetId: resolvedExamTargetId,
+      examTargetIds: resolvedExamTargetIds,
+      preferredLanguage: languageName,
+      preferredLanguageId: resolvedLanguageId,
+      schoolCollege: schoolCollege || resolvedInstitutionName || 'Not Specified',
+      institutionId: resolvedInstitutionId,
+      institutionName: resolvedInstitutionName,
+    };
+
+    // Delete old errors for this row
+    await this.prisma.bulkUploadError.deleteMany({ where: { rowId: row.id } });
+
+    // Insert new errors if invalid
+    if (rowErrors.length > 0) {
+      await this.prisma.bulkUploadError.createMany({
+        data: rowErrors.map((err) => ({
+          uploadId: row.uploadId,
+          rowId: row.id,
+          rowNumber: row.rowNumber,
+          field: err.field,
+          errorCode: err.errorCode,
+          message: err.message,
+        })),
+      });
+    }
+
+    // Update row
+    const updatedRow = await this.prisma.bulkUploadRow.update({
+      where: { id: row.id },
+      data: {
+        normalizedData: newNormalizedData,
+        validationStatus: isValid ? 'VALID' : 'INVALID',
+        deduplicationStatus: dedupStatus,
+        errorCount: rowErrors.length,
+      },
+      include: { errors: true },
+    });
+
+    // Recalculate summary counts on BulkUpload
+    const [validCount, invalidCount, duplicateCount] = await Promise.all([
+      this.prisma.bulkUploadRow.count({ where: { uploadId: row.uploadId, validationStatus: 'VALID' } }),
+      this.prisma.bulkUploadRow.count({ where: { uploadId: row.uploadId, validationStatus: 'INVALID' } }),
+      this.prisma.bulkUploadRow.count({ where: { uploadId: row.uploadId, deduplicationStatus: { not: 'UNIQUE' } } }),
+    ]);
+
+    const updatedUpload = await this.prisma.bulkUpload.update({
+      where: { id: row.uploadId },
+      data: {
+        validRowCount: validCount,
+        invalidRowCount: invalidCount,
+        duplicateRowCount: duplicateCount,
+        status: validCount > 0 ? 'READY_FOR_REVIEW' : 'FAILED',
+      },
+    });
+
+    return {
+      row: {
+        id: updatedRow.id,
+        rowNumber: updatedRow.rowNumber,
+        data: updatedRow.normalizedData,
+        validationStatus: updatedRow.validationStatus,
+        deduplicationStatus: updatedRow.deduplicationStatus,
+        errors: updatedRow.errors.map((e) => ({ field: e.field, errorCode: e.errorCode, message: e.message })),
+      },
+      uploadSummary: {
+        uploadId: updatedUpload.id,
+        validRowCount: updatedUpload.validRowCount,
+        invalidRowCount: updatedUpload.invalidRowCount,
+        duplicateRowCount: updatedUpload.duplicateRowCount,
+        status: updatedUpload.status,
+      },
+    };
   }
 }

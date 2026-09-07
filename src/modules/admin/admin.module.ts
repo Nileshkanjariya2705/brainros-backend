@@ -18,6 +18,7 @@ import { AdminUserSearchController } from './controllers/admin-user-search.contr
 import { AdminStudentBulkController } from './controllers/admin-student-bulk.controller';
 import { CompletedExamReportsController } from './controllers/completed-exam-reports.controller';
 import { AdminStudentsController } from './controllers/admin-students.controller';
+import { AdminSchoolsController } from './controllers/admin-schools.controller';
 
 // Services & Processors
 import { AdminDashboardService } from './dashboard/services/admin-dashboard.service';
@@ -32,6 +33,8 @@ import { ExamReportPdfService } from './services/exam-report-pdf.service';
 import { CompletedExamReportsService } from './services/completed-exam-reports.service';
 import { ExamReportEmailProcessor } from './processors/exam-report-email.processor';
 import { AdminStudentsService } from './services/admin-students.service';
+import { AdminSchoolsService } from './services/admin-schools.service';
+import { SchoolBulkUploadService } from './services/school-bulk-upload.service';
 
 // Handlers & Registry
 import { ApprovalHandlerRegistry } from './approval/handlers/approval-handler.registry';
@@ -68,6 +71,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     AdminStudentBulkController,
     CompletedExamReportsController,
     AdminStudentsController,
+    AdminSchoolsController,
   ],
   providers: [
     // Core Services
@@ -83,6 +87,8 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     CompletedExamReportsService,
     ExamReportEmailProcessor,
     AdminStudentsService,
+    AdminSchoolsService,
+    SchoolBulkUploadService,
 
     // Approval Handlers & Registry
     ApprovalHandlerRegistry,

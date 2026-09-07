@@ -212,6 +212,7 @@ model User {
   examSessions       ExamSession[]
   reviewedSecurityReviews AttemptSecurityReview[]
   publishedResultPublications ExamResultPublication[] @relation("ResultPublishedBy")
+  answerKeyUploads            ExamSchedule[]          @relation("AnswerKeyUploadedBy")
 
   @@index([status])
   @@index([email])
@@ -287,6 +288,7 @@ model ExamTarget {
   exams       Exam[]
   institutionBatches InstitutionBatch[]
   orders      Order[]
+  studentExamTargets StudentExamTarget[]
 
   @@map("exam_targets")
 }
@@ -302,6 +304,7 @@ model Student {
   stateId             String?           @map("state_id") @db.Uuid
   districtId          String?           @map("district_id") @db.Uuid
   schoolCollege       String            @map("school_college")
+  institutionId       String?           @map("institution_id") @db.Uuid
   classId             String            @map("class_id") @db.Uuid
   examTargetId        String            @map("exam_target_id") @db.Uuid
   preferredLanguageId String            @map("preferred_language_id") @db.Uuid
@@ -314,6 +317,8 @@ model Student {
   preferredLanguage   PreferredLanguage @relation(fields: [preferredLanguageId], references: [id])
   stateRef            State?            @relation(fields: [stateId], references: [id])
   districtRef         District?         @relation(fields: [districtId], references: [id])
+  institution         Institution?      @relation(fields: [institutionId], references: [id])
+  studentExamTargets  StudentExamTarget[]
   attempts            Attempt[]
   candidateRanks      CandidateRank[]
   parentLinks         ParentStudentLink[]
@@ -324,7 +329,24 @@ model Student {
   @@index([status])
   @@index([stateId])
   @@index([districtId])
+  @@index([institutionId])
   @@map("students")
+}
+
+model StudentExamTarget {
+  id           String      @id @default(uuid()) @db.Uuid
+  studentId    String      @map("student_id") @db.Uuid
+  examTargetId String      @map("exam_target_id") @db.Uuid
+  isPrimary    Boolean     @default(false) @map("is_primary")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  student      Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  examTarget   ExamTarget  @relation(fields: [examTargetId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, examTargetId])
+  @@index([studentId])
+  @@index([examTargetId])
+  @@map("student_exam_targets")
 }
 
 model OtpPurpose {
@@ -473,6 +495,7 @@ model State {
   updatedAt   DateTime   @updatedAt @map("updated_at")
   districts   District[]
   students    Student[]
+  institutions Institution[]
 
   @@map("states")
 }
@@ -487,6 +510,7 @@ model District {
   updatedAt DateTime  @updatedAt @map("updated_at")
   state     State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
   students  Student[]
+  institutions Institution[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1566,6 +1590,9 @@ model ExamSchedule {
   activatedAt           DateTime?             @map("activated_at")
   cancelledById         String?               @map("cancelled_by_id") @db.Uuid
   cancelledAt           DateTime?             @map("cancelled_at")
+  hasAnswerKey          Boolean               @default(false) @map("has_answer_key")
+  answerKeyUploadedAt   DateTime?             @map("answer_key_uploaded_at")
+  answerKeyUploadedById String?               @map("answer_key_uploaded_by_id") @db.Uuid
   createdAt             DateTime              @default(now()) @map("created_at")
   updatedAt             DateTime              @updatedAt @map("updated_at")
 
@@ -1574,6 +1601,7 @@ model ExamSchedule {
   scheduledBy           User                  @relation("ScheduleCreatedBy", fields: [scheduledById], references: [id])
   activatedBy           User?                 @relation("ScheduleActivatedBy", fields: [activatedById], references: [id])
   cancelledBy           User?                 @relation("ScheduleCancelledBy", fields: [cancelledById], references: [id])
+  answerKeyUploadedBy   User?                 @relation("AnswerKeyUploadedBy", fields: [answerKeyUploadedById], references: [id])
   histories             ExamLifecycleHistory[]
   attempts              Attempt[]
 
@@ -1996,6 +2024,8 @@ model Institution {
   city        String?
   state       String?
   country     String?           @default("India")
+  stateId     String?           @map("state_id") @db.Uuid
+  districtId  String?           @map("district_id") @db.Uuid
   logo        String?
   settings    Json?
   createdById String            @map("created_by_id") @db.Uuid
@@ -2006,9 +2036,14 @@ model Institution {
   batches     InstitutionBatch[]
   bulkUploads BulkUpload[]
   reportJobs  ReportJob[]
+  stateRef    State?            @relation(fields: [stateId], references: [id])
+  districtRef District?         @relation(fields: [districtId], references: [id])
+  students    Student[]
 
   @@index([status])
   @@index([code])
+  @@index([stateId])
+  @@index([districtId])
   @@map("institutions")
 }
 

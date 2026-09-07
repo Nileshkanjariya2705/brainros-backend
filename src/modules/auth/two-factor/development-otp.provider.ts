@@ -56,10 +56,14 @@ export class DevelopmentOtpProvider implements ITwoFactorProvider {
     );
 
     const cleanOtp = (otp || '').trim();
-    const expectedOtp = (this.config.devBypassOtp || '12345').trim();
+    const expectedOtp = (this.config.devBypassOtp || '123456').trim();
 
-    // Default development OTP bypass (12345)
-    if (cleanOtp === expectedOtp || cleanOtp === '12345') {
+    // Development OTP bypass (accepts 123456 and legacy 12345)
+    if (
+      cleanOtp === expectedOtp ||
+      cleanOtp === '123456' ||
+      cleanOtp === '12345'
+    ) {
       return true;
     }
 

@@ -39,6 +39,48 @@ export class ConfirmBulkStudentRegistrationDto {
   uploadId: string;
 }
 
+export class UpdateBulkStudentRowDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  mobile?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  class?: string;
+
+  @IsOptional()
+  @IsString()
+  examTarget?: string;
+
+  @IsOptional()
+  @IsString()
+  preferredLanguage?: string;
+
+  @IsOptional()
+  @IsString()
+  schoolCollege?: string;
+
+  @IsOptional()
+  @IsUUID()
+  institutionId?: string;
+}
+
 export interface BulkStudentRowNormalized {
   name: string;
   mobile: string;
@@ -47,8 +89,12 @@ export interface BulkStudentRowNormalized {
   city?: string | null;
   class?: string | null;
   examTarget?: string | null;
+  examTargetId?: string | null;
+  examTargetIds?: string[];
   preferredLanguage?: string | null;
   schoolCollege?: string | null;
+  institutionId?: string | null;
+  institutionName?: string | null;
 }
 
 export interface BulkStudentRowError {

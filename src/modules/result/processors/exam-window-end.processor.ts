@@ -182,6 +182,31 @@ export class ExamWindowEndProcessor extends WorkerHost {
         );
       }
 
+      // ─── STEP 2.5: Check Answer Key Upload Readiness ───
+      const targetSchedule = scheduleId
+        ? await this.prisma.examSchedule.findUnique({ where: { id: scheduleId } })
+        : await this.prisma.examSchedule.findFirst({
+            where: { examId },
+            orderBy: { startTime: 'desc' },
+          });
+
+      if (targetSchedule && !targetSchedule.hasAnswerKey) {
+        this.logger.warn(
+          `[ExamWindowEndWorker] Exam schedule '${targetSchedule.id}' for exam '${examId}' does not have an Answer Key uploaded yet. Deferring batch evaluation until Answer Key is uploaded by Admin/Super Admin.`,
+        );
+
+        return {
+          success: true,
+          deferred: true,
+          reason: 'AWAITING_ANSWER_KEY',
+          examId,
+          examTitle: exam.title,
+          scheduleId: targetSchedule.id,
+          autoSubmittedCount,
+          enqueuedEvaluations: 0,
+        };
+      }
+
       // ─── STEP 3: Find all finalized attempts needing evaluation ───
       const eligibleAttempts = await this.prisma.attempt.findMany({
         where: {

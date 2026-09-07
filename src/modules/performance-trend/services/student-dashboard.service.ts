@@ -45,6 +45,7 @@ export class StudentDashboardService {
       include: {
         user: { select: { id: true, email: true, mobileNumber: true } },
         examTarget: { select: { id: true, name: true } },
+        studentExamTargets: { include: { examTarget: true } },
         studentClass: { select: { id: true, name: true } },
         preferredLanguage: { select: { id: true, name: true } },
       },
@@ -95,14 +96,21 @@ export class StudentDashboardService {
       };
     }
 
+    const targetIds = Array.from(
+      new Set([
+        ...(student.studentExamTargets?.map((st: any) => st.examTargetId) || []),
+        ...(student.examTargetId ? [student.examTargetId] : []),
+      ]),
+    );
+
     // 3. Fetch Upcoming / Live Exams for Student's Target
     const upcomingExamRecords = await this.prisma.exam.findMany({
       where: {
         status: { name: { in: ['SCHEDULED', 'ACTIVE'] } },
-        ...(student.examTargetId
+        ...(targetIds.length > 0
           ? {
               OR: [
-                { examTargetId: student.examTargetId },
+                { examTargetId: { in: targetIds } },
                 { examTarget: { name: 'General' } },
               ],
             }
@@ -408,10 +416,10 @@ export class StudentDashboardService {
             status: {
               name: { in: ['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'ENDED'] },
             },
-            ...(student.examTargetId
+            ...(targetIds.length > 0
               ? {
                   OR: [
-                    { examTargetId: student.examTargetId },
+                    { examTargetId: { in: targetIds } },
                     { examTarget: { name: 'General' } },
                   ],
                 }
