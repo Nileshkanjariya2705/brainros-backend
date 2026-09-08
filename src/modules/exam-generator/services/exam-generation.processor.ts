@@ -6,6 +6,7 @@ import { BlueprintValidationService } from './blueprint-validation.service';
 import { QuestionPoolService } from './question-pool.service';
 import { ExamSnapshotService } from './exam-snapshot.service';
 import { ExamRandomizationService } from './exam-randomization.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
 interface ExamGenJobData {
   examId: string;
@@ -24,6 +25,7 @@ export class ExamGenerationProcessor extends WorkerHost {
     private readonly poolService: QuestionPoolService,
     private readonly snapshotService: ExamSnapshotService,
     private readonly randomizationService: ExamRandomizationService,
+    private readonly jobProgressService: JobProgressService,
   ) {
     super();
   }
@@ -35,7 +37,16 @@ export class ExamGenerationProcessor extends WorkerHost {
 
   async process(job: Job<ExamGenJobData>): Promise<any> {
     const { examId, blueprintId, createdById } = job.data;
+    const jobId = String(job.id || `exam_gen_${examId}`);
     this.logger.log(`Starting background exam generation for exam: ${examId}, blueprint: ${blueprintId}`);
+
+    await this.jobProgressService.publishStarted('exam-generation', jobId, {
+      type: 'EXAM_GENERATION',
+      stage: 'SELECTING_QUESTIONS',
+      examId,
+      userId: createdById,
+      message: 'Selecting questions for blueprint...',
+    });
 
     try {
       // 1. Fetch Exam and Blueprint
@@ -72,6 +83,15 @@ export class ExamGenerationProcessor extends WorkerHost {
       if (selectedQuestions.length < blueprint.totalQuestions) {
         throw new Error(`Insufficient questions in the pool. Needed ${blueprint.totalQuestions}, got ${selectedQuestions.length}`);
       }
+
+      await this.jobProgressService.publishProgress('exam-generation', jobId, 50, 100, {
+        stage: 'POPULATING_SECTIONS',
+        stageIndex: 2,
+        totalStages: 4,
+        message: `Selected ${selectedQuestions.length} questions. Populating exam sections...`,
+        examId,
+        userId: createdById,
+      });
 
       // 3. Atomically populate sections, legacy questions, and save snapshot version
       await this.prisma.$transaction(async (tx) => {
@@ -115,6 +135,15 @@ export class ExamGenerationProcessor extends WorkerHost {
         }
       });
 
+      await this.jobProgressService.publishProgress('exam-generation', jobId, 80, 100, {
+        stage: 'CREATING_SNAPSHOT',
+        stageIndex: 3,
+        totalStages: 4,
+        message: 'Persisting immutable version snapshot...',
+        examId,
+        userId: createdById,
+      });
+
       // 4. Save version snapshot
       const examVersion = await this.snapshotService.persistImmutableExamVersionSnapshot({
         exam,
@@ -136,11 +165,24 @@ export class ExamGenerationProcessor extends WorkerHost {
         });
       }
 
+      await this.jobProgressService.publishCompleted('exam-generation', jobId, {
+        message: 'Exam generation completed successfully.',
+        examId,
+        userId: createdById,
+        resultSummary: { examVersionId: examVersion.id, totalQuestions: selectedQuestions.length },
+      });
+
       this.logger.log(`Exam generation finished successfully for exam ${examId}`);
       return { success: true, examVersionId: examVersion.id };
     } catch (err: any) {
       this.logger.error(`Failed background exam generation: ${err.message}`, err.stack);
       
+      await this.jobProgressService.publishFailed(
+        'exam-generation',
+        jobId,
+        err.message || 'Exam generation failed.',
+      );
+
       // Update Exam status to CANCELLED on failure
       const cancelledStatus = await this.prisma.examStatus.findUnique({
         where: { name: 'CANCELLED' },

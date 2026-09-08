@@ -25,7 +25,6 @@ export async function seedAcademicQuestions(ctx: SeedContext): Promise<SeederRes
 
   const neetTarget = ctx.examTargets.get('NEET')!;
   const jeeTarget = ctx.examTargets.get('JEE') || ctx.examTargets.get('JEE_MAIN')!;
-  const catTarget = ctx.examTargets.get('CAT');
 
   // 1. Subjects Setup
   const subjectsData = [
@@ -42,15 +41,6 @@ export async function seedAcademicQuestions(ctx: SeedContext): Promise<SeederRes
     { target: jeeTarget, name: 'Physics (JEE)', code: 'JEE_PHY', displayOrder: 1 },
     { target: jeeTarget, name: 'Chemistry (JEE)', code: 'JEE_CHEM', displayOrder: 2 },
     { target: jeeTarget, name: 'Mathematics', code: 'JEE_MATH', displayOrder: 3 },
-    // CAT Subjects (Physics, Chemistry, Mathematics, Biology)
-    ...(catTarget
-      ? [
-          { target: catTarget, name: 'Physics (CAT)', code: 'CAT_PHY', displayOrder: 1 },
-          { target: catTarget, name: 'Chemistry (CAT)', code: 'CAT_CHEM', displayOrder: 2 },
-          { target: catTarget, name: 'Mathematics (CAT)', code: 'CAT_MATH', displayOrder: 3 },
-          { target: catTarget, name: 'Biology (CAT)', code: 'CAT_BIO', displayOrder: 4 },
-        ]
-      : []),
   ];
 
   for (const sData of subjectsData) {
@@ -146,7 +136,7 @@ export async function seedAcademicQuestions(ctx: SeedContext): Promise<SeederRes
     { subjectNames: ['Physics (NEET)', 'Physics (JEE)', 'Physics'], chapterDefs: physicsChapters },
     { subjectNames: ['Chemistry (NEET)', 'Chemistry (JEE)', 'Chemistry'], chapterDefs: chemistryChapters },
     { subjectNames: ['Biology', 'Botany', 'Zoology'], chapterDefs: biologyChapters },
-    { subjectNames: ['Mathematics', 'Mathematics (CAT)'], chapterDefs: mathChapters },
+    { subjectNames: ['Mathematics'], chapterDefs: mathChapters },
   ];
 
   let physicsCount = 0;

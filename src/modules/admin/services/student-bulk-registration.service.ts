@@ -11,6 +11,9 @@ import { UpdateBulkStudentRowDto } from '../dto/student-bulk-upload.dto';
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
 
+import { Optional } from '@nestjs/common';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
+
 const ALLOWED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_ROW_COUNT = 10000;
@@ -26,6 +29,7 @@ export class StudentBulkRegistrationService {
     private readonly prisma: PrismaService,
     private readonly securityEventService: SecurityEventService,
     private readonly otpService: OtpService,
+    @Optional() private readonly jobProgressService?: JobProgressService,
   ) {}
 
   /**
@@ -465,13 +469,13 @@ export class StudentBulkRegistrationService {
         });
       }
 
-      // Master Data Validations
+      // Master Data Validations with Intelligent Spelling & Alias Resolution
       let resolvedStateId: string | null = null;
       let resolvedDistrictId: string | null = null;
-      let resolvedClassId: string | null = null;
-      let resolvedLanguageId: string | null = null;
+      let resolvedStateName = stateName;
+      let resolvedCityName = cityName;
 
-      // State
+      // State & City
       if (!stateName) {
         rowErrors.push({
           field: 'state',
@@ -479,72 +483,57 @@ export class StudentBulkRegistrationService {
           message: 'State is required.',
         });
       } else {
-        const stateRecord = stateMap.get(stateName.toLowerCase());
-        if (!stateRecord) {
-          rowErrors.push({
-            field: 'state',
-            errorCode: 'UNKNOWN_STATE',
-            message: `State '${stateName}' is not recognized in active master records.`,
-          });
-        } else {
-          resolvedStateId = stateRecord.id;
+        const stateRes = this.resolveStateAndCity(
+          stateName,
+          cityName,
+          stateMap,
+          states,
+          districtMap,
+          districts,
+        );
+        if (stateRes.stateRecord) {
+          resolvedStateId = stateRes.stateRecord.id;
+          resolvedStateName = stateRes.stateRecord.name;
+        }
+        if (stateRes.districtRecord) {
+          resolvedDistrictId = stateRes.districtRecord.id;
+          resolvedCityName = stateRes.districtRecord.name;
         }
       }
 
-      // City / District
       if (!cityName) {
         rowErrors.push({
           field: 'city',
           errorCode: 'MISSING_CITY',
           message: 'City / District is required.',
         });
-      } else if (resolvedStateId) {
-        const districtKey = `${cityName.toLowerCase()}_${resolvedStateId}`;
-        const districtRecord = districtMap.get(districtKey) || districtMap.get(cityName.toLowerCase());
-        if (!districtRecord) {
-          rowErrors.push({
-            field: 'city',
-            errorCode: 'UNKNOWN_CITY',
-            message: `City/District '${cityName}' not found in master records.`,
-          });
-        } else if (districtRecord.stateId !== resolvedStateId) {
-          rowErrors.push({
-            field: 'city',
-            errorCode: 'CITY_STATE_MISMATCH',
-            message: `City '${cityName}' does not belong to State '${stateName}'.`,
-          });
-        } else {
-          resolvedDistrictId = districtRecord.id;
-        }
       }
 
-      // Class
+      // Class (supports 11th, 12th, Class 11, Class 12, XI, XII, Dropper, Foundation, etc.)
+      let resolvedClassId: string | null = null;
+      let resolvedClassName = className;
+
       if (!className) {
         rowErrors.push({
           field: 'class',
           errorCode: 'MISSING_CLASS',
-          message: 'Class / Grade is required.',
+          message: 'Class / Grade is required (e.g. 11th, 12th, Dropper).',
         });
       } else {
-        const classRecord = classMap.get(className.toLowerCase()) || classMap.get(className.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+        const classRecord = this.resolveAcademicClass(className, classMap, classes);
         if (!classRecord) {
           rowErrors.push({
             field: 'class',
             errorCode: 'UNKNOWN_CLASS',
-            message: `Class '${className}' is not a valid academic class.`,
-          });
-        } else if (classRecord.name === 'FOUNDATION') {
-          rowErrors.push({
-            field: 'class',
-            errorCode: 'DEPRECATED_CLASS',
-            message: 'Class FOUNDATION is no longer available.',
+            message: `Class '${className}' is not a valid academic class. Supported: 11th, 12th, Dropper, Foundation.`,
           });
         } else {
           resolvedClassId = classRecord.id;
+          resolvedClassName = classRecord.name === 'CLASS_11' ? '11th' : classRecord.name === 'CLASS_12' ? '12th' : classRecord.name;
         }
       }
 
-      // Exam Target (Supports single or multi-target: e.g. "NEET, CET", "JEE, CET")
+      // Exam Target (supports single or multi-target: JEE Main, MHT-CET, NEET, etc.)
       let resolvedExamTargetId: string | null = null;
       const resolvedExamTargetIds: string[] = [];
       const validTargetNames: string[] = [];
@@ -570,14 +559,7 @@ export class StudentBulkRegistrationService {
         } else {
           let hasTargetError = false;
           for (const part of parts) {
-            let lookupKey = part.toLowerCase();
-            if (lookupKey === 'jee_main' || lookupKey === 'jee-main' || lookupKey === 'jee main') {
-              lookupKey = 'jee';
-            }
-            const examRecord =
-              examTargetMap.get(lookupKey) ||
-              examTargetMap.get(part.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-
+            const examRecord = this.resolveSingleExamTarget(part, examTargetMap, examTargets);
             if (!examRecord) {
               hasTargetError = true;
               rowErrors.push({
@@ -599,7 +581,10 @@ export class StudentBulkRegistrationService {
         }
       }
 
-      // Preferred Language
+      // Preferred Language (supports English, Hindi, Gujarati, Marathi, Tamil, etc.)
+      let resolvedLanguageId: string | null = null;
+      let resolvedLanguageName = languageName;
+
       if (!languageName) {
         rowErrors.push({
           field: 'preferredLanguage',
@@ -607,15 +592,16 @@ export class StudentBulkRegistrationService {
           message: 'Preferred Language is required (e.g. ENGLISH, HINDI, GUJARATI).',
         });
       } else {
-        const langRecord = languageMap.get(languageName.toLowerCase());
+        const langRecord = this.resolvePreferredLanguage(languageName, languageMap, languages);
         if (!langRecord) {
           rowErrors.push({
             field: 'preferredLanguage',
             errorCode: 'UNKNOWN_LANGUAGE',
-            message: `Language '${languageName}' is not supported.`,
+            message: `Language '${languageName}' is not supported. Supported: ${languages.map((l) => l.name).join(', ')}.`,
           });
         } else {
           resolvedLanguageId = langRecord.id;
+          resolvedLanguageName = langRecord.name;
         }
       }
 
@@ -623,27 +609,21 @@ export class StudentBulkRegistrationService {
       let resolvedInstitutionId: string | null = null;
       let resolvedInstitutionName: string | null = null;
 
-      if (selectedInstitution) {
-        resolvedInstitutionId = selectedInstitution.id;
-        resolvedInstitutionName = selectedInstitution.name;
-      } else if (schoolCollege) {
-        const matchedInst =
-          institutionMap.get(schoolCollege.toLowerCase()) ||
-          institutionMap.get(schoolCollege.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-        if (matchedInst) {
-          resolvedInstitutionId = matchedInst.id;
-          resolvedInstitutionName = matchedInst.name;
-        }
-      }
-
-      if (!schoolCollege && resolvedInstitutionName) {
-        // Auto-filled from selected institution
-      } else if (!schoolCollege && !resolvedInstitutionName) {
+      if (!schoolCollege && !selectedInstitution) {
         rowErrors.push({
           field: 'schoolCollege',
           errorCode: 'MISSING_SCHOOL_COLLEGE',
           message: 'School / College / Institution name or code is required.',
         });
+      } else {
+        const instRes = this.resolveInstitution(
+          schoolCollege,
+          selectedInstitution,
+          institutionMap,
+          institutions,
+        );
+        resolvedInstitutionId = instRes.id;
+        resolvedInstitutionName = instRes.name || schoolCollege;
       }
 
       // Deduplication checks
@@ -1141,7 +1121,7 @@ export class StudentBulkRegistrationService {
         }
       }
 
-      // Update progress
+      // Update progress in DB and WebSocket
       await this.prisma.bulkUpload.update({
         where: { id: uploadId },
         data: {
@@ -1149,6 +1129,20 @@ export class StudentBulkRegistrationService {
           failedCount: failed,
         },
       });
+
+      if (this.jobProgressService && validRows.length > 0) {
+        await this.jobProgressService.publishProgress(
+          'student-bulk-registration',
+          uploadId,
+          activated + failed,
+          validRows.length,
+          {
+            stage: 'ACTIVATING_STUDENTS',
+            message: `Registered ${activated} students (${activated + failed}/${validRows.length})...`,
+            userId: actor?.userId,
+          },
+        );
+      }
     }
 
     const finalStatus =
@@ -1311,11 +1305,11 @@ export class StudentBulkRegistrationService {
     const name = (merged.name || '').trim();
     const rawMobile = (merged.mobile || '').replace(/\D/g, '');
     const email = merged.email ? merged.email.toLowerCase().trim() : null;
-    const stateName = (merged.state || '').trim();
-    const cityName = (merged.city || '').trim();
-    const className = (merged.class || '').trim();
+    let stateName = (merged.state || '').trim();
+    let cityName = (merged.city || '').trim();
+    let className = (merged.class || '').trim();
     const examTargetName = (merged.examTarget || '').trim();
-    const languageName = (merged.preferredLanguage || '').trim();
+    let languageName = (merged.preferredLanguage || '').trim();
     const schoolCollege = (merged.schoolCollege || '').trim();
     const institutionId = merged.institutionId || null;
 
@@ -1417,29 +1411,46 @@ export class StudentBulkRegistrationService {
     let resolvedInstitutionId: string | null = null;
     let resolvedInstitutionName: string | null = null;
 
-    if (stateName) {
-      const stateRecord = stateMap.get(stateName.toLowerCase());
-      if (stateRecord) resolvedStateId = stateRecord.id;
-      else rowErrors.push({ field: 'state', errorCode: 'UNKNOWN_STATE', message: `State '${stateName}' not recognized.` });
+    // State & City Resolution
+    if (stateName || cityName) {
+      const stateRes = this.resolveStateAndCity(
+        stateName,
+        cityName,
+        stateMap,
+        states,
+        districtMap,
+        districts,
+      );
+      if (stateRes.stateRecord) {
+        resolvedStateId = stateRes.stateRecord.id;
+        stateName = stateRes.stateRecord.name;
+      }
+      if (stateRes.districtRecord) {
+        resolvedDistrictId = stateRes.districtRecord.id;
+        cityName = stateRes.districtRecord.name;
+      }
     }
 
-    if (cityName) {
-      const districtKey = resolvedStateId ? `${cityName.toLowerCase()}_${resolvedStateId}` : cityName.toLowerCase();
-      const districtRecord = districtMap.get(districtKey) || districtMap.get(cityName.toLowerCase());
-      if (districtRecord) resolvedDistrictId = districtRecord.id;
-      else rowErrors.push({ field: 'city', errorCode: 'UNKNOWN_CITY', message: `City '${cityName}' not found.` });
-    }
-
+    // Class Resolution
     if (className) {
-      const classRecord = classMap.get(className.toLowerCase()) || classMap.get(className.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-      if (classRecord) resolvedClassId = classRecord.id;
-      else rowErrors.push({ field: 'class', errorCode: 'UNKNOWN_CLASS', message: `Class '${className}' not recognized.` });
+      const classRecord = this.resolveAcademicClass(className, classMap, classes);
+      if (classRecord) {
+        resolvedClassId = classRecord.id;
+        className = classRecord.name === 'CLASS_11' ? '11th' : classRecord.name === 'CLASS_12' ? '12th' : classRecord.name;
+      } else {
+        rowErrors.push({ field: 'class', errorCode: 'UNKNOWN_CLASS', message: `Class '${className}' not recognized.` });
+      }
     }
 
+    // Language Resolution
     if (languageName) {
-      const langRecord = languageMap.get(languageName.toLowerCase());
-      if (langRecord) resolvedLanguageId = langRecord.id;
-      else rowErrors.push({ field: 'preferredLanguage', errorCode: 'UNKNOWN_LANGUAGE', message: `Language '${languageName}' not supported.` });
+      const langRecord = this.resolvePreferredLanguage(languageName, languageMap, languages);
+      if (langRecord) {
+        resolvedLanguageId = langRecord.id;
+        languageName = langRecord.name;
+      } else {
+        rowErrors.push({ field: 'preferredLanguage', errorCode: 'UNKNOWN_LANGUAGE', message: `Language '${languageName}' not supported.` });
+      }
     }
 
     // Exam Target validation (multi-target)
@@ -1448,9 +1459,7 @@ export class StudentBulkRegistrationService {
     } else {
       const parts = examTargetName.split(/[,/+]|\band\b/i).map((s) => s.trim()).filter(Boolean);
       for (const part of parts) {
-        let lookupKey = part.toLowerCase();
-        if (lookupKey === 'jee_main' || lookupKey === 'jee-main' || lookupKey === 'jee main') lookupKey = 'jee';
-        const etRecord = examTargetMap.get(lookupKey) || examTargetMap.get(part.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+        const etRecord = this.resolveSingleExamTarget(part, examTargetMap, examTargets);
         if (!etRecord) {
           rowErrors.push({ field: 'examTarget', errorCode: 'UNKNOWN_EXAM_TARGET', message: `Exam target '${part}' not recognized.` });
         } else {
@@ -1464,17 +1473,14 @@ export class StudentBulkRegistrationService {
     }
 
     // Institution resolution
-    if (institutionId && institutionMap.has(institutionId.toLowerCase())) {
-      const inst = institutionMap.get(institutionId.toLowerCase());
-      resolvedInstitutionId = inst.id;
-      resolvedInstitutionName = inst.name;
-    } else if (schoolCollege) {
-      const inst = institutionMap.get(schoolCollege.toLowerCase()) || institutionMap.get(schoolCollege.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-      if (inst) {
-        resolvedInstitutionId = inst.id;
-        resolvedInstitutionName = inst.name;
-      }
-    }
+    const instRes = this.resolveInstitution(
+      schoolCollege,
+      institutionId ? institutionMap.get(institutionId.toLowerCase()) : null,
+      institutionMap,
+      institutions,
+    );
+    resolvedInstitutionId = instRes.id;
+    resolvedInstitutionName = instRes.name || schoolCollege;
 
     // Deduplication check
     const standardMobile =
@@ -1592,6 +1598,383 @@ export class StudentBulkRegistrationService {
         duplicateRowCount: updatedUpload.duplicateRowCount,
         status: updatedUpload.status,
       },
+    };
+  }
+
+  /**
+   * Helper: Resolve academic class with comprehensive alias & spelling tolerance
+   */
+  private resolveAcademicClass(
+    className: string,
+    classMap: Map<string, any>,
+    classes: any[],
+  ) {
+    if (!className) return null;
+    const raw = className.toLowerCase().trim();
+    const clean = raw.replace(/[^a-z0-9]/g, '');
+
+    // 1. Direct map lookup
+    if (classMap.has(raw)) return classMap.get(raw);
+    if (classMap.has(clean)) return classMap.get(clean);
+
+    // 2. Class 11 variations
+    if (
+      /^(11|11th|xi|class\s*11|class\s*11th|class\s*xi|11th\s*std|11th\s*standard|11th\s*grade|first\s*puc|1st\s*puc|puc\s*1|plus\s*1|\+1|fyjc|inter\s*1st)/i.test(raw) ||
+      clean === '11' || clean === '11th' || clean === 'xi' || clean === 'class11' || clean === 'class11th' || clean === 'classxi'
+    ) {
+      return classes.find((c) => c.name === 'CLASS_11') || classMap.get('class_11') || classMap.get('11th') || null;
+    }
+
+    // 3. Class 12 variations
+    if (
+      /^(12|12th|xii|class\s*12|class\s*12th|class\s*xii|12th\s*std|12th\s*standard|12th\s*grade|second\s*puc|2nd\s*puc|puc\s*2|plus\s*2|\+2|syjc|hsc|inter\s*2nd)/i.test(raw) ||
+      clean === '12' || clean === '12th' || clean === 'xii' || clean === 'class12' || clean === 'class12th' || clean === 'classxii'
+    ) {
+      return classes.find((c) => c.name === 'CLASS_12') || classMap.get('class_12') || classMap.get('12th') || null;
+    }
+
+    // 4. Dropper / Repeater variations
+    if (
+      /^(drop|dropper|repeat|repeater|long\s*term|longterm|13|13th|target)/i.test(raw) ||
+      clean.includes('drop') || clean.includes('repeat')
+    ) {
+      return classes.find((c) => c.name === 'DROPPER') || classMap.get('dropper') || null;
+    }
+
+    // 5. Foundation variations
+    if (
+      /^(foundation|9|9th|10|10th|ix|x|class\s*9|class\s*10|class\s*9th|class\s*10th)/i.test(raw) ||
+      clean.includes('foundation')
+    ) {
+      return classes.find((c) => c.name === 'FOUNDATION') || classMap.get('foundation') || null;
+    }
+
+    // 6. Substring match fallback
+    for (const c of classes) {
+      const cClean = c.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (clean.includes(cClean) || cClean.includes(clean)) return c;
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper: Resolve exam target with aliases (JEE Main, MHT-CET, NEET-UG, CAT, etc.)
+   */
+  private resolveSingleExamTarget(
+    targetName: string,
+    examTargetMap: Map<string, any>,
+    examTargets: any[],
+  ) {
+    if (!targetName) return null;
+    const raw = targetName.toLowerCase().trim();
+    const clean = raw.replace(/[^a-z0-9]/g, '');
+
+    // 1. Direct map lookup
+    if (examTargetMap.has(raw)) return examTargetMap.get(raw);
+    if (examTargetMap.has(clean)) return examTargetMap.get(clean);
+
+    // 2. JEE variations
+    if (
+      /^(jee|iit|iit_jee|iit\s*jee|jee\s*main|jee_main|jee-main|jeemain|jee\s*adv|engineering)/i.test(raw) ||
+      clean.startsWith('jee') || clean.includes('iit')
+    ) {
+      return examTargets.find((et) => et.name === 'JEE') || examTargetMap.get('jee') || null;
+    }
+
+    // 3. NEET variations
+    if (
+      /^(neet|neet_ug|neet-ug|neet\s*ug|neetug|aipmt|medical|pmt)/i.test(raw) ||
+      clean.startsWith('neet')
+    ) {
+      return examTargets.find((et) => et.name === 'NEET') || examTargetMap.get('neet') || null;
+    }
+
+    // 4. CET variations (MHT-CET, GUJCET, KCET, State CET, etc.)
+    if (
+      /^(cet|mht|mht_cet|mht-cet|mht\s*cet|mhtcet|gujcet|kcet|state\s*cet|keam|eamcet|wbjee)/i.test(raw) ||
+      clean.includes('cet')
+    ) {
+      return examTargets.find((et) => et.name === 'CET') || examTargetMap.get('cet') || null;
+    }
+
+    // 5. CAT variations
+    if (
+      /^(cat|cmat|mat|xat|mba)/i.test(raw) ||
+      clean.includes('cat')
+    ) {
+      return examTargets.find((et) => et.name === 'CAT') || examTargetMap.get('cat') || null;
+    }
+
+    // 6. Substring match fallback
+    for (const et of examTargets) {
+      const etClean = et.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (clean.includes(etClean) || etClean.includes(clean)) return et;
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper: Resolve preferred language with aliases & spelling tolerance
+   */
+  private resolvePreferredLanguage(
+    languageName: string,
+    languageMap: Map<string, any>,
+    languages: any[],
+  ) {
+    if (!languageName) return null;
+    const raw = languageName.toLowerCase().trim();
+    const clean = raw.replace(/[^a-z0-9]/g, '');
+
+    // 1. Direct map lookup
+    if (languageMap.has(raw)) return languageMap.get(raw);
+    if (languageMap.has(clean)) return languageMap.get(clean);
+
+    // 2. Language variations
+    if (/^(en|eng|english|angrezi)/i.test(raw)) return languages.find((l) => l.name === 'ENGLISH') || null;
+    if (/^(hi|hin|hindi)/i.test(raw)) return languages.find((l) => l.name === 'HINDI') || null;
+    if (/^(gu|guj|gujarati|gujrati)/i.test(raw)) return languages.find((l) => l.name === 'GUJARATI') || null;
+    if (/^(mr|mar|marathi)/i.test(raw)) return languages.find((l) => l.name === 'MARATHI') || null;
+    if (/^(kn|kan|kannada)/i.test(raw)) return languages.find((l) => l.name === 'KANNADA') || null;
+    if (/^(ta|tam|tamil)/i.test(raw)) return languages.find((l) => l.name === 'TAMIL') || null;
+    if (/^(te|tel|telugu)/i.test(raw)) return languages.find((l) => l.name === 'TELUGU') || null;
+    if (/^(ml|mal|malayalam)/i.test(raw)) return languages.find((l) => l.name === 'MALAYALAM') || null;
+    if (/^(bn|ben|bengali|bangla)/i.test(raw)) return languages.find((l) => l.name === 'BENGALI') || null;
+
+    // 3. Substring match
+    for (const l of languages) {
+      const lClean = l.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (clean.includes(lClean) || lClean.includes(clean)) return l;
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper: Resolve state and district with alias map and city fallback
+   */
+  private resolveStateAndCity(
+    stateName: string,
+    cityName: string,
+    stateMap: Map<string, any>,
+    states: any[],
+    districtMap: Map<string, any>,
+    districts: any[],
+  ) {
+    let stateRecord: any = null;
+    if (stateName) {
+      const sRaw = stateName.toLowerCase().trim();
+      const sClean = sRaw.replace(/[^a-z0-9]/g, '');
+
+      // Direct map check
+      stateRecord = stateMap.get(sRaw) || stateMap.get(sClean);
+
+      // State alias map
+      if (!stateRecord) {
+        const STATE_ALIASES: Record<string, string> = {
+          up: 'Uttar Pradesh',
+          'u.p.': 'Uttar Pradesh',
+          uttarpradesh: 'Uttar Pradesh',
+          mp: 'Madhya Pradesh',
+          'm.p.': 'Madhya Pradesh',
+          madhyapradesh: 'Madhya Pradesh',
+          wb: 'West Bengal',
+          'w.b.': 'West Bengal',
+          westbengal: 'West Bengal',
+          tn: 'Tamil Nadu',
+          't.n.': 'Tamil Nadu',
+          tamilnadu: 'Tamil Nadu',
+          mh: 'Maharashtra',
+          maharastra: 'Maharashtra',
+          gj: 'Gujarat',
+          gujrat: 'Gujarat',
+          ka: 'Karnataka',
+          karnatka: 'Karnataka',
+          rj: 'Rajasthan',
+          rajastan: 'Rajasthan',
+          ts: 'Telangana',
+          tg: 'Telangana',
+          telengana: 'Telangana',
+          ap: 'Andhra Pradesh',
+          'a.p.': 'Andhra Pradesh',
+          andhra: 'Andhra Pradesh',
+          dl: 'Delhi',
+          newdelhi: 'Delhi',
+          nct: 'Delhi',
+          pb: 'Punjab',
+          kl: 'Kerala',
+          hr: 'Haryana',
+          br: 'Bihar',
+          od: 'Odisha',
+          or: 'Odisha',
+          orissa: 'Odisha',
+          jk: 'Jammu and Kashmir',
+          'j&k': 'Jammu and Kashmir',
+          uk: 'Uttarakhand',
+          uttaranchal: 'Uttarakhand',
+          jh: 'Jharkhand',
+          cg: 'Chhattisgarh',
+          ga: 'Goa',
+          as: 'Assam',
+        };
+
+        const canonicalName = STATE_ALIASES[sRaw] || STATE_ALIASES[sClean];
+        if (canonicalName) {
+          stateRecord =
+            stateMap.get(canonicalName.toLowerCase()) ||
+            states.find((s) => s.name.toLowerCase() === canonicalName.toLowerCase());
+        }
+
+        // Substring / partial match
+        if (!stateRecord) {
+          stateRecord = states.find((s) => {
+            const sc = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return sc.includes(sClean) || sClean.includes(sc);
+          });
+        }
+      }
+    }
+
+    let districtRecord: any = null;
+    if (cityName) {
+      const cRaw = cityName.toLowerCase().trim();
+      const cClean = cRaw.replace(/[^a-z0-9]/g, '');
+
+      // Check with state ID if state is resolved
+      if (stateRecord) {
+        districtRecord =
+          districtMap.get(`${cRaw}_${stateRecord.id}`) ||
+          districtMap.get(`${cClean}_${stateRecord.id}`);
+      }
+
+      // Fallback direct check
+      if (!districtRecord) {
+        districtRecord = districtMap.get(cRaw) || districtMap.get(cClean);
+      }
+
+      // City aliases
+      if (!districtRecord) {
+        const CITY_ALIASES: Record<string, string> = {
+          bangalore: 'Bengaluru',
+          bengaluru: 'Bengaluru',
+          bombay: 'Mumbai',
+          mumbai: 'Mumbai',
+          calcutta: 'Kolkata',
+          kolkata: 'Kolkata',
+          madras: 'Chennai',
+          chennai: 'Chennai',
+          cochin: 'Kochi',
+          kochi: 'Kochi',
+          ernakulam: 'Ernakulam',
+          trivandrum: 'Thiruvananthapuram',
+          poona: 'Pune',
+          pune: 'Pune',
+          nasik: 'Nashik',
+          nashik: 'Nashik',
+          baroda: 'Vadodara',
+          vadodara: 'Vadodara',
+          gurgaon: 'Gurugram',
+          gurugram: 'Noida',
+          allahabad: 'Prayagraj',
+          prayagraj: 'Prayagraj',
+          banaras: 'Varanasi',
+          varanasi: 'Varanasi',
+        };
+
+        const canonCity = CITY_ALIASES[cRaw] || CITY_ALIASES[cClean];
+        if (canonCity) {
+          if (stateRecord) {
+            districtRecord = districtMap.get(`${canonCity.toLowerCase()}_${stateRecord.id}`);
+          }
+          if (!districtRecord) {
+            districtRecord = districtMap.get(canonCity.toLowerCase());
+          }
+        }
+      }
+
+      // Substring match in state districts
+      if (!districtRecord && stateRecord) {
+        districtRecord = districts.find(
+          (d) =>
+            d.stateId === stateRecord.id &&
+            (d.name.toLowerCase().includes(cRaw) || cRaw.includes(d.name.toLowerCase())),
+        );
+      }
+    }
+
+    return {
+      stateRecord,
+      districtRecord,
+    };
+  }
+
+  /**
+   * Helper: Resolve School / College / Institution with fuzzy and token matching
+   */
+  private resolveInstitution(
+    schoolCollege: string,
+    selectedInstitution: any,
+    institutionMap: Map<string, any>,
+    institutions: any[],
+  ) {
+    if (selectedInstitution) {
+      return {
+        id: selectedInstitution.id,
+        name: selectedInstitution.name,
+      };
+    }
+
+    if (!schoolCollege) return { id: null, name: null };
+
+    const raw = schoolCollege.toLowerCase().trim();
+    const clean = raw.replace(/[^a-z0-9]/g, '');
+
+    // 1. Direct map lookup by ID, code, or exact name
+    const direct = institutionMap.get(raw) || institutionMap.get(clean);
+    if (direct) {
+      return { id: direct.id, name: direct.name };
+    }
+
+    // 2. Token / keyword matching
+    const stopWords = new Set([
+      'school',
+      'college',
+      'high',
+      'the',
+      'international',
+      'secondary',
+      'vidyalaya',
+      'academy',
+      'institute',
+      'senior',
+      'public',
+    ]);
+    const tokens = raw.split(/[\s,.-]+/).filter((t) => t.length > 2 && !stopWords.has(t));
+
+    if (tokens.length > 0) {
+      for (const inst of institutions) {
+        const instLower = inst.name.toLowerCase();
+        const matchesAll = tokens.every((token) => instLower.includes(token));
+        if (matchesAll) {
+          return { id: inst.id, name: inst.name };
+        }
+      }
+
+      // Match at least 1 strong distinctive token
+      for (const inst of institutions) {
+        const instLower = inst.name.toLowerCase();
+        const firstTokenMatch = tokens.length > 0 && instLower.includes(tokens[0]);
+        if (firstTokenMatch) {
+          return { id: inst.id, name: inst.name };
+        }
+      }
+    }
+
+    // Retain user's provided school name string
+    return {
+      id: null,
+      name: schoolCollege.trim(),
     };
   }
 }

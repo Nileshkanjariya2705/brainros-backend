@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { OtpController } from './otp.controller';
 import { OtpService } from './services/otp.service';
 import { TokenService } from './services/token.service';
 import { PasswordService } from './services/password.service';
@@ -20,6 +22,7 @@ import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
+    HttpModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
       secret:
@@ -28,7 +31,8 @@ import { RedisModule } from '../redis/redis.module';
     }),
     RedisModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, OtpController],
+
   providers: [
     TwoFactorConfig,
 

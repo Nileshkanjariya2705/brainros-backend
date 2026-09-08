@@ -5,6 +5,7 @@ import {
   Put,
   Patch,
   Param,
+  Query,
   Body,
   UseGuards,
   Req,
@@ -193,9 +194,20 @@ export class ExamAttemptController {
   async getAttemptQuestions(
     @Param('id') attemptId: string,
     @CurrentUser() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.getAttemptQuestions(attemptId, studentId);
+    const parsedPage = page ? parseInt(page, 10) : undefined;
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedOffset = offset ? parseInt(offset, 10) : undefined;
+
+    return this.attemptService.getAttemptQuestions(attemptId, studentId, {
+      page: Number.isNaN(parsedPage) ? undefined : parsedPage,
+      limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
+      offset: Number.isNaN(parsedOffset) ? undefined : parsedOffset,
+    });
   }
 
   @Get('my-history')

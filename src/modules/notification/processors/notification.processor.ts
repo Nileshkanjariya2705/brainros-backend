@@ -8,11 +8,16 @@ import {
 } from '../interfaces/exam-notification-job.interface';
 import { NotificationChannel, NotificationPriority, NotificationStatus } from '@prisma/client';
 
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
+
 @Processor(NOTIFICATION_QUEUE_NAME)
 export class NotificationProcessor extends WorkerHost {
   private readonly logger = new Logger(NotificationProcessor.name);
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jobProgressService: JobProgressService,
+  ) {
     super();
   }
 
@@ -26,6 +31,14 @@ export class NotificationProcessor extends WorkerHost {
     this.logger.log(`Processing notification job [${job.id}] - Type: ${type}, Exam: ${examId}`);
 
     try {
+      await this.jobProgressService.publishStarted(
+        NOTIFICATION_QUEUE_NAME,
+        job.id!,
+        'NOTIFICATION',
+        `Processing notification job: ${type}`,
+        { examId, scheduleId },
+      );
+
       // 1. Fetch Exam with ExamTarget and Schedule
       const exam = await this.prisma.exam.findUnique({
         where: { id: examId },
@@ -42,6 +55,11 @@ export class NotificationProcessor extends WorkerHost {
 
       if (!exam) {
         this.logger.warn(`Exam with ID '${examId}' not found. Skipping notification job.`);
+        await this.jobProgressService.publishCompleted(
+          NOTIFICATION_QUEUE_NAME,
+          job.id!,
+          'Skipped: Exam not found',
+        );
         return { status: 'SKIPPED_EXAM_NOT_FOUND' };
       }
 
@@ -137,6 +155,11 @@ export class NotificationProcessor extends WorkerHost {
 
       if (students.length === 0) {
         this.logger.log(`No active students found in system.`);
+        await this.jobProgressService.publishCompleted(
+          NOTIFICATION_QUEUE_NAME,
+          job.id!,
+          'Completed (0 students)',
+        );
         return { status: 'COMPLETED_ZERO_STUDENTS' };
       }
 
@@ -172,10 +195,31 @@ export class NotificationProcessor extends WorkerHost {
         });
 
         totalCreated += result.count;
+        const currentProcessed = Math.min(i + BATCH_SIZE, students.length);
+        const percentage = Math.round((currentProcessed / students.length) * 100);
+
+        await this.jobProgressService.publishProgress(
+          NOTIFICATION_QUEUE_NAME,
+          job.id!,
+          {
+            current: currentProcessed,
+            total: students.length,
+            percentage,
+            stage: 'BULK_NOTIFY',
+            message: `Created ${totalCreated} notifications...`,
+          },
+        );
       }
 
       this.logger.log(
         `Successfully created ${totalCreated} in-app notification(s) for Exam '${exam.title}'`,
+      );
+
+      await this.jobProgressService.publishCompleted(
+        NOTIFICATION_QUEUE_NAME,
+        job.id!,
+        `Successfully created ${totalCreated} in-app notifications`,
+        { notificationsCreated: totalCreated },
       );
 
       return {
@@ -188,6 +232,11 @@ export class NotificationProcessor extends WorkerHost {
       this.logger.error(
         `Error processing exam notification job [${job.id}]: ${error.message}`,
         error.stack,
+      );
+      await this.jobProgressService.publishFailed(
+        NOTIFICATION_QUEUE_NAME,
+        job.id!,
+        error.message || 'Notification processing failed',
       );
       throw error;
     }

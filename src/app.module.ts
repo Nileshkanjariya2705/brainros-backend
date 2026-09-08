@@ -31,6 +31,8 @@ import { ExamSecurityModule } from './modules/exam-security/exam-security.module
 import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { HealthModule } from './modules/health/health.module';
 import { LoggerModule } from './common/logger/logger.module';
+import { JobProgressModule } from './modules/job-progress/job-progress.module';
+
 
 @Module({
   imports: [
@@ -134,6 +136,7 @@ import { LoggerModule } from './common/logger/logger.module';
     ParentDashboardModule,
     RegionalLanguageModule,
     FeatureFlagModule,
+    JobProgressModule,
   ],
   providers: [],
 })

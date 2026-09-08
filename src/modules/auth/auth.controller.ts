@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Patch,
   Body,
   Get,
   Delete,
@@ -13,6 +14,7 @@ import {
   HttpStatus,
   UnauthorizedException,
   ForbiddenException,
+  Query,
 } from '@nestjs/common';
 import type { Response as ExpressResponse } from 'express';
 import { ConfigService } from '@nestjs/config';
@@ -222,10 +224,19 @@ export class AuthController {
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
   async verifyOtpAndLogin(
-    @Body() dto: VerifyOtpLoginDto,
+    @Body() dto: any,
     @Request() req: any,
     @Response({ passthrough: true }) res: ExpressResponse,
   ) {
+    if (dto.token) {
+      const result = await this.authService.verifyAccessToken(dto.token, req);
+      setAuthCookies(res, this.configService, {
+        accessToken: result.data?.accessToken,
+        refreshToken: result.data?.refreshToken,
+      });
+      return result;
+    }
+
     const result = await this.authService.verifyOtpAndLogin(
       dto.mobileNumber,
       dto.otp,
@@ -238,6 +249,13 @@ export class AuthController {
     });
     return result;
   }
+
+  @Get('otp/check-user')
+  @HttpCode(HttpStatus.OK)
+  async checkUserExists(@Query('identifier') identifier: string) {
+    return this.authService.checkUserExists(identifier);
+  }
+
 
   // ═══════════════════════════════════════════════════════════════
   // 5. LEGACY PASSWORD & OAUTH ENDPOINTS
@@ -393,6 +411,26 @@ export class AuthController {
     return {
       message: 'Profile retrieved successfully',
       data: userProfile,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(['me', 'profile'])
+  async updateMe(
+    @Request() req: any,
+    @Body()
+    dto: {
+      name?: string;
+      email?: string;
+      mobileNumber?: string;
+      phone?: string;
+      password?: string;
+    },
+  ) {
+    const updated = await this.authService.updateMe(req.user.userId, dto);
+    return {
+      message: 'Profile updated successfully',
+      data: updated,
     };
   }
 

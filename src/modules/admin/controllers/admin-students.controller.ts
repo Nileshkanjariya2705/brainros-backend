@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Query,
   Param,
@@ -86,5 +87,21 @@ export class AdminStudentsController {
   ) {
     const actorUserId = req.user?.id || req.user?.userId;
     return this.studentsService.revokeParentLink(studentId, linkId, actorUserId);
+  }
+
+  /**
+   * PATCH /admin/students/:studentId
+   * Update student details (name, email, mobile, school, class, target, status)
+   */
+  @Patch(':studentId')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async updateStudent(
+    @Param('studentId') studentId: string,
+    @Body() dto: any,
+    @Req() req: any,
+  ) {
+    const actorUserId = req.user?.id || req.user?.userId;
+    return this.studentsService.updateStudent(studentId, dto, actorUserId);
   }
 }

@@ -35,6 +35,7 @@ const prismaMock = {
   attemptQuestion: {
     findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
+    createMany: jest.fn().mockResolvedValue({ count: 1 }),
     count: jest.fn().mockResolvedValue(1),
   },
   attemptQuestionOption: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
@@ -109,6 +110,10 @@ describe('ExamAttemptService', () => {
           provide: QuestionShuffleService,
           useValue: {
             generateAttemptSeed: jest.fn().mockReturnValue('seed-123'),
+            generateDeterministicSeed: jest
+              .fn()
+              .mockReturnValue('deterministic-seed-hash-123'),
+            normalizeSeedToPostgresRange: jest.fn().mockReturnValue(0.5),
             shuffleQuestions: jest.fn().mockImplementation((q) => q),
             shuffleOptions: jest.fn().mockImplementation((opts) => opts),
           },

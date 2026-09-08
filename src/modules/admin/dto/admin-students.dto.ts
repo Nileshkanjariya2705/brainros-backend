@@ -109,3 +109,49 @@ export class AddStudentParentDto {
   })
   relationship: ParentRelationshipEnum;
 }
+
+export class UpdateAdminStudentDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  mobile?: string;
+
+  @IsOptional()
+  @IsString()
+  schoolCollege?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
+  @IsUUID()
+  classId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  examTargetId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  stateId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  districtId?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+}

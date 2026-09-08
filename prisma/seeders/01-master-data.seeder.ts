@@ -158,11 +158,11 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
     }
   }
 
-  // 5. Exam Targets (3 Focus Exams: NEET, JEE, CAT)
+  // 5. Exam Targets (Focus Exams: NEET, JEE, CET)
   const targetsList = [
     { name: 'NEET', description: 'National Eligibility cum Entrance Test (UG Medical)' },
     { name: 'JEE', description: 'Joint Entrance Examination (Engineering)' },
-    { name: 'CAT', description: 'Common Admission & Entrance Test' },
+    { name: 'CET', description: 'State Common Entrance Test (MHT-CET, GUJCET, KCET, KEAM, etc.)' },
   ];
 
   for (const t of targetsList) {

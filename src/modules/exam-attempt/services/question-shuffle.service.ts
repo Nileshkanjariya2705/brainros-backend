@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 
 /**
  * High-performance deterministic PRNG using 32-bit MurmurHash3 + Mulberry32.
@@ -37,7 +38,64 @@ function seededShuffle<T>(array: T[], prng: () => number): T[] {
 @Injectable()
 export class QuestionShuffleService {
   /**
-   * Generates a cryptographically secure 128-bit server random seed for the attempt
+   * Generates a deterministic SHA-256 seed derived from studentId, examVersionId/examId, and attemptId.
+   * Reproducible 100% for the same attempt parameters.
+   */
+  generateDeterministicSeed(
+    studentId: string,
+    examVersionOrId: string,
+    attemptId: string,
+  ): string {
+    const input = `${studentId}:${examVersionOrId}:${attemptId}`;
+    return crypto.createHash('sha256').update(input).digest('hex');
+  }
+
+  /**
+   * Converts a deterministic seed string to a normalized PostgreSQL setseed() float value in [-1.0, 1.0].
+   */
+  normalizeSeedToPostgresRange(seedInput: string): number {
+    const hashHex = crypto
+      .createHash('md5')
+      .update(seedInput)
+      .digest('hex')
+      .substring(0, 8);
+    const intVal = parseInt(hashHex, 16);
+    const float01 = intVal / 4294967295.0; // [0.0, 1.0]
+    return float01 * 2.0 - 1.0; // [-1.0, 1.0]
+  }
+
+  /**
+   * Connection-pool safe PostgreSQL setseed() + ORDER BY random() query.
+   * MUST be executed inside a single database transaction connection (`tx`).
+   */
+  async getSeededRandomQuestionsRawSQL(
+    tx: Prisma.TransactionClient,
+    examId: string,
+    seedInput: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<any[]> {
+    const normalizedSeed = this.normalizeSeedToPostgresRange(seedInput);
+    // setseed and random() MUST run on the SAME transaction connection
+    await tx.$executeRaw`SELECT setseed(${normalizedSeed})`;
+
+    let query = Prisma.sql`
+      SELECT eq.id, eq.exam_id, eq.display_order, eq.section_id
+      FROM exam_questions eq
+      WHERE eq.exam_id = ${examId}::uuid
+      ORDER BY random()
+    `;
+    if (limit !== undefined && limit > 0) {
+      query = Prisma.sql`${query} LIMIT ${limit}`;
+    }
+    if (offset !== undefined && offset >= 0) {
+      query = Prisma.sql`${query} OFFSET ${offset}`;
+    }
+    return tx.$queryRaw<any[]>(query);
+  }
+
+  /**
+   * Generates a random seed as a fallback
    */
   generateAttemptSeed(): string {
     return crypto.randomBytes(16).toString('hex');

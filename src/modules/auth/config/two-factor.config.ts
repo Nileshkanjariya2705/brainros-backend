@@ -63,7 +63,16 @@ export class TwoFactorConfig {
 
     this.enable2FA = parseSafeBoolean(rawEnable, 'ENABLE_REAL_OTP', false);
 
-    this.otpProvider = '2FACTOR';
+    const rawProvider = String(
+      this.configService.get<string>('OTP_PROVIDER') ||
+        process.env.OTP_PROVIDER ||
+        'MSG91',
+    )
+      .trim()
+      .toUpperCase();
+
+    this.otpProvider = rawProvider === '2FACTOR' ? '2FACTOR' : 'MSG91';
+
 
     // 2Factor.in API Key
     this.twoFactorApiKey =

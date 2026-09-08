@@ -11,6 +11,7 @@ import {
 } from '../interfaces/result-lifecycle.interface';
 import { ResultReadinessService } from '../services/result-readiness.service';
 import { ExamLifecycleService } from '../../exam-scheduling/services/exam-lifecycle.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
 @Processor(EXAM_WINDOW_END_QUEUE_NAME, {
   concurrency: 2,
@@ -26,6 +27,7 @@ export class ExamWindowEndProcessor extends WorkerHost {
     private readonly lifecycleService: ExamLifecycleService,
     @InjectQueue(EVALUATION_QUEUE_NAME)
     private readonly evaluationQueue: Queue,
+    private readonly jobProgressService: JobProgressService,
   ) {
     super();
   }
@@ -37,6 +39,7 @@ export class ExamWindowEndProcessor extends WorkerHost {
 
   async process(job: Job<ExamWindowEndJobPayload>): Promise<any> {
     const { examId, scheduleId } = job.data;
+    const jobId = String(job.id || `window_end_${examId}`);
     this.logger.log(
       `[ExamWindowEndWorker] Processing window closure for exam '${examId}' (Schedule: ${scheduleId || 'ALL'})`,
     );
@@ -52,6 +55,13 @@ export class ExamWindowEndProcessor extends WorkerHost {
 
     // Acquire lock for 60 seconds
     await this.redisService.set(lockKey, 'locked', 60);
+
+    await this.jobProgressService.publishStarted(EXAM_WINDOW_END_QUEUE_NAME, jobId, {
+      type: 'EXAM_WINDOW_END',
+      stage: 'CLOSING_WINDOW',
+      examId,
+      message: 'Processing exam window closure...',
+    });
 
     try {
       const exam = await this.prisma.exam.findUnique({
@@ -195,6 +205,12 @@ export class ExamWindowEndProcessor extends WorkerHost {
           `[ExamWindowEndWorker] Exam schedule '${targetSchedule.id}' for exam '${examId}' does not have an Answer Key uploaded yet. Deferring batch evaluation until Answer Key is uploaded by Admin/Super Admin.`,
         );
 
+        await this.jobProgressService.publishCompleted(EXAM_WINDOW_END_QUEUE_NAME, jobId, {
+          message: 'Exam window closed. Deferring evaluation until Answer Key is uploaded.',
+          examId,
+          resultSummary: { deferred: true, reason: 'AWAITING_ANSWER_KEY' },
+        });
+
         return {
           success: true,
           deferred: true,
@@ -236,6 +252,8 @@ export class ExamWindowEndProcessor extends WorkerHost {
 
       // ─── STEP 4: Batch Enqueue to EVALUATION_QUEUE_NAME ───
       let enqueuedCount = 0;
+      const totalEligible = eligibleAttempts.length;
+
       for (const att of eligibleAttempts) {
         // Update Result state to PROCESSING so UI reflects active scoring
         await this.prisma.result.upsert({
@@ -277,7 +295,27 @@ export class ExamWindowEndProcessor extends WorkerHost {
           },
         );
         enqueuedCount++;
+
+        if (totalEligible > 0) {
+          await this.jobProgressService.publishProgress(
+            EXAM_WINDOW_END_QUEUE_NAME,
+            jobId,
+            enqueuedCount,
+            totalEligible,
+            {
+              stage: 'ENQUEUING_EVALUATIONS',
+              message: `Enqueued ${enqueuedCount}/${totalEligible} attempts for evaluation...`,
+              examId,
+            },
+          );
+        }
       }
+
+      await this.jobProgressService.publishCompleted(EXAM_WINDOW_END_QUEUE_NAME, jobId, {
+        message: `Successfully closed window for exam '${exam.title}'. Enqueued ${enqueuedCount} attempts.`,
+        examId,
+        resultSummary: { autoSubmittedCount, enqueuedEvaluations: enqueuedCount },
+      });
 
       this.logger.log(
         `[ExamWindowEndWorker] Successfully initiated batch evaluation for ${enqueuedCount} attempts. Exam: '${exam.title}'.`,
@@ -290,6 +328,13 @@ export class ExamWindowEndProcessor extends WorkerHost {
         autoSubmittedCount,
         enqueuedEvaluations: enqueuedCount,
       };
+    } catch (err: any) {
+      await this.jobProgressService.publishFailed(
+        EXAM_WINDOW_END_QUEUE_NAME,
+        jobId,
+        err.message || 'Exam window closure processing failed.',
+      );
+      throw err;
     } finally {
       await this.redisService.del(lockKey);
     }

@@ -320,4 +320,11 @@ export class TokenService {
       data: { revokedAt: new Date() },
     });
   }
+
+  /**
+   * Verifies access JWT token and returns decoded payload
+   */
+  async verifyAccessToken(token: string): Promise<any> {
+    return this.jwtService.verifyAsync(token);
+  }
 }

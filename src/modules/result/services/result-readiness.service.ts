@@ -308,6 +308,22 @@ export class ResultReadinessService {
         `Live Exam attempt '${attemptId}' completed processing. Result marked READY_TO_PUBLISH.`,
       );
     }
+
+    // Auto-upsert ExamAnalysisReport in READY_FOR_REVIEW status
+    await this.prisma.examAnalysisReport.upsert({
+      where: { attemptId },
+      create: {
+        examId: attempt.examId,
+        examVersionId: attempt.examVersionId,
+        attemptId: attempt.id,
+        studentId: attempt.studentId,
+        status: 'READY_FOR_REVIEW',
+        generatedAt: new Date(),
+      },
+      update: {
+        generatedAt: new Date(),
+      },
+    }).catch((e) => this.logger.warn(`Could not upsert ExamAnalysisReport: ${e.message}`));
   }
 
   /**

@@ -26,3 +26,6 @@ export class VerifyOtpLoginDto {
   ])
   purpose: OtpPurpose;
 }
+
+export { VerifyOtpDto, CheckUserDto } from './verify-widget-otp.dto';
+

@@ -26,17 +26,15 @@ export const FEATURE_DEPENDENCIES: Partial<Record<FeatureKey, FeatureKey[]>> = {
 
 /**
  * Safe boolean parser for environment variables.
- * Treats only explicit 'true', '1', 'yes', 'on' (case-insensitive) as true.
- * Missing, undefined, 'false', '0', 'no', 'off', or invalid strings default to false.
+ * Treats 'false', '0', 'no', 'off' as false.
+ * Treats 'true', '1', 'yes', 'on' as true.
+ * Missing / undefined values default to defaultValue (true).
  */
-export function parseBooleanFlag(val?: string | boolean | null): boolean {
+export function parseBooleanFlag(val?: string | boolean | null, defaultValue = true): boolean {
   if (typeof val === 'boolean') return val;
-  if (!val) return false;
+  if (val === undefined || val === null || val === '') return defaultValue;
   const normalized = String(val).trim().toLowerCase();
-  return (
-    normalized === 'true' ||
-    normalized === '1' ||
-    normalized === 'yes' ||
-    normalized === 'on'
-  );
+  if (['false', '0', 'no', 'off', 'disabled'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'on', 'enabled'].includes(normalized)) return true;
+  return defaultValue;
 }

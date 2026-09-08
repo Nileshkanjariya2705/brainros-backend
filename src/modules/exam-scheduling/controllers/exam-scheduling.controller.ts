@@ -16,6 +16,7 @@ import { ExamLifecycleService } from '../services/exam-lifecycle.service';
 import { ExamScheduleService } from '../services/exam-schedule.service';
 import { ExamAccessService } from '../services/exam-access.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
+import { AdminScheduleExamDto } from '../dto/admin-schedule-exam.dto';
 import {
   CancelExamDto,
   ActionReasonDto,
@@ -30,6 +31,20 @@ export class ExamSchedulingController {
     private readonly scheduleService: ExamScheduleService,
     private readonly accessService: ExamAccessService,
   ) {}
+
+  @Post('admin/exams/schedule')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async scheduleAdminExam(
+    @CurrentUser('id') userId: string,
+    @Body() dto: AdminScheduleExamDto,
+  ) {
+    const data = await this.scheduleService.scheduleAdminExam(dto, userId);
+    return {
+      statusCode: 201,
+      message: 'Exam scheduled successfully.',
+      data,
+    };
+  }
 
   @Post('exams/:examId/submit')
   @Roles('ADMIN', 'SUPER_ADMIN')

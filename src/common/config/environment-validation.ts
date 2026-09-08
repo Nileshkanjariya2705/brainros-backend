@@ -22,6 +22,13 @@ export function validateEnvironment(logger: AppLoggerService): void {
     logger.error(errorMsg, undefined, 'ConfigValidation');
   }
 
+  if (!process.env.MSG91_AUTH_KEY || !process.env.MSG91_AUTH_KEY.trim()) {
+    logger.warn(
+      '[ConfigValidation] MSG91_AUTH_KEY is not configured in .env. MSG91 OTP Widget verification will fail until set.',
+      'ConfigValidation',
+    );
+  }
+
   const isRedisEnabled =
     process.env.REDIS_ENABLED !== undefined
       ? parseBooleanFlag(process.env.REDIS_ENABLED)

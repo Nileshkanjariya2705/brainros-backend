@@ -99,6 +99,16 @@ enum ExamVersionStatus {
   FAILED
 }
 
+enum ExamAnalysisReportStatus {
+  PENDING
+  GENERATING
+  READY_FOR_REVIEW
+  APPROVED
+  EMAIL_QUEUED
+  EMAILED
+  FAILED
+}
+
 enum ExamScheduleStatus {
   SCHEDULED
   ACTIVE
@@ -213,6 +223,8 @@ model User {
   reviewedSecurityReviews AttemptSecurityReview[]
   publishedResultPublications ExamResultPublication[] @relation("ResultPublishedBy")
   answerKeyUploads            ExamSchedule[]          @relation("AnswerKeyUploadedBy")
+  reviewedAnalysisReports     ExamAnalysisReport[]    @relation("ReportReviewedBy")
+  approvedAnalysisReports     ExamAnalysisReport[]    @relation("ReportApprovedBy")
 
   @@index([status])
   @@index([email])
@@ -325,6 +337,7 @@ model Student {
   batchMemberships    BatchStudent[]
   orders              Order[]
   salesLeads          SalesLead[]
+  analysisReports     ExamAnalysisReport[]
 
   @@index([status])
   @@index([stateId])
@@ -852,6 +865,7 @@ model Exam {
   calendars                  ExamCalendar[]
   orders                     Order[]
   resultPublications         ExamResultPublication[]
+  analysisReports            ExamAnalysisReport[]
 
   @@index([examTargetId])
   @@index([statusId])
@@ -991,6 +1005,7 @@ model Attempt {
   attemptEvents           AttemptEvent[]
   securityAcceptances     AttemptSecurityAcceptance[]
   securityReviews         AttemptSecurityReview[]
+  analysisReport          ExamAnalysisReport?
 
   @@index([studentId, examId])
   @@index([studentId])
@@ -2831,6 +2846,39 @@ model ExamImportRow {
   @@index([importId])
   @@index([status])
   @@map("exam_import_rows")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXAM ANALYSIS REPORT MODEL
+// ═══════════════════════════════════════════════════════════════════
+
+model ExamAnalysisReport {
+  id              String                   @id @default(uuid()) @db.Uuid
+  examId          String                   @map("exam_id") @db.Uuid
+  examVersionId   String?                  @map("exam_version_id") @db.Uuid
+  attemptId       String                   @unique @map("attempt_id") @db.Uuid
+  studentId       String                   @map("student_id") @db.Uuid
+  status          ExamAnalysisReportStatus @default(READY_FOR_REVIEW)
+  generatedAt     DateTime                 @default(now()) @map("generated_at")
+  reviewedAt      DateTime?                @map("reviewed_at")
+  reviewedById    String?                  @map("reviewed_by_id") @db.Uuid
+  approvedAt      DateTime?                @map("approved_at")
+  approvedById    String?                  @map("approved_by_id") @db.Uuid
+  pdfGeneratedAt  DateTime?                @map("pdf_generated_at")
+  emailStatus     String                   @default("NONE") @map("email_status")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  exam            Exam                     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  attempt         Attempt                  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  student         Student                  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reviewedBy      User?                    @relation("ReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  approvedBy      User?                    @relation("ReportApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([examId])
+  @@index([studentId])
+  @@index([status])
+  @@map("exam_analysis_reports")
 }
 
 

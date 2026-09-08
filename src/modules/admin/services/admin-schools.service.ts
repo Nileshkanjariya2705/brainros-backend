@@ -77,21 +77,62 @@ export class AdminSchoolsService {
     }
 
     if (query.stateId) {
-      where.stateId = query.stateId;
+      const stateRecord = await this.prisma.state.findUnique({
+        where: { id: query.stateId },
+        select: { name: true },
+      });
+      if (stateRecord?.name) {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { stateId: query.stateId },
+              { state: { equals: stateRecord.name, mode: 'insensitive' } },
+            ],
+          },
+        ];
+      } else {
+        where.stateId = query.stateId;
+      }
     }
 
     if (query.districtId) {
-      where.districtId = query.districtId;
+      const districtRecord = await this.prisma.district.findUnique({
+        where: { id: query.districtId },
+        select: { name: true },
+      });
+      if (districtRecord?.name) {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { districtId: query.districtId },
+              { city: { equals: districtRecord.name, mode: 'insensitive' } },
+            ],
+          },
+        ];
+      } else {
+        where.districtId = query.districtId;
+      }
     }
 
     if (query.search?.trim()) {
       const s = query.search.trim();
-      where.OR = [
-        { name: { contains: s, mode: 'insensitive' } },
-        { code: { contains: s, mode: 'insensitive' } },
-        { city: { contains: s, mode: 'insensitive' } },
-        { state: { contains: s, mode: 'insensitive' } },
-      ];
+      const searchCondition = {
+        OR: [
+          { name: { contains: s, mode: 'insensitive' } },
+          { code: { contains: s, mode: 'insensitive' } },
+          { city: { contains: s, mode: 'insensitive' } },
+          { state: { contains: s, mode: 'insensitive' } },
+          { email: { contains: s, mode: 'insensitive' } },
+          { phone: { contains: s, mode: 'insensitive' } },
+        ],
+      };
+      if (where.AND) {
+        where.AND.push(searchCondition);
+      } else {
+        where.OR = searchCondition.OR;
+      }
     }
 
     const [items, total] = await Promise.all([

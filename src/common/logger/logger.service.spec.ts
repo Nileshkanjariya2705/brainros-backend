@@ -61,7 +61,7 @@ describe('AppLoggerService', () => {
         () => {
           logger.log('Test message with ambient context', 'TestContext');
           expect(spy).toHaveBeenCalled();
-          const loggedMeta = spy.mock.calls[0][0];
+          const loggedMeta: any = spy.mock.calls[0][0];
           expect(loggedMeta.requestId).toBe('req-test-123');
           expect(loggedMeta.userId).toBe('usr-456');
           expect(loggedMeta.role).toBe('ADMIN');
@@ -85,7 +85,7 @@ describe('AppLoggerService', () => {
       });
 
       expect(spy).toHaveBeenCalled();
-      const meta = spy.mock.calls[0][0];
+      const meta: any = spy.mock.calls[0][0];
       expect(meta.method).toBe('GET');
       expect(meta.path).toBe('/api/v1/exams');
       expect(meta.statusCode).toBe(200);
@@ -104,7 +104,7 @@ describe('AppLoggerService', () => {
       });
 
       expect(spy).toHaveBeenCalled();
-      const meta = spy.mock.calls[0][0];
+      const meta: any = spy.mock.calls[0][0];
       expect(meta.queue).toBe('evaluation-queue');
       expect(meta.jobId).toBe('job-999');
       expect(meta.attemptId).toBe('att-123');
@@ -119,7 +119,7 @@ describe('AppLoggerService', () => {
       });
 
       expect(spy).toHaveBeenCalled();
-      const meta = spy.mock.calls[0][0];
+      const meta: any = spy.mock.calls[0][0];
       expect(meta.event).toBe('EXAM_SUBMITTED');
       expect(meta.examId).toBe('exam-101');
     });

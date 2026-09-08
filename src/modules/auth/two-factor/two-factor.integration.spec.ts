@@ -91,10 +91,17 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
       redisServiceMock as RedisService,
       { log: jest.fn().mockResolvedValue(undefined) } as any,
       twoFactorDotInProviderMock as TwoFactorDotInProvider,
+      {} as any,
       devProviderMock as DevelopmentOtpProvider,
     );
 
-    const otpService = new OtpService(twoFactorService);
+    const otpService = new OtpService(
+      twoFactorService,
+      {} as any,
+      configServiceMock,
+      prismaMock as any,
+      {} as any,
+    );
 
     prismaMock = {
       user: {

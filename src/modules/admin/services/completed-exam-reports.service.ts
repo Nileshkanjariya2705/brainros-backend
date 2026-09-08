@@ -324,15 +324,22 @@ export class CompletedExamReportsService {
       }),
     ]);
 
-    // Fetch latest email notification statuses for these attempts
+    // Fetch latest email notification statuses and analysis reports for these attempts
     const attemptIds = attempts.map((a) => a.id);
-    const notifications = await this.prisma.notification.findMany({
-      where: {
-        type: NotificationType.REPORT_READY,
-        correlationId: { in: attemptIds },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [notifications, reports] = await Promise.all([
+      this.prisma.notification.findMany({
+        where: {
+          type: NotificationType.REPORT_READY,
+          correlationId: { in: attemptIds },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.examAnalysisReport.findMany({
+        where: {
+          attemptId: { in: attemptIds },
+        },
+      }),
+    ]);
 
     const notificationMap = new Map<string, any>();
     notifications.forEach((n) => {
@@ -341,9 +348,15 @@ export class CompletedExamReportsService {
       }
     });
 
+    const reportMap = new Map<string, any>();
+    reports.forEach((r) => {
+      reportMap.set(r.attemptId, r);
+    });
+
     const items = attempts.map((att) => {
       const rankData = att.candidateRanks[0];
       const notif = notificationMap.get(att.id);
+      const report = reportMap.get(att.id);
 
       let emailStatus: 'NONE' | 'QUEUED' | 'PROCESSING' | 'SENT' | 'FAILED' = 'NONE';
       if (notif) {
@@ -352,6 +365,9 @@ export class CompletedExamReportsService {
         else if (notif.status === NotificationStatus.PROCESSING) emailStatus = 'PROCESSING';
         else if (notif.status === NotificationStatus.PENDING) emailStatus = 'QUEUED';
       }
+
+      let reportStatus = report?.status || (att.result ? 'READY_FOR_REVIEW' : 'PENDING');
+      if (emailStatus === 'SENT') reportStatus = 'EMAILED';
 
       return {
         attemptId: att.id,
@@ -372,6 +388,9 @@ export class CompletedExamReportsService {
         percentile: rankData?.percentile ?? null,
         totalCandidates: rankData?.totalCandidates ?? null,
         resultStatus: att.result ? att.result.resultStatus || 'EVALUATED' : 'EVALUATING',
+        reportStatus,
+        approvedAt: report?.approvedAt || null,
+        approvedBy: report?.approvedById || null,
         emailStatus,
         lastEmailSentAt: notif?.sentAt || null,
       };
@@ -452,6 +471,60 @@ export class CompletedExamReportsService {
   }
 
   /**
+   * Approves a student analysis report for email distribution.
+   */
+  async approveReport(examId: string, attemptId: string, adminUser: any) {
+    const attempt = await this.prisma.attempt.findUnique({
+      where: { id: attemptId },
+      include: { result: true },
+    });
+
+    if (!attempt || attempt.examId !== examId) {
+      throw new NotFoundException(`Attempt '${attemptId}' not found for exam '${examId}'.`);
+    }
+
+    if (!attempt.result) {
+      throw new BadRequestException('Cannot approve report: Result has not been evaluated yet.');
+    }
+
+    const adminId = adminUser?.userId || adminUser?.id;
+    const report = await this.prisma.examAnalysisReport.upsert({
+      where: { attemptId },
+      create: {
+        examId: attempt.examId,
+        examVersionId: attempt.examVersionId,
+        attemptId: attempt.id,
+        studentId: attempt.studentId,
+        status: 'APPROVED',
+        approvedById: adminId,
+        approvedAt: new Date(),
+      },
+      update: {
+        status: 'APPROVED',
+        approvedById: adminId,
+        approvedAt: new Date(),
+      },
+    });
+
+    if (adminId) {
+      await this.auditLogService.logAction({
+        actorUserId: adminId,
+        action: 'REPORT_APPROVED',
+        entityType: 'ExamAnalysisReport',
+        entityId: report.id,
+        metadata: { examId, attemptId, studentId: attempt.studentId },
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Report approved successfully.',
+      reportStatus: report.status,
+      approvedAt: report.approvedAt,
+    };
+  }
+
+  /**
    * Enqueues a BullMQ job to asynchronously generate PDF and deliver via Resend.
    */
   async queueReportEmail(examId: string, attemptId: string, adminUser: any) {
@@ -488,6 +561,23 @@ export class CompletedExamReportsService {
     if (!recipientEmail || !recipientEmail.includes('@')) {
       throw new BadRequestException(`Student '${attempt.student.name}' does not have a valid registered email address.`);
     }
+
+    // Ensure ExamAnalysisReport status is set to EMAIL_QUEUED
+    await this.prisma.examAnalysisReport.upsert({
+      where: { attemptId },
+      create: {
+        examId: attempt.examId,
+        examVersionId: attempt.examVersionId,
+        attemptId: attempt.id,
+        studentId: attempt.studentId,
+        status: 'EMAIL_QUEUED',
+        emailStatus: 'QUEUED',
+      },
+      update: {
+        status: 'EMAIL_QUEUED',
+        emailStatus: 'QUEUED',
+      },
+    });
 
     // Idempotency: create or update Notification record
     const idempotencyKey = `report-email:${examId}:${attemptId}:${Date.now()}`;

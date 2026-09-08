@@ -20,7 +20,6 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
   const adminUser = ctx.users.get('admin.neet@brainros.test') || ctx.users.get('superadmin@brainros.test')!;
   const neetTarget = ctx.examTargets.get('NEET')!;
   const jeeTarget = ctx.examTargets.get('JEE') || ctx.examTargets.get('JEE_MAIN')!;
-  const catTarget = ctx.examTargets.get('CAT')!;
 
   const statusActive = ctx.examStatuses.get('ACTIVE')!;
   const statusCompleted = ctx.examStatuses.get('COMPLETED')!;
@@ -72,18 +71,6 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
       status: statusCompleted,
       isSystem: true,
       subjects: ['Physics (NEET)', 'Chemistry (NEET)', 'Botany', 'Zoology'],
-    },
-    {
-      code: 'TEMPLATE_CAT',
-      title: 'CAT Exam Template',
-      description: 'System template for CAT blueprint generation.',
-      target: catTarget,
-      totalQuestions: 68,
-      totalMarks: 204,
-      durationMinutes: 120,
-      status: statusCompleted,
-      isSystem: true,
-      subjects: ['Physics (CAT)', 'Chemistry (CAT)', 'Mathematics (CAT)'],
     },
     {
       code: 'EXAM_NEET_MOCK_01',
@@ -321,17 +308,6 @@ export async function seedExamsAndBlueprints(ctx: SeedContext): Promise<SeederRe
               { blueprintId: blueprint.id, subjectId: chem.id, selectionCount: 45, priority: priority++ },
               { blueprintId: blueprint.id, subjectId: bot.id, selectionCount: 45, priority: priority++ },
               { blueprintId: blueprint.id, subjectId: zoo.id, selectionCount: 45, priority: priority++ },
-            ],
-          });
-        } else if (eData.code === 'TEMPLATE_CAT') {
-          const varc = ctx.subjects.get('Physics (CAT)')!;
-          const dilr = ctx.subjects.get('Chemistry (CAT)')!;
-          const qa = ctx.subjects.get('Mathematics (CAT)')!;
-          await prisma.blueprintRule.createMany({
-            data: [
-              { blueprintId: blueprint.id, subjectId: varc.id, selectionCount: 24, priority: priority++ },
-              { blueprintId: blueprint.id, subjectId: dilr.id, selectionCount: 22, priority: priority++ },
-              { blueprintId: blueprint.id, subjectId: qa.id, selectionCount: 22, priority: priority++ },
             ],
           });
         }

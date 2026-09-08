@@ -204,7 +204,13 @@ export class ExamAttemptService {
     const windowEnd = new Date(access.endTime);
     const serverEndTime = durationEnd < windowEnd ? durationEnd : windowEnd;
 
-    const randomSeed = this.questionShuffleService.generateAttemptSeed();
+    // Pre-generate attempt ID and compute deterministic seed based on student, exam/version, and attempt ID
+    const attemptId = randomUUID();
+    const randomSeed = this.questionShuffleService.generateDeterministicSeed(
+      studentId,
+      access.examVersionId || dto.examId,
+      attemptId,
+    );
 
     const rawExamQuestions = await this.prisma.examQuestion.findMany({
       where: { examId: dto.examId },
@@ -248,8 +254,7 @@ export class ExamAttemptService {
       }
     }
 
-    // Pre-generate attempt and question IDs to batch insert in bulk
-    const attemptId = randomUUID();
+    // Pre-allocate batch insert arrays for AttemptQuestion and AttemptQuestionOption
     const attemptQuestionsToInsert: {
       id: string;
       attemptId: string;
@@ -875,22 +880,73 @@ export class ExamAttemptService {
 
   /**
    * Get the exam questions for a specific attempt
-   * (Returns student-specific deterministic question order & option order with localized language fallback).
+   * (Returns student-specific deterministic question order & option order with localized language fallback & pagination).
    */
-  async getAttemptQuestions(attemptId: string, studentId: string) {
+  async getAttemptQuestions(
+    attemptId: string,
+    studentId: string,
+    query?: { page?: number; limit?: number; offset?: number },
+  ) {
     const attempt = await this.verifyAttemptOwnership(attemptId, studentId);
 
-    // 1. Ensure AttemptQuestion & AttemptQuestionOption records exist for this attempt
+    // 1. Compute deterministic seed fallback if missing
+    const seedToUse =
+      attempt.randomSeed && attempt.randomSeed !== 'default_seed'
+        ? attempt.randomSeed
+        : this.questionShuffleService.generateDeterministicSeed(
+            attempt.studentId,
+            attempt.examVersionId || attempt.examId,
+            attempt.id,
+          );
+
+    // 2. Ensure AttemptQuestion & AttemptQuestionOption records exist for this attempt
     await this.ensureAttemptQuestionsInitialized(
       attempt.id,
       attempt.examId,
-      attempt.randomSeed || 'default_seed',
+      seedToUse,
     );
 
-    // 2. Fetch personalized AttemptQuestion mappings ordered by displayOrder asc
+    // 3. Handle pagination parameters if supplied
+    const hasPagination =
+      query?.page !== undefined ||
+      query?.limit !== undefined ||
+      query?.offset !== undefined;
+
+    let take: number | undefined = undefined;
+    let skip: number | undefined = undefined;
+
+    let totalCount = 0;
+    let limitNum = 50;
+    let pageNum = 1;
+    let offsetNum = 0;
+
+    if (hasPagination) {
+      totalCount = await this.prisma.attemptQuestion.count({
+        where: { attemptId: attempt.id },
+      });
+
+      limitNum = query?.limit
+        ? Math.min(Math.max(1, Number(query.limit)), 500)
+        : 50;
+
+      if (query?.offset !== undefined) {
+        offsetNum = Math.max(0, Number(query.offset));
+        pageNum = Math.floor(offsetNum / limitNum) + 1;
+      } else if (query?.page !== undefined) {
+        pageNum = Math.max(1, Number(query.page));
+        offsetNum = (pageNum - 1) * limitNum;
+      }
+
+      take = limitNum;
+      skip = offsetNum;
+    }
+
+    // 4. Fetch personalized AttemptQuestion mappings ordered by displayOrder asc
     const attemptQuestions = await this.prisma.attemptQuestion.findMany({
       where: { attemptId: attempt.id },
       orderBy: { displayOrder: 'asc' },
+      skip,
+      take,
       include: {
         options: {
           orderBy: { displayOrder: 'asc' },
@@ -933,7 +989,7 @@ export class ExamAttemptService {
     )?.languageId;
     const currentLanguageId = attempt.languageId;
 
-    return attemptQuestions.map((aq) => {
+    const items = attemptQuestions.map((aq) => {
       const eq = aq.examQuestion;
       const q = eq.question;
 
@@ -1049,6 +1105,21 @@ export class ExamAttemptService {
         options: orderedOptions,
       };
     });
+
+    if (hasPagination) {
+      return {
+        items,
+        pagination: {
+          total: totalCount,
+          page: pageNum,
+          limit: limitNum,
+          offset: offsetNum,
+          totalPages: Math.ceil(totalCount / limitNum),
+        },
+      };
+    }
+
+    return items;
   }
 
   /**

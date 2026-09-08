@@ -129,6 +129,32 @@ export class CompletedExamReportsController {
   }
 
   /**
+   * Approve Student Analysis Report.
+   * POST /admin/completed-exams/:examId/attempts/:attemptId/approve
+   * POST /super-admin/completed-exams/:examId/attempts/:attemptId/approve
+   */
+  @Post([
+    'admin/completed-exams/:examId/attempts/:attemptId/approve',
+    'super-admin/completed-exams/:examId/attempts/:attemptId/approve',
+  ])
+  async approveReport(
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
+    const data = await this.reportsService.approveReport(
+      examId,
+      attemptId,
+      user,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Student analysis report approved successfully',
+      data,
+    };
+  }
+
+  /**
    * Queue PDF report generation and email delivery via BullMQ.
    * POST /admin/completed-exams/:examId/attempts/:attemptId/send-report
    * POST /super-admin/completed-exams/:examId/attempts/:attemptId/send-report

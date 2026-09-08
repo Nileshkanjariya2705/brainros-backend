@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QuestionBankService } from '../question-bank.service';
@@ -23,6 +24,7 @@ import {
 } from '../dto/question-import.dto';
 import { CreateQuestionDto } from '../dto/create-question.dto';
 import { UpdateQuestionDto } from '../dto/update-question.dto';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
 const ALLOWED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
@@ -50,6 +52,7 @@ export class QuestionImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly questionBankService: QuestionBankService,
+    @Optional() private readonly jobProgressService?: JobProgressService,
   ) {
     if (!fs.existsSync(this.storageDir)) {
       fs.mkdirSync(this.storageDir, { recursive: true });
@@ -510,6 +513,21 @@ export class QuestionImportService {
             importError: err.message || 'Unknown database write error',
           },
         });
+      }
+
+      const processed = createdCount + updatedCount + failedCount;
+      if (this.jobProgressService && candidateRows.length > 0 && (processed % 5 === 0 || processed === candidateRows.length)) {
+        await this.jobProgressService.publishProgress(
+          'question-import',
+          importId,
+          processed,
+          candidateRows.length,
+          {
+            stage: 'IMPORTING_QUESTIONS',
+            message: `Importing questions (${processed}/${candidateRows.length})...`,
+            userId,
+          },
+        );
       }
     }
 

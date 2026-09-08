@@ -16,6 +16,34 @@ describe('QuestionShuffleService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('generateDeterministicSeed', () => {
+    it('should generate identical seed string for exact same studentId, examVersionId, and attemptId', () => {
+      const seed1 = service.generateDeterministicSeed('student_101', 'v_1.0', 'attempt_abc');
+      const seed2 = service.generateDeterministicSeed('student_101', 'v_1.0', 'attempt_abc');
+
+      expect(seed1).toBe(seed2);
+      expect(seed1).toHaveLength(64); // SHA-256 hex output length
+    });
+
+    it('should generate different seeds for different attempts', () => {
+      const seedAttempt1 = service.generateDeterministicSeed('student_101', 'v_1.0', 'attempt_1');
+      const seedAttempt2 = service.generateDeterministicSeed('student_101', 'v_1.0', 'attempt_2');
+
+      expect(seedAttempt1).not.toEqual(seedAttempt2);
+    });
+  });
+
+  describe('normalizeSeedToPostgresRange', () => {
+    it('should normalize any seed string to a float between -1.0 and 1.0', () => {
+      const norm1 = service.normalizeSeedToPostgresRange('student_101:v_1:att_1');
+      const norm2 = service.normalizeSeedToPostgresRange('student_101:v_1:att_1');
+
+      expect(norm1).toBeGreaterThanOrEqual(-1.0);
+      expect(norm1).toBeLessThanOrEqual(1.0);
+      expect(norm1).toBe(norm2); // Reproducible
+    });
+  });
+
   describe('generateAttemptSeed', () => {
     it('should generate a 32-character hex random seed', () => {
       const seed1 = service.generateAttemptSeed();

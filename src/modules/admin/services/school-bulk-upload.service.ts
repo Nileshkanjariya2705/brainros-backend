@@ -3,8 +3,10 @@ import {
   BadRequestException,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
 
@@ -26,7 +28,10 @@ interface SchoolRowData {
 export class SchoolBulkUploadService {
   private readonly logger = new Logger(SchoolBulkUploadService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly jobProgressService?: JobProgressService,
+  ) {}
 
   /**
    * Validate uploaded file type, extension, and size
@@ -69,9 +74,10 @@ export class SchoolBulkUploadService {
       { header: 'School Code * (e.g. SCH-001 or UDISE)', key: 'code', width: 28 },
       { header: 'Email Address (Optional)', key: 'email', width: 26 },
       { header: 'Phone Number (Optional)', key: 'phone', width: 20 },
-      { header: 'State *', key: 'state', width: 22 },
-      { header: 'City / District *', key: 'city', width: 22 },
+      { header: 'State (Optional)', key: 'state', width: 22 },
+      { header: 'City / District (Optional)', key: 'city', width: 22 },
       { header: 'Address (Optional)', key: 'address', width: 35 },
+      { header: 'Status (Optional - Default: ACTIVE)', key: 'status', width: 25 },
     ];
 
     sheet.columns = headers;
@@ -199,7 +205,28 @@ export class SchoolBulkUploadService {
       existingSchools.map((s) => s.code.toUpperCase()),
     );
 
-    // 3. Parse and validate rows
+    // 3. Map dynamic column headers
+    const colMap: Record<string, number> = {};
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      const text = String(cell.value || '')
+        .toLowerCase()
+        .trim()
+        .replace(/[*()_/-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (text.includes('school name') || text === 'name') colMap['name'] = colNumber;
+      else if (text.includes('school code') || text === 'code' || text.includes('udise')) colMap['code'] = colNumber;
+      else if (text.includes('email')) colMap['email'] = colNumber;
+      else if (text.includes('phone') || text.includes('mobile') || text.includes('contact')) colMap['phone'] = colNumber;
+      else if (text.includes('state') || text.includes('province') || text.includes('region')) colMap['state'] = colNumber;
+      else if (text.includes('city') || text.includes('district') || text.includes('town')) colMap['city'] = colNumber;
+      else if (text.includes('address') || text.includes('location')) colMap['address'] = colNumber;
+      else if (text.includes('status')) colMap['status'] = colNumber;
+    });
+
+    // 4. Parse and validate rows
     const rowsToInsert: any[] = [];
     const seenCodesInFile = new Set<string>();
 
@@ -210,23 +237,27 @@ export class SchoolBulkUploadService {
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return; // Skip header
 
-      const getVal = (col: number) => {
+      const getVal = (field: string, fallbackCol: number) => {
+        const col = colMap[field] || fallbackCol;
         const val = row.getCell(col).value;
-        if (!val) return '';
-        if (typeof val === 'object' && 'text' in val) return String(val.text).trim();
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'object' && 'text' in val) return String((val as any).text).trim();
+        if (typeof val === 'object' && 'result' in val) return String((val as any).result).trim();
         return String(val).trim();
       };
 
-      const name = getVal(1);
-      const code = getVal(2).toUpperCase();
-      const email = getVal(3);
-      const phone = getVal(4);
-      const state = getVal(5);
-      const city = getVal(6);
-      const address = getVal(7);
+      const name = getVal('name', 1);
+      const code = getVal('code', 2).toUpperCase();
+      const email = getVal('email', 3);
+      const phone = getVal('phone', 4);
+      const state = getVal('state', 5);
+      const city = getVal('city', 6);
+      const address = getVal('address', 7);
+      const rawStatus = getVal('status', 8);
+      const status = rawStatus ? rawStatus.toUpperCase() : 'ACTIVE';
 
       // Skip completely blank rows
-      if (!name && !code && !state && !city) return;
+      if (!name && !code && !state && !city && !email && !phone && !address) return;
 
       const errors: string[] = [];
 
@@ -245,12 +276,7 @@ export class SchoolBulkUploadService {
         errors.push(`School Code '${code}' already exists in database.`);
       }
 
-      if (!state) {
-        errors.push('State is required.');
-      }
-      if (!city) {
-        errors.push('City / District is required.');
-      }
+      // State, City, Email, Phone, Address are optional - missing state/city does NOT cause invalid error
 
       const isValid = errors.length === 0;
       let deduplicationStatus = 'UNIQUE';
@@ -284,15 +310,18 @@ export class SchoolBulkUploadService {
           state,
           city,
           address,
+          status,
         },
         normalizedData: {
           name,
           code,
           email: email || null,
           phone: phone || null,
-          state,
-          city,
+          state: state || null,
+          city: city || null,
           address: address || null,
+          status: status || 'ACTIVE',
+          errors,
         },
         validationStatus: isValid ? 'VALID' : 'INVALID',
         deduplicationStatus,
@@ -438,20 +467,36 @@ export class SchoolBulkUploadService {
       );
     }
 
+    const queue = 'schools-bulk-upload';
+    const jobId = uploadId;
+
+    if (this.jobProgressService) {
+      await this.jobProgressService.publishStarted(queue, jobId, {
+        type: 'SCHOOL_BULK_CREATION',
+        userId: actor.userId,
+        totalRecords: validRows.length,
+        message: `Starting onboarding of ${validRows.length} schools...`,
+      });
+    }
+
     let createdCount = 0;
     const errors: string[] = [];
 
-    for (const row of validRows) {
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
       const data = (row.normalizedData || row.rawData) as any;
       try {
+        const validStatuses = ['ACTIVE', 'INACTIVE', 'DRAFT', 'SUSPENDED'];
+        const schoolStatus = validStatuses.includes(data.status) ? data.status : 'ACTIVE';
+
         await this.prisma.institution.create({
           data: {
             name: data.name,
             code: data.code,
             type: 'SCHOOL',
-            status: 'ACTIVE',
+            status: schoolStatus,
             email: data.email || null,
-            phone: data.phone || null,
+            phone: data.phone || data.phoneNumber || null,
             state: data.state || null,
             city: data.city || null,
             address: data.address || null,
@@ -473,6 +518,16 @@ export class SchoolBulkUploadService {
           data: { activationStatus: 'FAILED' },
         });
       }
+
+      if (this.jobProgressService) {
+        await this.jobProgressService.publishProgress(queue, jobId, {
+          current: i + 1,
+          total: validRows.length,
+          stage: 'CREATING_SCHOOLS',
+          message: `Onboarded ${i + 1} of ${validRows.length} schools... (${data.name})`,
+          userId: actor.userId,
+        });
+      }
     }
 
     await this.prisma.bulkUpload.update({
@@ -485,6 +540,19 @@ export class SchoolBulkUploadService {
         approvedAt: new Date(),
       },
     });
+
+    if (this.jobProgressService) {
+      await this.jobProgressService.publishCompleted(queue, jobId, {
+        message: `Successfully onboarded ${createdCount} schools (${errors.length} failed).`,
+        userId: actor.userId,
+        totalProcessed: validRows.length,
+        resultSummary: {
+          total: validRows.length,
+          createdCount,
+          failedCount: errors.length,
+        },
+      });
+    }
 
     this.logger.log(
       `Schools batch ${uploadId} activated: ${createdCount} created, ${errors.length} failed`,

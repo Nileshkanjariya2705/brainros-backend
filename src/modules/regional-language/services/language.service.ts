@@ -64,14 +64,32 @@ export class LanguageService {
   }
 
   /**
-   * Get single language by ID
+   * Get single language by ID or Code (e.g. UUID, 'hi', 'en', 'gu')
    */
-  async getLanguageById(id: string) {
-    const language = await this.prisma.preferredLanguage.findUnique({
-      where: { id },
-    });
+  async getLanguageById(idOrCode: string) {
+    if (!idOrCode) {
+      throw new NotFoundException('Language identifier is required.');
+    }
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        idOrCode,
+      );
+
+    const language = isUuid
+      ? await this.prisma.preferredLanguage.findUnique({
+          where: { id: idOrCode },
+        })
+      : await this.prisma.preferredLanguage.findFirst({
+          where: {
+            OR: [
+              { code: { equals: idOrCode.toLowerCase().trim() } },
+              { name: { equals: idOrCode.trim(), mode: 'insensitive' } },
+            ],
+          },
+        });
+
     if (!language) {
-      throw new NotFoundException(`Language with ID '${id}' not found`);
+      throw new NotFoundException(`Language '${idOrCode}' not found`);
     }
     return language;
   }

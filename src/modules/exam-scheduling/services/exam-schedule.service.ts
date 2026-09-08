@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamLifecycleService } from './exam-lifecycle.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
+import { AdminScheduleExamDto } from '../dto/admin-schedule-exam.dto';
 import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -270,6 +271,352 @@ export class ExamScheduleService {
     }
 
     return scheduled;
+  }
+
+  /**
+   * Admin Exam Scheduling Flow: SPECIFIC_SUBJECT | SPECIFIC_CHAPTER | JEE/NEET/CET
+   */
+  async scheduleAdminExam(dto: AdminScheduleExamDto, scheduledById: string) {
+    const startTime = new Date(dto.startTime);
+    if (isNaN(startTime.getTime())) {
+      throw new BadRequestException('Invalid startTime ISO timestamp format.');
+    }
+
+    let title = dto.title?.trim();
+    let durationMinutes = dto.durationMinutes || 180;
+    let totalQuestions = dto.totalQuestions || 100;
+    let examTargetId = dto.examTargetId;
+    let subjectId = dto.subjectId;
+    let chapterId = dto.chapterId;
+    let blueprintId = dto.blueprintId;
+
+    let targetName = 'General';
+    let subjectObj: any = null;
+    let chapterObj: any = null;
+    let blueprintObj: any = null;
+
+    const examTypeUpper = (dto.examType || '').toUpperCase();
+
+    if (examTypeUpper === 'SPECIFIC_SUBJECT') {
+      if (!subjectId) {
+        throw new BadRequestException('subjectId is required for Specific Subject exams.');
+      }
+      subjectObj = await this.prisma.subject.findUnique({
+        where: { id: subjectId },
+        include: { examTarget: true },
+      });
+      if (!subjectObj) {
+        throw new NotFoundException(`Subject with ID '${subjectId}' not found.`);
+      }
+      examTargetId = subjectObj.examTargetId;
+      targetName = subjectObj.examTarget?.name || 'General';
+      if (!title) {
+        title = `${subjectObj.name} Subject Exam`;
+      }
+      if (!dto.totalQuestions || dto.totalQuestions <= 0) {
+        throw new BadRequestException('Number of questions must be greater than 0.');
+      }
+      if (!dto.durationMinutes || dto.durationMinutes <= 0) {
+        throw new BadRequestException('Duration in minutes must be greater than 0.');
+      }
+
+      // Pool availability check for subject
+      const availableCount = await this.prisma.question.count({
+        where: {
+          subjectId,
+          status: 'APPROVED',
+          isActive: true,
+        },
+      });
+
+      if (availableCount < totalQuestions) {
+        throw new BadRequestException(
+          `Insufficient question pool for subject '${subjectObj.name}'. Required: ${totalQuestions}, Available: ${availableCount}.`,
+        );
+      }
+    } else if (examTypeUpper === 'SPECIFIC_CHAPTER') {
+      if (!subjectId || !chapterId) {
+        throw new BadRequestException('Both subjectId and chapterId are required for Specific Chapter exams.');
+      }
+      subjectObj = await this.prisma.subject.findUnique({
+        where: { id: subjectId },
+        include: { examTarget: true },
+      });
+      if (!subjectObj) {
+        throw new NotFoundException(`Subject with ID '${subjectId}' not found.`);
+      }
+      chapterObj = await this.prisma.chapter.findUnique({
+        where: { id: chapterId },
+      });
+      if (!chapterObj) {
+        throw new NotFoundException(`Chapter with ID '${chapterId}' not found.`);
+      }
+      examTargetId = subjectObj.examTargetId;
+      targetName = subjectObj.examTarget?.name || 'General';
+      if (!title) {
+        title = `${subjectObj.name} - ${chapterObj.name} Chapter Exam`;
+      }
+      if (!dto.totalQuestions || dto.totalQuestions <= 0) {
+        throw new BadRequestException('Number of questions must be greater than 0.');
+      }
+      if (!dto.durationMinutes || dto.durationMinutes <= 0) {
+        throw new BadRequestException('Duration in minutes must be greater than 0.');
+      }
+
+      // Pool availability check for chapter
+      const availableCount = await this.prisma.question.count({
+        where: {
+          chapterId,
+          status: 'APPROVED',
+          isActive: true,
+        },
+      });
+
+      if (availableCount < totalQuestions) {
+        throw new BadRequestException(
+          `Insufficient question pool for chapter '${chapterObj.name}'. Required: ${totalQuestions}, Available: ${availableCount}.`,
+        );
+      }
+    } else {
+      // JEE / NEET / CET Blueprint Exam
+      if (blueprintId) {
+        blueprintObj = await this.prisma.examBlueprint.findUnique({
+          where: { id: blueprintId },
+          include: {
+            rules: true,
+            exam: { include: { examTarget: true } },
+          },
+        });
+      }
+
+      if (!blueprintObj) {
+        const targetSearch = (dto.examType || '').toUpperCase();
+        let matchedTarget = await this.prisma.examTarget.findFirst({
+          where: {
+            name: { contains: targetSearch === 'JEE_NEET_CET' ? 'NEET' : targetSearch, mode: 'insensitive' },
+          },
+        });
+        if (!matchedTarget) {
+          matchedTarget = await this.prisma.examTarget.findFirst();
+        }
+        if (matchedTarget) {
+          examTargetId = matchedTarget.id;
+          targetName = matchedTarget.name;
+          blueprintObj = await this.prisma.examBlueprint.findFirst({
+            where: { exam: { examTargetId: matchedTarget.id } },
+            include: { rules: true, exam: { include: { examTarget: true } } },
+          });
+        }
+      }
+
+      if (blueprintObj) {
+        totalQuestions = blueprintObj.totalQuestions || dto.totalQuestions || 180;
+        durationMinutes = blueprintObj.exam?.durationMinutes || dto.durationMinutes || 180;
+        examTargetId = blueprintObj.exam?.examTargetId || examTargetId;
+        if (!title) {
+          title = `${blueprintObj.name || targetName} Mock Exam`;
+        }
+      } else {
+        targetName = dto.examType || 'NEET';
+        let matchedTarget = await this.prisma.examTarget.findFirst({
+          where: { name: { equals: targetName, mode: 'insensitive' } },
+        });
+        if (!matchedTarget) {
+          matchedTarget = await this.prisma.examTarget.findFirst();
+        }
+        examTargetId = matchedTarget?.id || '';
+        if (!title) {
+          title = `${targetName} Grand Exam`;
+        }
+      }
+    }
+
+    // Auto-compute End Time from startTime + durationMinutes
+    const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+
+    // Resolve or fallback exam target
+    if (!examTargetId) {
+      const fallbackTarget = await this.prisma.examTarget.findFirst();
+      if (fallbackTarget) {
+        examTargetId = fallbackTarget.id;
+      } else {
+        const createdTarget = await this.prisma.examTarget.create({
+          data: { name: 'General Exam Target', description: 'Default Target' },
+        });
+        examTargetId = createdTarget.id;
+      }
+    }
+
+    const scheduledStatus = await this.lifecycleService.getOrCreateExamStatus('SCHEDULED');
+
+    // Create Exam, Version & Schedule in a transaction
+    const scheduleRecord = await this.prisma.$transaction(async (tx) => {
+      // 1. Create Exam record
+      const exam = await tx.exam.create({
+        data: {
+          examTargetId,
+          title,
+          description: `Scheduled via Admin Exam Manager (${dto.examType})`,
+          totalQuestions,
+          totalMarks: totalQuestions * 4,
+          durationMinutes,
+          defaultMarksPerQuestion: 4,
+          defaultNegativeMarks: 1,
+          statusId: scheduledStatus.id,
+          startTime,
+          endTime,
+          createdById: scheduledById,
+        },
+      });
+
+      // 2. Create Section
+      if (subjectId) {
+        await tx.examSection.create({
+          data: {
+            examId: exam.id,
+            subjectId,
+            name: subjectObj?.name || 'Section A',
+            totalQuestions,
+            displayOrder: 1,
+          },
+        });
+      } else {
+        const subjectsList = await tx.subject.findMany({
+          where: { examTargetId },
+          take: 4,
+        });
+        const sectionQuestions = Math.floor(totalQuestions / (subjectsList.length || 1));
+        for (let i = 0; i < subjectsList.length; i++) {
+          await tx.examSection.create({
+            data: {
+              examId: exam.id,
+              subjectId: subjectsList[i].id,
+              name: `${subjectsList[i].name} Section`,
+              totalQuestions: sectionQuestions,
+              displayOrder: i + 1,
+            },
+          });
+        }
+      }
+
+      // 3. Select Questions & create Snapshot Version
+      let selectedQuestions: any[] = [];
+      if (chapterId) {
+        selectedQuestions = await tx.question.findMany({
+          where: { chapterId, status: 'APPROVED', isActive: true },
+          take: totalQuestions,
+        });
+      } else if (subjectId) {
+        selectedQuestions = await tx.question.findMany({
+          where: { subjectId, status: 'APPROVED', isActive: true },
+          take: totalQuestions,
+        });
+      } else {
+        selectedQuestions = await tx.question.findMany({
+          where: { subject: { examTargetId }, status: 'APPROVED', isActive: true },
+          take: totalQuestions,
+        });
+      }
+
+      // 4. Create ExamVersion
+      const version = await tx.examVersion.create({
+        data: {
+          examId: exam.id,
+          blueprintId: blueprintId || undefined,
+          versionNumber: 1,
+          status: 'PUBLISHED',
+          totalQuestions,
+          durationMinutes,
+          totalMarks: totalQuestions * 4,
+          generatedById: scheduledById,
+        },
+      });
+
+      // 5. Link ExamQuestions
+      for (let idx = 0; idx < selectedQuestions.length; idx++) {
+        const q = selectedQuestions[idx];
+        let sec = await tx.examSection.findFirst({
+          where: { examId: exam.id, subjectId: q.subjectId },
+        });
+        if (!sec) {
+          sec = await tx.examSection.findFirst({ where: { examId: exam.id } });
+        }
+        if (sec) {
+          await tx.examQuestion.create({
+            data: {
+              examId: exam.id,
+              sectionId: sec.id,
+              questionId: q.id,
+              displayOrder: idx + 1,
+              marks: q.marks || 4.0,
+              negativeMarks: q.negativeMarks || 1.0,
+            },
+          });
+        }
+      }
+
+      // 6. Create ExamSchedule
+      const schedule = await tx.examSchedule.create({
+        data: {
+          examId: exam.id,
+          examVersionId: version.id,
+          startTime,
+          endTime,
+          timezone: dto.timezone || 'Asia/Kolkata',
+          status: 'SCHEDULED',
+          scheduledById,
+        },
+        include: {
+          exam: {
+            include: {
+              status: true,
+              examTarget: true,
+              sections: { include: { subject: true } },
+            },
+          },
+          examVersion: true,
+        },
+      });
+
+      // 7. Audit log
+      await this.lifecycleService.recordHistory(
+        {
+          examId: exam.id,
+          examVersionId: version.id,
+          scheduleId: schedule.id,
+          action: 'SCHEDULE',
+          fromStatus: 'DRAFT',
+          toStatus: 'SCHEDULED',
+          performedById: scheduledById,
+          comment: `Scheduled ${dto.examType} exam for window ${startTime.toISOString()} - ${endTime.toISOString()}`,
+          metadata: {
+            examType: dto.examType,
+            subjectId,
+            chapterId,
+            totalQuestions,
+            durationMinutes,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+          },
+        },
+        tx,
+      );
+
+      return schedule;
+    });
+
+    // Asynchronous student notification
+    try {
+      this.notificationQueue.dispatchExamNotificationJob({
+        type: 'EXAM_SCHEDULED',
+        examId: scheduleRecord.examId,
+        scheduleId: scheduleRecord.id,
+      });
+    } catch (nErr: any) {
+      this.logger.warn(`Notification dispatch error: ${nErr.message}`);
+    }
+
+    return scheduleRecord;
   }
 
   /**

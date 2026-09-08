@@ -3,9 +3,9 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('--- Syncing Database to 3 Focus Exams: NEET, JEE, CAT ---');
+  console.log('--- Syncing Database to Focus Exams: NEET, JEE ---');
 
-  // 1. Upsert 3 Exam Targets: NEET, JEE, CAT
+  // 1. Upsert Exam Targets: NEET, JEE
   const targetDefs = [
     {
       name: 'NEET',
@@ -14,10 +14,6 @@ async function main() {
     {
       name: 'JEE',
       description: 'Joint Entrance Examination (Engineering)',
-    },
-    {
-      name: 'CAT',
-      description: 'Common Admission & Entrance Test',
     },
   ];
 
@@ -43,10 +39,10 @@ async function main() {
     }
   }
 
-  // 2. Re-assign any orphaned / old targets (JEE_MAIN, JEE_ADVANCED, BITSAT, CET) to JEE or CAT
+  // 2. Re-assign any orphaned / old targets (CAT, JEE_MAIN, etc) to JEE or NEET
   const oldTargets = await prisma.examTarget.findMany({
     where: {
-      name: { notIn: ['NEET', 'JEE', 'CAT'] },
+      name: { notIn: ['NEET', 'JEE'] },
     },
     include: {
       subjects: true,
@@ -58,11 +54,10 @@ async function main() {
 
   const neet = targetMap.get('NEET');
   const jee = targetMap.get('JEE');
-  const cat = targetMap.get('CAT');
 
   for (const oldT of oldTargets) {
     console.log(`Migrating data from old target: ${oldT.name}...`);
-    const newTargetId = oldT.name.includes('JEE') || oldT.name.includes('BITSAT') ? jee.id : cat.id;
+    const newTargetId = oldT.name.includes('JEE') || oldT.name.includes('BITSAT') ? jee.id : neet.id;
 
     // Migrate Exams
     await prisma.exam.updateMany({
@@ -84,7 +79,6 @@ async function main() {
 
     // Migrate Subjects
     for (const sub of oldT.subjects) {
-      // Check if subject with same name already exists in target
       const existingInNew = await prisma.subject.findFirst({
         where: { examTargetId: newTargetId, name: sub.name },
       });
@@ -105,8 +99,7 @@ async function main() {
     }
   }
 
-  // 3. Ensure Standard Subjects for each of the 3 Targets
-  // NEET -> Physics, Chemistry, Biology (Botany & Zoology)
+  // 3. Ensure Standard Subjects for NEET and JEE
   const neetSubjects = [
     { name: 'Physics (NEET)', code: 'NEET_PHY', displayOrder: 1 },
     { name: 'Chemistry (NEET)', code: 'NEET_CHEM', displayOrder: 2 },
@@ -115,19 +108,10 @@ async function main() {
     { name: 'Zoology', code: 'NEET_ZOO', displayOrder: 5 },
   ];
 
-  // JEE -> Physics, Chemistry, Mathematics
   const jeeSubjects = [
     { name: 'Physics (JEE)', code: 'JEE_PHY', displayOrder: 1 },
     { name: 'Chemistry (JEE)', code: 'JEE_CHEM', displayOrder: 2 },
     { name: 'Mathematics', code: 'JEE_MATH', displayOrder: 3 },
-  ];
-
-  // CAT -> Physics, Chemistry, Mathematics, Biology
-  const catSubjects = [
-    { name: 'Physics (CAT)', code: 'CAT_PHY', displayOrder: 1 },
-    { name: 'Chemistry (CAT)', code: 'CAT_CHEM', displayOrder: 2 },
-    { name: 'Mathematics (CAT)', code: 'CAT_MATH', displayOrder: 3 },
-    { name: 'Biology (CAT)', code: 'CAT_BIO', displayOrder: 4 },
   ];
 
   const ensureSubjects = async (targetId: string, subjects: any[]) => {
@@ -159,9 +143,8 @@ async function main() {
 
   await ensureSubjects(neet.id, neetSubjects);
   await ensureSubjects(jee.id, jeeSubjects);
-  await ensureSubjects(cat.id, catSubjects);
 
-  console.log('--- Successfully configured 3 Focus Exams (NEET, JEE, CAT) & Subjects ---');
+  console.log('--- Successfully configured Focus Exams (NEET, JEE) & Subjects ---');
 }
 
 main()

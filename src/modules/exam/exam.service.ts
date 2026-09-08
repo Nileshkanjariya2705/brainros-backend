@@ -88,9 +88,6 @@ export class ExamService {
     } else if (blueprint.totalQuestions === 180 || blueprint.totalQuestions === 200) {
       duration = 200; // NEET
       totalMarks = 720; // NEET-UG total marks is 720 (180 questions x 4 marks)
-    } else if (blueprint.totalQuestions === 68) {
-      duration = 120; // CAT
-      totalMarks = 204;
     }
 
     const exam = await this.prisma.exam.create({

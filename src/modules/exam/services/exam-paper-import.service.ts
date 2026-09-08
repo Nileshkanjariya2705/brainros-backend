@@ -907,7 +907,7 @@ export class ExamPaperImportService {
       });
     }
 
-    // Ensure canonical predefined exam blueprints exist (NEET, JEE Main, CAT)
+    // Ensure canonical predefined exam blueprints exist (NEET, JEE Main)
     const canonicals = [
       {
         name: 'NEET',
@@ -933,25 +933,6 @@ export class ExamPaperImportService {
           { subject: 'Physics', questionCount: 30 },
           { subject: 'Chemistry', questionCount: 30 },
           { subject: 'Mathematics', questionCount: 30 },
-        ],
-      },
-      {
-        name: 'CAT',
-        code: 'CAT',
-        totalQuestions: 68,
-        durationMinutes: 120,
-        description:
-          'Standard IIM CAT blueprint (VARC 24, DILR 20, Quantitative Aptitude 24 = 68 Questions)',
-        subjectDistribution: [
-          {
-            subject: 'Verbal Ability & Reading Comprehension',
-            questionCount: 24,
-          },
-          {
-            subject: 'Data Interpretation & Logical Reasoning',
-            questionCount: 20,
-          },
-          { subject: 'Quantitative Aptitude', questionCount: 24 },
         ],
       },
     ];
@@ -1842,44 +1823,11 @@ export class ExamPaperImportService {
    * for exams that have a scheduled session.
    */
   async validateQuestionPaperUploadWindow(
-    examId?: string,
-    scheduleId?: string,
+    _examId?: string,
+    _scheduleId?: string,
   ): Promise<void> {
-    if (!examId && !scheduleId) return;
-
-    const schedule = await this.prisma.examSchedule.findFirst({
-      where: scheduleId
-        ? { id: scheduleId }
-        : { examId, status: { in: ['SCHEDULED', 'ACTIVE'] } },
-      orderBy: { startTime: 'asc' },
-    });
-
-    if (!schedule) {
-      // Exam is in draft / not yet scheduled. Permitted.
-      return;
-    }
-
-    const now = Date.now();
-    const startTimeMs = new Date(schedule.startTime).getTime();
-    const windowStartMs = startTimeMs - 24 * 60 * 60 * 1000; // 24 hours prior
-
-    if (now < windowStartMs) {
-      const formattedOpen = new Date(windowStartMs).toLocaleString('en-IN', {
-        timeZone: schedule.timezone || 'Asia/Kolkata',
-      });
-      throw new BadRequestException(
-        `Question paper upload window is not yet open. Uploads are strictly permitted only within 24 hours of exam start time. The 24-hour upload window opens at: ${formattedOpen} (${schedule.timezone || 'Asia/Kolkata'}).`,
-      );
-    }
-
-    if (now > startTimeMs) {
-      const formattedStart = new Date(startTimeMs).toLocaleString('en-IN', {
-        timeZone: schedule.timezone || 'Asia/Kolkata',
-      });
-      throw new BadRequestException(
-        `Question paper upload window is closed. Examination already commenced at: ${formattedStart} (${schedule.timezone || 'Asia/Kolkata'}).`,
-      );
-    }
+    // Permitted for all admin question paper uploads across all exam states (Draft, Approved, Scheduled, Live/Active)
+    return;
   }
 }
 

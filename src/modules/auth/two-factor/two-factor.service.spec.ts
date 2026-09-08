@@ -70,6 +70,7 @@ describe('TwoFactorService', () => {
       redisServiceMock as RedisService,
       securityEventServiceMock as SecurityEventService,
       twoFactorDotInProviderMock as TwoFactorDotInProvider,
+      twoFactorDotInProviderMock as any,
       devProviderMock as DevelopmentOtpProvider,
     );
   };

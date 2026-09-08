@@ -1,0 +1,202 @@
+[
+  {
+    "index": 1,
+    "question_id": "cc96a433-2600-41f9-a097-580d10e07b7e",
+    "question_text": "A block of mass 2 kg is placed on a rough horizontal surface with coefficient of static friction 0.4. What minimum force is required to move the block? (Take g = 9.8 m/s²)",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "7.84 N",
+      "b": "9.8 N",
+      "c": "19.6 N",
+      "d": "3.92 N"
+    },
+    "explanation": "Limiting friction f_max = mu_s * N = 0.4 * (2 * 9.8) = 7.84 N."
+  },
+  {
+    "index": 2,
+    "question_id": "e1d68618-5b57-429e-869d-9256dbfe942b",
+    "question_text": "[Variant 2] A block of mass 2 kg is placed on a rough horizontal surface with coefficient of static friction 0.4. What minimum force is required to move the block? (Take g = 9.8 m/s²)",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "7.84 N",
+      "b": "9.8 N",
+      "c": "19.6 N",
+      "d": "3.92 N"
+    },
+    "explanation": "Limiting friction f_max = mu_s * N = 0.4 * (2 * 9.8) = 7.84 N."
+  },
+  {
+    "index": 3,
+    "question_id": "745c0ed1-fc49-4424-9408-d9b744102d8c",
+    "question_text": "[Variant 3] A block of mass 2 kg is placed on a rough horizontal surface with coefficient of static friction 0.4. What minimum force is required to move the block? (Take g = 9.8 m/s²)",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "7.84 N",
+      "b": "9.8 N",
+      "c": "19.6 N",
+      "d": "3.92 N"
+    },
+    "explanation": "Limiting friction f_max = mu_s * N = 0.4 * (2 * 9.8) = 7.84 N."
+  },
+  {
+    "index": 4,
+    "question_id": "465964b4-48de-4963-86b3-9aa08a01d7c3",
+    "question_text": "[Variant 4] A block of mass 2 kg is placed on a rough horizontal surface with coefficient of static friction 0.4. What minimum force is required to move the block? (Take g = 9.8 m/s²)",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "7.84 N",
+      "b": "9.8 N",
+      "c": "19.6 N",
+      "d": "3.92 N"
+    },
+    "explanation": "Limiting friction f_max = mu_s * N = 0.4 * (2 * 9.8) = 7.84 N."
+  },
+  {
+    "index": 5,
+    "question_id": "1e06f512-689e-40bc-b19f-550dcdaadcdf",
+    "question_text": "[Variant 5] A block of mass 2 kg is placed on a rough horizontal surface with coefficient of static friction 0.4. What minimum force is required to move the block? (Take g = 9.8 m/s²)",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "7.84 N",
+      "b": "9.8 N",
+      "c": "19.6 N",
+      "d": "3.92 N"
+    },
+    "explanation": "Limiting friction f_max = mu_s * N = 0.4 * (2 * 9.8) = 7.84 N."
+  },
+  {
+    "index": 6,
+    "question_id": "3a8ca89e-cfd2-4083-aae8-d92d98647133",
+    "question_text": "Two point charges of +2 microcoulomb and +8 microcoulomb are separated by a distance of 6 cm. Find the distance (in cm) from the +2 microcoulomb charge where the electric field is zero.",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {},
+    "explanation": "Distance x = d / (sqrt(q2/q1) + 1) = 6 / (sqrt(8/2) + 1) = 6 / (2 + 1) = 2.0 cm."
+  },
+  {
+    "index": 7,
+    "question_id": "a26f2756-03a5-413f-8be6-3d041fea20e9",
+    "question_text": "[Variant 2] Two point charges of +2 microcoulomb and +8 microcoulomb are separated by a distance of 6 cm. Find the distance (in cm) from the +2 microcoulomb charge where the electric field is zero.",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {},
+    "explanation": "Distance x = d / (sqrt(q2/q1) + 1) = 6 / (sqrt(8/2) + 1) = 6 / (2 + 1) = 2.0 cm."
+  },
+  {
+    "index": 8,
+    "question_id": "a7a3528a-eaff-48fc-ba82-666e38599c2b",
+    "question_text": "[Variant 3] Two point charges of +2 microcoulomb and +8 microcoulomb are separated by a distance of 6 cm. Find the distance (in cm) from the +2 microcoulomb charge where the electric field is zero.",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {},
+    "explanation": "Distance x = d / (sqrt(q2/q1) + 1) = 6 / (sqrt(8/2) + 1) = 6 / (2 + 1) = 2.0 cm."
+  },
+  {
+    "index": 9,
+    "question_id": "51b278a2-5f30-472a-b6a5-cedf6efdda0e",
+    "question_text": "[Variant 4] Two point charges of +2 microcoulomb and +8 microcoulomb are separated by a distance of 6 cm. Find the distance (in cm) from the +2 microcoulomb charge where the electric field is zero.",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {},
+    "explanation": "Distance x = d / (sqrt(q2/q1) + 1) = 6 / (sqrt(8/2) + 1) = 6 / (2 + 1) = 2.0 cm."
+  },
+  {
+    "index": 10,
+    "question_id": "dd86a981-4ea2-4058-a081-6c9ad5b237c8",
+    "question_text": "[Variant 5] Two point charges of +2 microcoulomb and +8 microcoulomb are separated by a distance of 6 cm. Find the distance (in cm) from the +2 microcoulomb charge where the electric field is zero.",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {},
+    "explanation": "Distance x = d / (sqrt(q2/q1) + 1) = 6 / (sqrt(8/2) + 1) = 6 / (2 + 1) = 2.0 cm."
+  },
+  {
+    "index": 11,
+    "question_id": "b5177e9e-8f85-4269-b551-df35938f4795",
+    "question_text": "The value of lim (x -> 0) [sin(5x) / tan(2x)] is equal to:",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "5/2",
+      "b": "2/5",
+      "c": "1",
+      "d": "0"
+    },
+    "explanation": "lim (sin 5x / 5x) * 5 / ((tan 2x / 2x) * 2) = 1 * 5 / (1 * 2) = 5/2."
+  },
+  {
+    "index": 12,
+    "question_id": "071dfc76-52ef-47fe-a390-bf100146c4e3",
+    "question_text": "[Variant 2] The value of lim (x -> 0) [sin(5x) / tan(2x)] is equal to:",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "5/2",
+      "b": "2/5",
+      "c": "1",
+      "d": "0"
+    },
+    "explanation": "lim (sin 5x / 5x) * 5 / ((tan 2x / 2x) * 2) = 1 * 5 / (1 * 2) = 5/2."
+  },
+  {
+    "index": 13,
+    "question_id": "dd15b15d-8b2e-404a-9a75-1aec0d8355e1",
+    "question_text": "[Variant 3] The value of lim (x -> 0) [sin(5x) / tan(2x)] is equal to:",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "5/2",
+      "b": "2/5",
+      "c": "1",
+      "d": "0"
+    },
+    "explanation": "lim (sin 5x / 5x) * 5 / ((tan 2x / 2x) * 2) = 1 * 5 / (1 * 2) = 5/2."
+  },
+  {
+    "index": 14,
+    "question_id": "74bae15c-f956-411e-b7d7-35ed353ec730",
+    "question_text": "[Variant 4] The value of lim (x -> 0) [sin(5x) / tan(2x)] is equal to:",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "5/2",
+      "b": "2/5",
+      "c": "1",
+      "d": "0"
+    },
+    "explanation": "lim (sin 5x / 5x) * 5 / ((tan 2x / 2x) * 2) = 1 * 5 / (1 * 2) = 5/2."
+  },
+  {
+    "index": 15,
+    "question_id": "a705cc96-74b0-424c-9b33-a21219e6b3ef",
+    "question_text": "[Variant 5] The value of lim (x -> 0) [sin(5x) / tan(2x)] is equal to:",
+    "passage_text": "",
+    "assertion_text": "",
+    "reason_text": "",
+    "options": {
+      "a": "5/2",
+      "b": "2/5",
+      "c": "1",
+      "d": "0"
+    },
+    "explanation": "lim (sin 5x / 5x) * 5 / ((tan 2x / 2x) * 2) = 1 * 5 / (1 * 2) = 5/2."
+  }
+]

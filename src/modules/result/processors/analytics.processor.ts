@@ -9,6 +9,7 @@ import {
 } from '../interfaces/result-lifecycle.interface';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ResultService } from '../result.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
 @Processor(ANALYTICS_QUEUE_NAME, {
   concurrency: 5,
@@ -21,6 +22,7 @@ export class AnalyticsProcessor extends WorkerHost {
     private readonly resultService: ResultService,
     @InjectQueue(RANKING_QUEUE_NAME)
     private readonly rankingQueue: Queue,
+    private readonly jobProgressService: JobProgressService,
   ) {
     super();
   }
@@ -32,6 +34,7 @@ export class AnalyticsProcessor extends WorkerHost {
 
   async process(job: Job<AnalyticsJobPayload>): Promise<any> {
     const { attemptId } = job.data;
+    const jobId = String(job.id || `analytics_${attemptId}`);
     this.logger.log(
       `[AnalyticsWorker] Starting analytics processing for attempt '${attemptId}'`,
     );
@@ -46,6 +49,15 @@ export class AnalyticsProcessor extends WorkerHost {
         throw new Error(`Attempt '${attemptId}' not found for analytics`);
       }
 
+      await this.jobProgressService.publishStarted(ANALYTICS_QUEUE_NAME, jobId, {
+        type: 'EXAM_ANALYTICS',
+        stage: 'ANALYTICS',
+        attemptId,
+        examId: attempt.examId,
+        userId: (attempt as any)?.student?.userId,
+        message: 'Calculating time & strategy analytics...',
+      });
+
       // 1. Mark status as ANALYTICS_PROCESSING
       if (attempt.result) {
         await this.prisma.result.update({
@@ -57,6 +69,22 @@ export class AnalyticsProcessor extends WorkerHost {
       // 2. Execute Time Analysis & Attempt Strategy calculations
       await this.resultService.getTimeAnalysis(attemptId);
       await this.resultService.getAttemptStrategy(attemptId);
+
+      await this.jobProgressService.publishProgress(
+        ANALYTICS_QUEUE_NAME,
+        jobId,
+        70,
+        100,
+        {
+          stage: 'ANALYTICS',
+          stageIndex: 2,
+          totalStages: 3,
+          message: 'Analytics completed. Preparing ranking...',
+          attemptId,
+          examId: attempt.examId,
+          userId: (attempt as any)?.student?.userId,
+        },
+      );
 
       // 3. Mark status as RANKING_PROCESSING
       if (attempt.result) {
@@ -83,6 +111,13 @@ export class AnalyticsProcessor extends WorkerHost {
         },
       );
 
+      await this.jobProgressService.publishCompleted(ANALYTICS_QUEUE_NAME, jobId, {
+        message: 'Analytics stage completed. Enqueued ranking stage.',
+        attemptId,
+        examId: attempt.examId,
+        userId: (attempt as any)?.student?.userId,
+      });
+
       this.logger.log(
         `[AnalyticsWorker] Analytics completed for attempt '${attemptId}'. Enqueued ranking job.`,
       );
@@ -92,6 +127,11 @@ export class AnalyticsProcessor extends WorkerHost {
       this.logger.error(
         `[AnalyticsWorker] Failed analytics for attempt '${attemptId}': ${err.message}`,
         err.stack,
+      );
+      await this.jobProgressService.publishFailed(
+        ANALYTICS_QUEUE_NAME,
+        jobId,
+        err.message || 'Analytics calculation failed.',
       );
       throw err;
     }

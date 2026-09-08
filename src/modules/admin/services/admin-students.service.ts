@@ -71,11 +71,33 @@ export class AdminStudentsService {
     }
 
     if (query.stateId) {
-      where.stateId = query.stateId;
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+        query.stateId,
+      );
+      if (isUuid) {
+        where.stateId = query.stateId;
+      } else {
+        where.OR = [
+          ...(where.OR || []),
+          { state: { contains: query.stateId, mode: 'insensitive' } },
+          { stateRef: { name: { contains: query.stateId, mode: 'insensitive' } } },
+        ];
+      }
     }
 
     if (query.districtId) {
-      where.districtId = query.districtId;
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+        query.districtId,
+      );
+      if (isUuid) {
+        where.districtId = query.districtId;
+      } else {
+        where.OR = [
+          ...(where.OR || []),
+          { district: { contains: query.districtId, mode: 'insensitive' } },
+          { districtRef: { name: { contains: query.districtId, mode: 'insensitive' } } },
+        ];
+      }
     }
 
     if (query.institutionId) {
@@ -614,5 +636,107 @@ export class AdminStudentsService {
     return {
       message: 'Parent link revoked successfully.',
     };
+  }
+
+  /**
+   * Update student details (Name, Email, Mobile, School, Class, Target, Location, Status)
+   */
+  async updateStudent(studentId: string, dto: any, actorUserId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: { user: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(`Student with ID '${studentId}' not found.`);
+    }
+
+    const studentData: Prisma.StudentUpdateInput = {};
+    if (dto.name !== undefined) studentData.name = dto.name.trim();
+    if (dto.schoolCollege !== undefined) studentData.schoolCollege = dto.schoolCollege.trim();
+    if (dto.status !== undefined) studentData.status = dto.status as StudentStatus;
+
+    if (dto.classId) {
+      studentData.studentClass = { connect: { id: dto.classId } };
+    }
+    if (dto.examTargetId) {
+      studentData.examTarget = { connect: { id: dto.examTargetId } };
+    }
+    if (dto.stateId !== undefined) {
+      studentData.stateRef = dto.stateId ? { connect: { id: dto.stateId } } : { disconnect: true };
+    }
+    if (dto.districtId !== undefined) {
+      studentData.districtRef = dto.districtId ? { connect: { id: dto.districtId } } : { disconnect: true };
+    }
+
+    if (dto.state !== undefined) studentData.state = dto.state;
+    if (dto.district !== undefined) studentData.district = dto.district;
+
+    await this.prisma.student.update({
+      where: { id: studentId },
+      data: studentData,
+    });
+
+    // Update associated User account email & mobile number if changed
+    if (student.userId) {
+      const userData: Prisma.UserUpdateInput = {};
+      if (dto.email !== undefined && dto.email.trim().toLowerCase() !== (student.user?.email || '')) {
+        const newEmail = dto.email.trim().toLowerCase();
+        if (newEmail) {
+          const existing = await this.prisma.user.findUnique({ where: { email: newEmail } });
+          if (existing && existing.id !== student.userId) {
+            throw new BadRequestException('Email is already registered by another user.');
+          }
+          userData.email = newEmail;
+        }
+      }
+
+      if (dto.mobile !== undefined && dto.mobile.trim() !== (student.user?.mobileNumber || '')) {
+        const newMobile = dto.mobile.trim();
+        if (newMobile) {
+          const existing = await this.prisma.user.findFirst({
+            where: { OR: [{ mobileNumber: newMobile }, { phone: newMobile }] },
+          });
+          if (existing && existing.id !== student.userId) {
+            throw new BadRequestException('Mobile number is already registered by another user.');
+          }
+          userData.mobileNumber = newMobile;
+          userData.phone = newMobile;
+        }
+      }
+
+      if (Object.keys(userData).length > 0) {
+        await this.prisma.user.update({
+          where: { id: student.userId },
+          data: userData,
+        });
+      }
+    }
+
+    // Audit Log
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'STUDENT_PROFILE_UPDATED',
+          entityType: 'STUDENT',
+          entityId: studentId,
+          reason: `Admin updated profile for student ${student.name} (${student.studentId})`,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Failed to write audit log for student update: ${e}`);
+    }
+
+    return this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        user: { select: { id: true, email: true, mobileNumber: true, status: true, isActive: true } },
+        studentClass: true,
+        examTarget: true,
+        stateRef: true,
+        districtRef: true,
+      },
+    });
   }
 }

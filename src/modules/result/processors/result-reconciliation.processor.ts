@@ -6,6 +6,7 @@ import { RedisService } from '../../redis/redis.service';
 import { ResultService } from '../result.service';
 import { ResultReadinessService } from '../services/result-readiness.service';
 import { ResultAccessService } from '../services/result-access.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 import {
   RECONCILIATION_QUEUE_NAME,
   EVALUATION_QUEUE_NAME,
@@ -31,6 +32,7 @@ export class ResultReconciliationProcessor extends WorkerHost {
     private readonly evaluationQueue: Queue,
     @InjectQueue(EXAM_WINDOW_END_QUEUE_NAME)
     private readonly windowEndQueue: Queue,
+    private readonly jobProgressService: JobProgressService,
   ) {
     super();
   }
@@ -41,6 +43,7 @@ export class ResultReconciliationProcessor extends WorkerHost {
   }
 
   async process(job: Job<ReconciliationJobPayload>): Promise<any> {
+    const jobId = String(job.id || `reconcile_${Date.now()}`);
     const lockKey = 'lock:result-reconciliation-run';
     const isLocked = await this.redisService.get(lockKey);
     if (isLocked) {
@@ -50,6 +53,12 @@ export class ResultReconciliationProcessor extends WorkerHost {
 
     // Acquire lock for 60s
     await this.redisService.set(lockKey, 'locked', 60);
+
+    await this.jobProgressService.publishStarted(RECONCILIATION_QUEUE_NAME, jobId, {
+      type: 'RESULT_RECONCILIATION',
+      stage: 'CHECKING_STUCK_RESULTS',
+      message: 'Checking for stuck attempts and un-evaluated results...',
+    });
 
     try {
       this.logger.log('[Reconciliation] Starting periodic background result reconciliation check.');
@@ -88,8 +97,12 @@ export class ResultReconciliationProcessor extends WorkerHost {
         take: 50,
       });
 
+      let processedCount = 0;
+      const totalStuck = stuckCalculatedResults.length;
+
       for (const res of stuckCalculatedResults) {
         stats.processedTotal++;
+        processedCount++;
         const isLive = await this.readinessService.isLiveExam(res.attempt.examId);
 
         if (!isLive) {
@@ -130,6 +143,19 @@ export class ResultReconciliationProcessor extends WorkerHost {
             stats.repairedLiveReady++;
             this.logger.log(`[Reconciliation] Repaired Live result '${res.attemptId}' -> READY_TO_PUBLISH`);
           }
+        }
+
+        if (totalStuck > 0) {
+          await this.jobProgressService.publishProgress(
+            RECONCILIATION_QUEUE_NAME,
+            jobId,
+            processedCount,
+            totalStuck,
+            {
+              stage: 'REPAIRING_STUCK_RESULTS',
+              message: `Reconciled ${processedCount}/${totalStuck} stuck results...`,
+            },
+          );
         }
       }
 
@@ -280,11 +306,23 @@ export class ResultReconciliationProcessor extends WorkerHost {
         }
       }
 
+      await this.jobProgressService.publishCompleted(RECONCILIATION_QUEUE_NAME, jobId, {
+        message: `Reconciliation finished. Repaired: ${stats.repairedMockPublished} mocks, ${stats.repairedLiveReady} live. Recovered: ${stats.requeuedMissingResults} missing.`,
+        resultSummary: stats,
+      });
+
       this.logger.log(
         `[Reconciliation] Finished run. Repaired: ${stats.repairedMockPublished} mocks, ${stats.repairedLiveReady} live. Recovered: ${stats.requeuedMissingResults} missing results. Triggered batch processing for: ${endedLiveExamsNeedingEvaluation.length} ended live exams.`,
       );
 
       return { success: true, stats };
+    } catch (err: any) {
+      await this.jobProgressService.publishFailed(
+        RECONCILIATION_QUEUE_NAME,
+        jobId,
+        err.message || 'Result reconciliation failed.',
+      );
+      throw err;
     } finally {
       await this.redisService.del(lockKey);
     }

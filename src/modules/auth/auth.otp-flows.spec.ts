@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 
 describe('Auth OTP Flows (MSG91 Registration & Login)', () => {
   let controller: AuthController;
@@ -37,88 +37,26 @@ describe('Auth OTP Flows (MSG91 Registration & Login)', () => {
   });
 
   describe('1. Registration Flow', () => {
-    it('Step A: POST /auth/register/send-otp should reject if mobile is already registered', async () => {
-      authService.registerSendOtp!.mockRejectedValueOnce(
-        new BadRequestException('A user with this mobile number already exists.'),
-      );
-
+    it('Step A: POST /auth/register/send-otp should throw ForbiddenException in B2B mode', async () => {
       await expect(
         controller.registerSendOtp({ mobileNumber: '+919876543210' }, {} as any),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(authService.registerSendOtp).toHaveBeenCalledWith(
-        { mobileNumber: '+919876543210' },
-        expect.anything(),
-      );
+      ).rejects.toThrow(ForbiddenException);
     });
 
-    it('Step A: POST /auth/register/send-otp should trigger sendOtp when mobile is new', async () => {
-      const mockResult = {
-        message: 'OTP sent successfully to your mobile number.',
-        data: {
-          requiresOtp: true,
-          purpose: 'REGISTER',
-          mobile: '+919876543210',
-          mobileMasked: '******3210',
-          expiresIn: 300,
-          resendAvailableIn: 60,
-        },
-      };
-
-      authService.registerSendOtp!.mockResolvedValueOnce(mockResult as any);
-
-      const result = await controller.registerSendOtp(
-        { mobileNumber: '+919876543210' },
-        {} as any,
-      );
-
-      expect(result).toEqual(mockResult);
-      expect(authService.registerSendOtp).toHaveBeenCalledTimes(1);
-    });
-
-    it('Step B: POST /auth/register/verify-otp should verify OTP, save user, and return tokens', async () => {
-      const mockResult = {
-        message: 'Registration completed successfully.',
-        data: {
-          user: {
-            userId: 'user-uuid-1',
-            mobileNumber: '+919876543210',
-            roles: ['STUDENT'],
-          },
-          student: {
-            studentId: 'STU001001',
-            studentCode: 'BRN-2026-000001',
-            name: 'Rahul Patel',
-          },
-          accessToken: 'mock-access-token',
-          refreshToken: 'mock-refresh-token',
-          expiresIn: 900,
-        },
-      };
-
-      authService.registerVerifyOtp!.mockResolvedValueOnce(mockResult as any);
-
-      const mockRes = {
-        cookie: jest.fn(),
-      } as any;
-
-      const result = await controller.registerVerifyOtp(
-        { mobileNumber: '+919876543210', otp: '12345', name: 'Rahul Patel' },
-        {} as any,
-        mockRes,
-      );
-
-      expect(result).toEqual(mockResult);
-      expect(authService.registerVerifyOtp).toHaveBeenCalledWith(
-        { mobileNumber: '+919876543210', otp: '12345', name: 'Rahul Patel' },
-        expect.anything(),
-      );
+    it('Step B: POST /auth/register/verify-otp should throw ForbiddenException in B2B mode', async () => {
+      await expect(
+        controller.registerVerifyOtp(
+          { mobileNumber: '+919876543210', otp: '12345', name: 'Rahul Patel' },
+          {} as any,
+          {} as any,
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
   describe('2. Login Flow', () => {
     it('Step A: POST /auth/login/send-otp should reject with "User not found" if user does not exist', async () => {
-      authService.loginSendOtp!.mockRejectedValueOnce(
+      (authService.loginSendOtp as jest.Mock).mockRejectedValueOnce(
         new NotFoundException('User not found'),
       );
 
@@ -145,7 +83,7 @@ describe('Auth OTP Flows (MSG91 Registration & Login)', () => {
         },
       };
 
-      authService.loginSendOtp!.mockResolvedValueOnce(mockResult as any);
+      (authService.loginSendOtp as jest.Mock).mockResolvedValueOnce(mockResult as any);
 
       const result = await controller.loginSendOtp(
         { mobileNumber: '+919876543210' },
@@ -171,7 +109,7 @@ describe('Auth OTP Flows (MSG91 Registration & Login)', () => {
         },
       };
 
-      authService.loginVerifyOtp!.mockResolvedValueOnce(mockResult as any);
+      (authService.loginVerifyOtp as jest.Mock).mockResolvedValueOnce(mockResult as any);
 
       const mockRes = {
         cookie: jest.fn(),

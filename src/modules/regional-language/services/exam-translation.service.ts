@@ -312,9 +312,10 @@ export class ExamTranslationService {
     if (!language) {
       throw new NotFoundException(`Language with ID '${languageId}' not found.`);
     }
+    const targetLangId = language.id;
 
     // 3. Duplicate protection: Reject if job is currently PROCESSING
-    const redisKey = `translation:status:${examId}:${languageId}`;
+    const redisKey = `translation:status:${examId}:${targetLangId}`;
     const currentRaw = await this.redisService.get(redisKey);
     if (currentRaw) {
       try {
@@ -338,12 +339,12 @@ export class ExamTranslationService {
     await this.redisService.set(redisKey, JSON.stringify(processingState), 86400);
 
     // 5. Create idempotent BullMQ job
-    const jobId = `trans_${examId}_${languageId}_${Date.now()}`;
+    const jobId = `trans_${examId}_${targetLangId}_${Date.now()}`;
     await this.translationQueue.add(
       'import-exam-translation',
       {
         examId,
-        languageId,
+        languageId: targetLangId,
         userId,
         fileName: file.originalname,
         fileBufferBase64: file.buffer.toString('base64'),
@@ -366,7 +367,7 @@ export class ExamTranslationService {
       status: 'PROCESSING',
       message: 'Translation upload started. Processing in background...',
       examId,
-      languageId,
+      languageId: targetLangId,
       languageName: language.name,
     };
   }
@@ -381,17 +382,18 @@ export class ExamTranslationService {
   ): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
     const { exam, questions } = await this.getExamQuestionsAndOptions(examId);
     const language = await this.languageService.getLanguageById(languageId);
+    const targetLangId = language.id;
 
     // Fetch existing translations for reference/prefilling
     const questionIds = questions.map((q) => q.id);
     const [existingQTranslations, existingOptTranslations] = await Promise.all([
       this.prisma.questionTranslation.findMany({
-        where: { questionId: { in: questionIds }, languageId },
+        where: { questionId: { in: questionIds }, languageId: targetLangId },
       }),
       this.prisma.questionOptionTranslation.findMany({
         where: {
           option: { questionId: { in: questionIds } },
-          languageId,
+          languageId: targetLangId,
         },
         include: { option: true },
       }),
@@ -596,6 +598,7 @@ export class ExamTranslationService {
     const { exam, questions, totalQuestions } =
       await this.getExamQuestionsAndOptions(examId);
     const language = await this.languageService.getLanguageById(languageId);
+    const targetLangId = language.id;
 
     const rawRows = await this.parseFileBuffer(file.buffer, file.originalname);
 
@@ -608,7 +611,7 @@ export class ExamTranslationService {
 
     // Fetch existing translations for diff calculations
     const existingQTranslations = await this.prisma.questionTranslation.findMany({
-      where: { questionId: { in: questionIds }, languageId },
+      where: { questionId: { in: questionIds }, languageId: targetLangId },
     });
     const existingQTrMap = new Map(existingQTranslations.map((t) => [t.questionId, t]));
 
@@ -699,7 +702,7 @@ export class ExamTranslationService {
 
     return {
       examId,
-      languageId,
+      languageId: targetLangId,
       languageName: language.name,
       languageCode: language.code || 'en',
       fileName: file.originalname,
@@ -727,8 +730,11 @@ export class ExamTranslationService {
     userId: string,
     replaceMode = false,
   ) {
+    const language = await this.languageService.getLanguageById(languageId);
+    const targetLangId = language.id;
+
     // 1. Run validation
-    const validation = await this.validateExamTranslationFile(examId, languageId, file);
+    const validation = await this.validateExamTranslationFile(examId, targetLangId, file);
 
     if (validation.validRows === 0) {
       throw new BadRequestException(
@@ -759,13 +765,13 @@ export class ExamTranslationService {
         await tx.questionOptionTranslation.deleteMany({
           where: {
             option: { questionId: { in: qIds } },
-            languageId,
+            languageId: targetLangId,
           },
         });
         await tx.questionTranslation.deleteMany({
           where: {
             questionId: { in: qIds },
-            languageId,
+            languageId: targetLangId,
           },
         });
       }
@@ -786,11 +792,11 @@ export class ExamTranslationService {
         // Upsert Question Translation
         await tx.questionTranslation.upsert({
           where: {
-            questionId_languageId: { questionId: qId, languageId },
+            questionId_languageId: { questionId: qId, languageId: targetLangId },
           },
           create: {
             questionId: qId,
-            languageId,
+            languageId: targetLangId,
             questionText: qText,
             passageText: row.passage_text ? String(row.passage_text).trim() : null,
             assertionText: row.assertion_text ? String(row.assertion_text).trim() : null,
@@ -815,11 +821,11 @@ export class ExamTranslationService {
           if (translatedOptText && String(translatedOptText).trim().length > 0) {
             await tx.questionOptionTranslation.upsert({
               where: {
-                optionId_languageId: { optionId: opt.id, languageId },
+                optionId_languageId: { optionId: opt.id, languageId: targetLangId },
               },
               create: {
                 optionId: opt.id,
-                languageId,
+                languageId: targetLangId,
                 optionText: String(translatedOptText).trim(),
               },
               update: {
@@ -834,7 +840,7 @@ export class ExamTranslationService {
       // Ensure examLanguage record exists
       const existingExamLang = await tx.examLanguage.findUnique({
         where: {
-          examId_languageId: { examId, languageId },
+          examId_languageId: { examId, languageId: targetLangId },
         },
       });
 
@@ -843,7 +849,7 @@ export class ExamTranslationService {
         await tx.examLanguage.create({
           data: {
             examId,
-            languageId,
+            languageId: targetLangId,
             isDefault: langCount === 0,
             displayOrder: langCount,
           },
@@ -860,7 +866,7 @@ export class ExamTranslationService {
             userId,
             details: {
               examId,
-              languageId,
+              languageId: targetLangId,
               fileName: file.originalname,
               importedQuestions,
               importedOptions,

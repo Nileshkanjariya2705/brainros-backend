@@ -178,6 +178,9 @@ export class AuthService {
     if (user.status === 'SUSPENDED') {
       throw new UnauthorizedException('User account is suspended.');
     }
+    if (user.status === 'INACTIVE' || user.status === 'ARCHIVED') {
+      throw new UnauthorizedException('User account is not active.');
+    }
     if (user.status === 'LOCKED') {
       throw new UnauthorizedException('User account is locked.');
     }
@@ -200,6 +203,59 @@ export class AuthService {
       throw new UnauthorizedException('Your student account is inactive.');
     }
   }
+
+  // ─── MSG91 OTP Widget Authentication Methods ─────────────────
+
+  /**
+   * Completes login for a user who has verified identity via MSG91 OTP Widget
+   */
+  async loginWithVerifiedUser(user: any, req?: any) {
+    this.verifyAccountActive(user);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        isVerified: true,
+        mobileVerifiedAt: user.mobileVerifiedAt || new Date(),
+      },
+    });
+
+    const fullUser = await this.loadUserWithRoles(user.id);
+    const { session, tokens } = await this.createSessionAndTokens(
+      user.id,
+      req,
+    );
+
+    const ctx = this.extractRequestContext(req);
+    await this.securityEventService.log('LOGIN_SUCCESS', {
+      userId: user.id,
+      ...ctx,
+      metadata: { method: 'MSG91_OTP_WIDGET' },
+    });
+
+    return this.buildAuthResponse(
+      fullUser,
+      session.id,
+      tokens,
+      'Login successful via MSG91 OTP Widget',
+    );
+  }
+
+  /**
+   * Delegates MSG91 access token verification to OtpService
+   */
+  async verifyAccessToken(accessToken: string, req?: any) {
+    return this.otpService.verifyAccessToken(accessToken, req);
+  }
+
+  /**
+   * Delegates User Existence check to OtpService
+   */
+  async checkUserExists(identifier: string) {
+    return this.otpService.checkUserExists(identifier);
+  }
+
 
   // ═══════════════════════════════════════════════════════════════
   // 1. NEW OTP-BASED REGISTRATION FLOW (PASSWORDLESS)
@@ -1596,6 +1652,72 @@ export class AuthService {
           }
         : null,
     };
+  }
+
+  async updateMe(
+    userId: string,
+    dto: {
+      name?: string;
+      email?: string;
+      mobileNumber?: string;
+      phone?: string;
+      password?: string;
+    },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { student: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found.');
+    }
+
+    const userDataToUpdate: any = {};
+
+    if (dto.email && dto.email.trim().toLowerCase() !== user.email) {
+      const existingEmail = await this.prisma.user.findUnique({
+        where: { email: dto.email.trim().toLowerCase() },
+      });
+      if (existingEmail && existingEmail.id !== userId) {
+        throw new BadRequestException('Email is already registered by another account.');
+      }
+      userDataToUpdate.email = dto.email.trim().toLowerCase();
+    }
+
+    const newMobile = dto.mobileNumber?.trim() || dto.phone?.trim();
+    if (newMobile && newMobile !== user.mobileNumber && newMobile !== user.phone) {
+      const existingMobile = await this.prisma.user.findFirst({
+        where: { OR: [{ mobileNumber: newMobile }, { phone: newMobile }] },
+      });
+      if (existingMobile && existingMobile.id !== userId) {
+        throw new BadRequestException('Mobile number is already registered by another account.');
+      }
+      userDataToUpdate.mobileNumber = newMobile;
+      userDataToUpdate.phone = newMobile;
+    }
+
+    if (dto.password && dto.password.trim().length >= 6) {
+      userDataToUpdate.passwordHash = await this.passwordService.hashPassword(
+        dto.password.trim(),
+      );
+    }
+
+    if (Object.keys(userDataToUpdate).length > 0) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: userDataToUpdate,
+      });
+    }
+
+    if (dto.name && user.student) {
+      await this.prisma.student.update({
+        where: { id: user.student.id },
+        data: { name: dto.name.trim() },
+      });
+    }
+
+    return this.getMe(userId);
   }
 
   async getRegisterOptions() {

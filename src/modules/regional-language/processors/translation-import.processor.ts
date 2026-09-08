@@ -3,6 +3,7 @@ import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExamTranslationService } from '../services/exam-translation.service';
 import { RedisService } from '../../redis/redis.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
 export interface ExamTranslationImportJobData {
   examId: string;
@@ -22,6 +23,7 @@ export class TranslationImportProcessor extends WorkerHost {
   constructor(
     private readonly examTranslationService: ExamTranslationService,
     private readonly redisService: RedisService,
+    private readonly jobProgressService: JobProgressService,
   ) {
     super();
   }
@@ -33,11 +35,20 @@ export class TranslationImportProcessor extends WorkerHost {
 
   async process(job: Job<ExamTranslationImportJobData>): Promise<any> {
     const { examId, languageId, userId, fileName, fileBufferBase64, replaceMode } = job.data;
+    const jobId = String(job.id || `trans_${examId}_${languageId}`);
     const redisKey = `translation:status:${examId}:${languageId}`;
 
     this.logger.log(
-      `[TranslationImportProcessor] Starting background import for Exam: ${examId}, Language: ${languageId}, File: ${fileName} (Job ID: ${job.id})`,
+      `[TranslationImportProcessor] Starting background import for Exam: ${examId}, Language: ${languageId}, File: ${fileName} (Job ID: ${jobId})`,
     );
+
+    await this.jobProgressService.publishStarted('translation-import', jobId, {
+      type: 'TRANSLATION_IMPORT',
+      stage: 'PARSING_FILE',
+      examId,
+      userId,
+      message: `Parsing and validating translation file ${fileName}...`,
+    });
 
     try {
       // Decode file buffer from base64
@@ -47,6 +58,13 @@ export class TranslationImportProcessor extends WorkerHost {
         size: fileBuffer.length,
         buffer: fileBuffer,
       };
+
+      await this.jobProgressService.publishProgress('translation-import', jobId, 30, 100, {
+        stage: 'IMPORTING_TRANSLATIONS',
+        message: 'Importing question & option translations...',
+        examId,
+        userId,
+      });
 
       // Execute transactional database persistence
       const result = await this.examTranslationService.importExamTranslations(
@@ -60,6 +78,13 @@ export class TranslationImportProcessor extends WorkerHost {
       const importedQuestions = result.stats?.importedQuestions ?? 0;
       const importedOptions = result.stats?.importedOptions ?? 0;
 
+      await this.jobProgressService.publishProgress('translation-import', jobId, 100, 100, {
+        stage: 'COMPLETED',
+        message: `Imported ${importedQuestions} questions and ${importedOptions} options.`,
+        examId,
+        userId,
+      });
+
       // Record successful completion in Redis (TTL: 24h)
       const completedState = {
         status: 'COMPLETED',
@@ -70,6 +95,13 @@ export class TranslationImportProcessor extends WorkerHost {
       };
       await this.redisService.set(redisKey, JSON.stringify(completedState), 86400);
 
+      await this.jobProgressService.publishCompleted('translation-import', jobId, {
+        message: `Translation import completed successfully: ${importedQuestions} questions, ${importedOptions} options.`,
+        examId,
+        userId,
+        resultSummary: completedState,
+      });
+
       this.logger.log(
         `[TranslationImportProcessor] Successfully imported translations for Exam: ${examId}, Language: ${languageId}. Imported ${importedQuestions} questions and ${importedOptions} options.`,
       );
@@ -79,6 +111,12 @@ export class TranslationImportProcessor extends WorkerHost {
       this.logger.error(
         `[TranslationImportProcessor] Failed to import translations for Exam: ${examId}, Language: ${languageId}: ${err.message}`,
         err.stack,
+      );
+
+      await this.jobProgressService.publishFailed(
+        'translation-import',
+        jobId,
+        err.message || 'Translation import processing failed.',
       );
 
       // Record failure in Redis (TTL: 24h)

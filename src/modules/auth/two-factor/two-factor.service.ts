@@ -3,6 +3,7 @@ import { RedisService } from '../../redis/redis.service';
 import { SecurityEventService } from '../services/security-event.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
 import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
+import { TwoFactorProvider } from '../otp/two-factor.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
 import {
   ITwoFactorProvider,
@@ -19,6 +20,7 @@ export class TwoFactorService {
     private readonly redisService: RedisService,
     private readonly securityEventService: SecurityEventService,
     private readonly twoFactorDotInProvider: TwoFactorDotInProvider,
+    private readonly msg91Provider: TwoFactorProvider,
     private readonly devProvider: DevelopmentOtpProvider,
   ) {}
 
@@ -28,7 +30,12 @@ export class TwoFactorService {
    */
   getActiveProvider(): ITwoFactorProvider {
     if (this.config.enable2FA) {
-      return this.twoFactorDotInProvider;
+      if (this.config.otpProvider === '2FACTOR') {
+        // 2Factor.in Provider (Available if configured in .env):
+        return this.twoFactorDotInProvider;
+      }
+      // MSG91 OTP Provider (Default / Active):
+      return this.msg91Provider;
     }
     return this.devProvider;
   }
