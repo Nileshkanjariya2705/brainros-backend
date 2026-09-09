@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "prisma", "scripts", "prisma.config.ts", "db.js", "ecosystem.config.js"]
+  "compilerOptions": {
+    "rootDir": "src",
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "prisma", "scripts", "prisma.config.ts", "db.ts", "db.js", "ecosystem.config.js"]
 }
 
