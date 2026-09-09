@@ -57,13 +57,38 @@ export interface ExamProcessingJobItem {
   updatedAt: string;
 }
 
+import { IsOptional, IsString, IsInt, Min, Max, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
+
 export class ExamProcessingJobsQueryDto {
-  page?: number;
-  limit?: number;
-  status?: 'ALL' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RETRYING';
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
   search?: string;
-  sortBy?: 'studentName' | 'status' | 'progress' | 'updatedAt';
-  sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string = 'updatedAt';
+
+  @IsOptional()
+  @IsIn(['asc', 'desc', 'ASC', 'DESC'])
+  sortOrder?: 'asc' | 'desc' = 'desc';
 }
 
 @Injectable()

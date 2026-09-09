@@ -579,6 +579,8 @@ export class CompletedExamReportsService {
       },
     });
 
+    const adminId = adminUser?.userId || adminUser?.id || null;
+
     // Idempotency: create or update Notification record
     const idempotencyKey = `report-email:${examId}:${attemptId}:${Date.now()}`;
     const notification = await this.prisma.notification.create({
@@ -597,7 +599,7 @@ export class CompletedExamReportsService {
           examId,
           attemptId,
           studentId: attempt.studentId,
-          requestedByAdminId: adminUser.userId || adminUser.id,
+          requestedByAdminId: adminId,
         },
       },
     });
@@ -611,7 +613,7 @@ export class CompletedExamReportsService {
         attemptId,
         studentId: attempt.studentId,
         recipientEmail,
-        requestedByAdminId: adminUser.userId || adminUser.id,
+        requestedByAdminId: adminId,
         reportType: 'EXAM_ANALYSIS',
       },
       {
@@ -627,7 +629,7 @@ export class CompletedExamReportsService {
 
     // Audit Log
     await this.auditLogService.logAction({
-      actorUserId: adminUser.userId || adminUser.id,
+      actorUserId: adminId,
       action: 'EXAM_REPORT_EMAIL_REQUESTED',
       entityType: 'Attempt',
       entityId: attemptId,

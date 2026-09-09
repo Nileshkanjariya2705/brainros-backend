@@ -117,12 +117,20 @@ export class ResultReadinessService {
         a.strategyAnalyses.length > 0,
     );
 
-    // Check rank snapshot completion
-    const latestRankSnapshot = await this.prisma.rankSnapshot.findFirst({
-      where: { examId },
-      orderBy: { snapshotVersion: 'desc' },
-    });
-    const rankingCompleted = latestRankSnapshot?.status === 'COMPLETED';
+    // Check rank snapshot completion safely
+    let rankingCompleted = false;
+    try {
+      const latestRankSnapshot = await this.prisma.rankSnapshot.findFirst({
+        where: { examId },
+        orderBy: { snapshotVersion: 'desc' },
+      });
+      rankingCompleted = latestRankSnapshot?.status === 'COMPLETED';
+    } catch {
+      // Fallback: check if in-memory finalized attempts have candidateRanks generated
+      rankingCompleted =
+        finalizedAttempts.length > 0 &&
+        finalizedAttempts.every((a) => a.candidateRanks && a.candidateRanks.length > 0);
+    }
 
     // Security reviews
     const flaggedAttempts = allAttempts.filter((a) => a.isFlagged).length;

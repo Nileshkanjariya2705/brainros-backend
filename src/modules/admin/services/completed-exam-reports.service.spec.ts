@@ -34,6 +34,11 @@ describe('CompletedExamReportsService', () => {
         findFirst: jest.fn(),
         create: jest.fn(),
       },
+      examAnalysisReport: {
+        upsert: jest.fn(),
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+      },
     };
 
     emailQueue = {

@@ -12,6 +12,7 @@ export interface ExamReportPdfData {
     examDate?: string | Date;
     totalMarks: number;
     durationMinutes?: number;
+    examTargetName?: string;
   };
   attempt: {
     id: string;
@@ -25,7 +26,12 @@ export interface ExamReportPdfData {
     wrongAnswers: number;
     unattempted: number;
     timeUsedSeconds?: number;
+    formattedTimeUsed?: string;
     averageTimePerQuestion?: number;
+    negativeMarksLost?: number;
+    potentialMarks?: number;
+    overallStatus?: string;
+    speedAccuracyQuadrant?: string;
   };
   rank?: {
     rank?: number;
@@ -37,28 +43,67 @@ export interface ExamReportPdfData {
     score: number;
     maxScore: number;
     accuracy: number;
+    percentage?: number;
     correct: number;
     wrong: number;
     unattempted: number;
+    timeSpentSeconds?: number;
+    avgTimePerQuestionSeconds?: number;
     performanceStatus?: string;
+    isStrongest?: boolean;
+    isWeakest?: boolean;
   }>;
-  chapters?: Array<{
-    name: string;
-    subjectName?: string;
-    accuracy: number;
-    performanceStatus?: string;
-  }>;
+  chapters?: {
+    mastered?: Array<{ name: string; subjectName?: string; accuracy: number; totalQuestions?: number; performanceStatus?: string }>;
+    revisionNeeded?: Array<{ name: string; subjectName?: string; accuracy: number; totalQuestions?: number; performanceStatus?: string }>;
+    criticalFocus?: Array<{ name: string; subjectName?: string; accuracy: number; totalQuestions?: number; performanceStatus?: string }>;
+  };
   timeAnalysis?: {
+    totalExamDurationMinutes?: number;
+    totalTimeUsedSeconds?: number;
     averageTimePerQuestionSeconds?: number;
+    timeOnCorrectSeconds?: number;
+    timeOnWrongSeconds?: number;
+    timeOnUnattemptedSeconds?: number;
+    timeWastedSeconds?: number;
     fastestQuestionSeconds?: number;
     slowestQuestionSeconds?: number;
+    pacingMetrics?: {
+      rushedCount: number;
+      optimalPaceCount: number;
+      overthoughtCount: number;
+    };
   };
   strategy?: {
+    negativeMarkingPenalty?: number;
+    marksLostToGuessing?: number;
+    scoreWithoutNegativeMarking?: number;
+    attemptRatio?: number;
+    accuracyVsSpeedProfile?: string;
     overAttemptingScore?: number;
     avoidableLossMarks?: number;
     riskCategory?: string;
+    strategicTakeaways?: string[];
+    potentialScoreGainMessage?: string;
     recommendations?: string[];
   };
+  recommendations?: Array<{
+    category?: string;
+    priority?: string;
+    title: string;
+    description: string;
+    actionStep?: string;
+    impactScore?: number;
+  }>;
+  questionsReview?: Array<{
+    displayOrder: number;
+    sectionName: string;
+    questionText?: string;
+    isAttempted: boolean;
+    isCorrect: boolean;
+    marksAwarded: number;
+    timeSpentSeconds?: number;
+  }>;
 }
 
 @Injectable()
@@ -66,8 +111,8 @@ export class ExamReportPdfService {
   private readonly logger = new Logger(ExamReportPdfService.name);
 
   /**
-   * Generates a branded, multi-page Brainros Student Performance Report PDF.
-   * Returns a Buffer ready for email attachment or storage.
+   * Generates a comprehensive, multi-page Brainros Student Performance Report PDF.
+   * Includes Overall, Subject, Chapter, Time, Strategy, Recommendations, and Question Audit.
    */
   async generateReportPdf(data: ExamReportPdfData): Promise<Buffer> {
     return new Promise((resolve, reject) => {
@@ -78,8 +123,8 @@ export class ExamReportPdfService {
           info: {
             Title: `Brainros Exam Report - ${data.exam.title} - ${data.student.name}`,
             Author: 'Brainros Assessment Engine',
-            Subject: 'Official Student Performance Report',
-            Keywords: 'Brainros, Live Exam, Student Report, Analytics',
+            Subject: 'Official Student Performance Analysis Report',
+            Keywords: 'Brainros, Live Exam, Student Report, Analytics, Diagnostics',
           },
         });
 
@@ -88,22 +133,16 @@ export class ExamReportPdfService {
         doc.on('end', () => resolve(Buffer.concat(buffers)));
         doc.on('error', (err) => reject(err));
 
-        // Colors
-        const primaryColor = '#4F46E5'; // Indigo
+        // Color Palette
+        const primaryColor = '#4F46E5'; // Indigo 600
         const secondaryColor = '#0F172A'; // Slate 900
-        const accentColor = '#10B981'; // Emerald
+        const accentEmerald = '#10B981'; // Emerald 600
+        const accentRose = '#EF4444'; // Rose 500
+        const accentAmber = '#F59E0B'; // Amber 500
         const lightBg = '#F8FAFC'; // Slate 50
         const borderColor = '#E2E8F0'; // Slate 200
         const mutedText = '#64748B'; // Slate 500
         const darkText = '#1E293B'; // Slate 800
-
-        // ═══════════════════════════════════════════════════════════════
-        // HEADER / BRANDING BANNER
-        // ═══════════════════════════════════════════════════════════════
-        doc.rect(40, 40, 515, 65).fill(secondaryColor);
-
-        doc.fillColor('#FFFFFF').fontSize(20).font('Helvetica-Bold').text('BRAINROS', 55, 52);
-        doc.fillColor('#94A3B8').fontSize(9).font('Helvetica').text('Official Live Exam Performance Analysis Report', 55, 78);
 
         const examDateStr = data.exam.examDate
           ? new Date(data.exam.examDate).toLocaleDateString('en-IN', {
@@ -111,75 +150,119 @@ export class ExamReportPdfService {
               month: 'short',
               year: 'numeric',
             })
-          : 'N/A';
-
-        doc.fillColor('#F1F5F9').fontSize(9).font('Helvetica-Bold').text(data.exam.title, 320, 54, { width: 220, align: 'right' });
-        doc.fillColor('#94A3B8').fontSize(8).font('Helvetica').text(`Exam Date: ${examDateStr}`, 320, 78, { width: 220, align: 'right' });
-
-        doc.moveDown(3);
+          : 'Recently';
 
         // ═══════════════════════════════════════════════════════════════
-        // CANDIDATE PROFILE BAR
+        // PAGE 1: EXECUTIVE SUMMARY & SUBJECT-WISE PERFORMANCE
         // ═══════════════════════════════════════════════════════════════
-        const profileY = 120;
-        doc.rect(40, profileY, 515, 45).fillAndStroke(lightBg, borderColor);
+
+        // 1. Header Banner
+        doc.rect(40, 40, 515, 62).fill(secondaryColor);
+        doc.fillColor('#FFFFFF').fontSize(20).font('Helvetica-Bold').text('BRAINROS', 55, 50);
+        doc.fillColor('#94A3B8').fontSize(8.5).font('Helvetica').text('Official Live Exam Performance Analysis Report', 55, 76);
+
+        doc.fillColor('#F1F5F9').fontSize(9).font('Helvetica-Bold').text(data.exam.title, 310, 52, { width: 230, align: 'right' });
+        doc.fillColor('#94A3B8').fontSize(7.5).font('Helvetica').text(
+          `Date: ${examDateStr}  |  Duration: ${data.exam.durationMinutes || 180}m  |  Total Marks: ${data.exam.totalMarks}`,
+          310,
+          76,
+          { width: 230, align: 'right' },
+        );
+
+        // 2. Candidate Profile & Rank Bar
+        const profileY = 115;
+        doc.rect(40, profileY, 515, 48).fillAndStroke(lightBg, borderColor);
 
         doc.fillColor(darkText).fontSize(11).font('Helvetica-Bold').text(data.student.name, 55, profileY + 10);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`Student ID: ${data.student.studentCode || 'N/A'}  |  Email: ${data.student.email}`, 55, profileY + 26);
+        doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(
+          `Student ID: ${data.student.studentCode || 'N/A'}   •   Email: ${data.student.email}`,
+          55,
+          profileY + 28,
+        );
 
         if (data.rank && data.rank.rank) {
-          doc.fillColor(primaryColor).fontSize(13).font('Helvetica-Bold').text(`Rank: #${data.rank.rank}`, 350, profileY + 8, { width: 190, align: 'right' });
+          doc.fillColor(primaryColor).fontSize(13).font('Helvetica-Bold').text(`Overall Rank: #${data.rank.rank}`, 340, profileY + 9, { width: 200, align: 'right' });
           const percentileStr = data.rank.percentile !== undefined ? `Percentile: ${Number(data.rank.percentile).toFixed(2)}%` : '';
           const totalCandStr = data.rank.totalCandidates ? ` / ${data.rank.totalCandidates.toLocaleString()} candidates` : '';
-          doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`${percentileStr}${totalCandStr}`, 350, profileY + 26, { width: 190, align: 'right' });
+          doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`${percentileStr}${totalCandStr}`, 340, profileY + 28, { width: 200, align: 'right' });
+        } else {
+          doc.fillColor(mutedText).fontSize(8.5).font('Helvetica-Bold').text('Official Rank: Processing / Batch', 340, profileY + 18, { width: 200, align: 'right' });
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        // EXECUTIVE SUMMARY TILES
-        // ═══════════════════════════════════════════════════════════════
-        const tilesY = 180;
-        const tileWidth = 120;
-        const tileHeight = 55;
-        const tileGap = 11;
+        // 3. Executive KPI Tiles (Row 1)
+        const tilesY = 175;
+        const tileW = 122;
+        const tileH = 55;
+        const gap = 9;
 
         // Tile 1: Score
-        doc.rect(40, tilesY, tileWidth, tileHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica-Bold').text('TOTAL SCORE', 50, tilesY + 10);
-        doc.fillColor(primaryColor).fontSize(16).font('Helvetica-Bold').text(`${data.attempt.score} / ${data.attempt.maxScore}`, 50, tilesY + 24);
+        doc.rect(40, tilesY, tileW, tileH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica-Bold').text('TOTAL SCORE', 48, tilesY + 9);
+        doc.fillColor(primaryColor).fontSize(15).font('Helvetica-Bold').text(`${data.attempt.score} / ${data.attempt.maxScore}`, 48, tilesY + 22);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(`${Number(data.attempt.percentage).toFixed(1)}% Marks`, 48, tilesY + 41);
 
-        // Tile 2: Percentage
-        doc.rect(40 + tileWidth + tileGap, tilesY, tileWidth, tileHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica-Bold').text('PERCENTAGE', 40 + tileWidth + tileGap + 10, tilesY + 10);
-        doc.fillColor(secondaryColor).fontSize(16).font('Helvetica-Bold').text(`${Number(data.attempt.percentage).toFixed(1)}%`, 40 + tileWidth + tileGap + 10, tilesY + 24);
+        // Tile 2: Accuracy
+        doc.rect(40 + (tileW + gap), tilesY, tileW, tileH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica-Bold').text('ACCURACY', 40 + (tileW + gap) + 8, tilesY + 9);
+        doc.fillColor(accentEmerald).fontSize(15).font('Helvetica-Bold').text(`${Number(data.attempt.accuracy).toFixed(1)}%`, 40 + (tileW + gap) + 8, tilesY + 22);
+        const accLabel = data.attempt.accuracy >= 75 ? 'Strong Discipline' : data.attempt.accuracy >= 50 ? 'Moderate' : 'High Guessing Risk';
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(accLabel, 40 + (tileW + gap) + 8, tilesY + 41);
 
-        // Tile 3: Accuracy
-        doc.rect(40 + (tileWidth + tileGap) * 2, tilesY, tileWidth, tileHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica-Bold').text('ACCURACY', 40 + (tileWidth + tileGap) * 2 + 10, tilesY + 10);
-        doc.fillColor(accentColor).fontSize(16).font('Helvetica-Bold').text(`${Number(data.attempt.accuracy).toFixed(1)}%`, 40 + (tileWidth + tileGap) * 2 + 10, tilesY + 24);
+        // Tile 3: Questions
+        doc.rect(40 + (tileW + gap) * 2, tilesY, tileW, tileH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica-Bold').text('QUESTIONS BREAKDOWN', 40 + (tileW + gap) * 2 + 8, tilesY + 9);
+        doc.fillColor(darkText).fontSize(11).font('Helvetica-Bold').text(
+          `${data.attempt.correctAnswers} Correct  •  ${data.attempt.wrongAnswers} Wrong`,
+          40 + (tileW + gap) * 2 + 8,
+          tilesY + 23,
+        );
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(
+          `${data.attempt.unattempted} Unattempted (Total: ${data.attempt.totalQuestions})`,
+          40 + (tileW + gap) * 2 + 8,
+          tilesY + 41,
+        );
 
-        // Tile 4: Questions Breakdown
-        doc.rect(40 + (tileWidth + tileGap) * 3, tilesY, tileWidth, tileHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica-Bold').text('ATTEMPT STATUS', 40 + (tileWidth + tileGap) * 3 + 10, tilesY + 10);
-        doc.fillColor(darkText).fontSize(9).font('Helvetica').text(`Correct: ${data.attempt.correctAnswers} | Wrong: ${data.attempt.wrongAnswers}`, 40 + (tileWidth + tileGap) * 3 + 10, tilesY + 25);
-        doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`Unattempted: ${data.attempt.unattempted}`, 40 + (tileWidth + tileGap) * 3 + 10, tilesY + 38);
+        // Tile 4: Time & Speed
+        doc.rect(40 + (tileW + gap) * 3, tilesY, tileW, tileH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica-Bold').text('TIME USED & SPEED', 40 + (tileW + gap) * 3 + 8, tilesY + 9);
+        const timeFormatted = data.attempt.formattedTimeUsed || (data.attempt.timeUsedSeconds ? `${Math.floor(data.attempt.timeUsedSeconds / 60)}m ${data.attempt.timeUsedSeconds % 60}s` : 'N/A');
+        doc.fillColor(secondaryColor).fontSize(13).font('Helvetica-Bold').text(timeFormatted, 40 + (tileW + gap) * 3 + 8, tilesY + 23);
+        const avgSec = data.attempt.averageTimePerQuestion || data.timeAnalysis?.averageTimePerQuestionSeconds || 0;
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(`Avg: ${Number(avgSec).toFixed(1)}s / question`, 40 + (tileW + gap) * 3 + 8, tilesY + 41);
 
-        // ═══════════════════════════════════════════════════════════════
-        // SUBJECT PERFORMANCE TABLE
-        // ═══════════════════════════════════════════════════════════════
-        let currentY = 255;
-        doc.fillColor(secondaryColor).fontSize(12).font('Helvetica-Bold').text('Subject-Wise Performance', 40, currentY);
-        currentY += 18;
+        // 4. Status & Quadrant Summary Banner
+        const bannerY = 240;
+        doc.rect(40, bannerY, 515, 34).fillAndStroke(lightBg, borderColor);
+        const statusText = data.attempt.overallStatus ? data.attempt.overallStatus.replace(/_/g, ' ') : 'EVALUATED';
+        const quadrantText = data.attempt.speedAccuracyQuadrant ? data.attempt.speedAccuracyQuadrant.replace(/_/g, ' ') : 'STANDARD';
+        doc.fillColor(darkText).fontSize(8.5).font('Helvetica-Bold').text('Performance Diagnosis:', 52, bannerY + 11);
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text(statusText, 160, bannerY + 11);
+        doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`Quadrant: ${quadrantText}`, 260, bannerY + 11);
+        if (data.attempt.negativeMarksLost !== undefined && data.attempt.negativeMarksLost > 0) {
+          doc.fillColor(accentRose).fontSize(8).font('Helvetica-Bold').text(
+            `Negative Loss: ~${data.attempt.negativeMarksLost} pts  |  Potential: ${data.attempt.potentialMarks ?? data.attempt.score} pts`,
+            390,
+            bannerY + 11,
+            { align: 'right', width: 155 },
+          );
+        }
+
+        // 5. Subject Performance Table
+        let currentY = 286;
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Subject-Wise Comprehensive Analysis', 40, currentY);
+        currentY += 16;
 
         // Table Header
-        doc.rect(40, currentY, 515, 22).fill(secondaryColor);
-        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+        doc.rect(40, currentY, 515, 20).fill(secondaryColor);
+        doc.fillColor('#FFFFFF').fontSize(7.5).font('Helvetica-Bold');
         doc.text('SUBJECT', 50, currentY + 6);
-        doc.text('SCORE', 180, currentY + 6);
-        doc.text('CORRECT', 260, currentY + 6);
-        doc.text('WRONG', 330, currentY + 6);
-        doc.text('UNATTEMPTED', 390, currentY + 6);
-        doc.text('ACCURACY', 480, currentY + 6);
-        currentY += 22;
+        doc.text('SCORE', 170, currentY + 6);
+        doc.text('CORRECT', 240, currentY + 6);
+        doc.text('WRONG', 300, currentY + 6);
+        doc.text('SKIPPED', 355, currentY + 6);
+        doc.text('ACCURACY', 415, currentY + 6);
+        doc.text('STATUS', 475, currentY + 6);
+        currentY += 20;
 
         const subjects = data.subjects && data.subjects.length > 0 ? data.subjects : [];
         if (subjects.length === 0) {
@@ -191,91 +274,266 @@ export class ExamReportPdfService {
             const rowBg = idx % 2 === 0 ? '#FFFFFF' : lightBg;
             doc.rect(40, currentY, 515, 22).fillAndStroke(rowBg, borderColor);
 
-            doc.fillColor(darkText).fontSize(8).font('Helvetica-Bold').text(sub.name, 50, currentY + 6);
-            doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text(`${sub.score} / ${sub.maxScore}`, 180, currentY + 6);
-            doc.fillColor(accentColor).fontSize(8).font('Helvetica').text(`${sub.correct}`, 260, currentY + 6);
-            doc.fillColor('#EF4444').fontSize(8).font('Helvetica').text(`${sub.wrong}`, 330, currentY + 6);
-            doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`${sub.unattempted}`, 390, currentY + 6);
-            doc.fillColor(darkText).fontSize(8).font('Helvetica-Bold').text(`${Number(sub.accuracy || 0).toFixed(1)}%`, 480, currentY + 6);
+            let subName = sub.name;
+            if (sub.isStrongest) subName += ' ★ (Top)';
+            if (sub.isWeakest) subName += ' ⚠ (Weak)';
+
+            doc.fillColor(sub.isStrongest ? primaryColor : darkText).fontSize(8).font('Helvetica-Bold').text(subName, 50, currentY + 6);
+            doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text(`${sub.score} / ${sub.maxScore}`, 170, currentY + 6);
+            doc.fillColor(accentEmerald).fontSize(8).font('Helvetica').text(`${sub.correct}`, 240, currentY + 6);
+            doc.fillColor(accentRose).fontSize(8).font('Helvetica').text(`${sub.wrong}`, 300, currentY + 6);
+            doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`${sub.unattempted}`, 355, currentY + 6);
+            doc.fillColor(darkText).fontSize(8).font('Helvetica-Bold').text(`${Number(sub.accuracy || 0).toFixed(1)}%`, 415, currentY + 6);
+
+            const st = sub.performanceStatus || (sub.accuracy >= 75 ? 'STRONG' : sub.accuracy >= 50 ? 'GOOD' : 'CRITICAL');
+            const stColor = st === 'STRONG' || st === 'EXCELLENT' ? accentEmerald : st === 'GOOD' ? primaryColor : accentRose;
+            doc.fillColor(stColor).fontSize(7.5).font('Helvetica-Bold').text(st, 475, currentY + 6);
 
             currentY += 22;
           });
         }
 
+        // 6. Page 1 Footer Note
+        const p1FooterY = 780;
+        doc.rect(40, p1FooterY, 515, 0.5).fill(borderColor);
+        doc.fillColor(mutedText).fontSize(7).font('Helvetica').text(
+          `Page 1 of 3   •   Brainros Assessment Engine   •   Deep Diagnostics continue on Page 2`,
+          40,
+          p1FooterY + 6,
+          { width: 515, align: 'center' },
+        );
+
         // ═══════════════════════════════════════════════════════════════
-        // TIME & ATTEMPT STRATEGY ANALYSIS
+        // PAGE 2: CHAPTER DIAGNOSIS, TIME & STRATEGY INSIGHTS
         // ═══════════════════════════════════════════════════════════════
-        currentY += 15;
-        doc.fillColor(secondaryColor).fontSize(12).font('Helvetica-Bold').text('Time & Strategy Insights', 40, currentY);
-        currentY += 18;
+        doc.addPage();
 
-        const halfBoxWidth = 250;
-        const boxHeight = 75;
+        // Header
+        doc.rect(40, 40, 515, 38).fill(secondaryColor);
+        doc.fillColor('#FFFFFF').fontSize(13).font('Helvetica-Bold').text('BRAINROS — Diagnostic & Attempt Strategy Analysis', 55, 52);
+        doc.fillColor('#94A3B8').fontSize(7.5).font('Helvetica').text(`Candidate: ${data.student.name}   |   Exam: ${data.exam.title}`, 320, 54, { width: 220, align: 'right' });
 
-        // Left Box: Speed & Time
-        doc.rect(40, currentY, halfBoxWidth, boxHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold').text('Speed & Time Management', 50, currentY + 10);
+        let p2Y = 95;
 
-        const totalTimeMin = data.attempt.timeUsedSeconds ? Math.floor(data.attempt.timeUsedSeconds / 60) : 0;
-        const totalTimeSec = data.attempt.timeUsedSeconds ? data.attempt.timeUsedSeconds % 60 : 0;
-        const avgSec = data.timeAnalysis?.averageTimePerQuestionSeconds ?? data.attempt.averageTimePerQuestion ?? 0;
+        // 1. Chapter-Wise Diagnostic Performance
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Chapter Diagnosis & Concept Mastery', 40, p2Y);
+        p2Y += 16;
 
-        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Total Time Used: ${totalTimeMin}m ${totalTimeSec}s`, 50, currentY + 28);
-        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Average Time / Question: ${Number(avgSec).toFixed(1)} seconds`, 50, currentY + 42);
-        if (data.timeAnalysis?.fastestQuestionSeconds) {
-          doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(`Fastest: ${data.timeAnalysis.fastestQuestionSeconds}s  |  Slowest: ${data.timeAnalysis.slowestQuestionSeconds || 'N/A'}s`, 50, currentY + 56);
+        const masteredChapters = data.chapters?.mastered || [];
+        const criticalChapters = data.chapters?.criticalFocus || data.chapters?.revisionNeeded || [];
+
+        const colW = 252;
+        const boxH = 110;
+
+        // Left Box: Mastered Chapters
+        doc.rect(40, p2Y, colW, boxH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(accentEmerald).fontSize(8.5).font('Helvetica-Bold').text('✓ Mastered & High Confidence Chapters', 50, p2Y + 9);
+        if (masteredChapters.length === 0) {
+          doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text('No high-mastery chapters identified in this attempt.', 50, p2Y + 28);
+        } else {
+          let chY = p2Y + 26;
+          masteredChapters.slice(0, 4).forEach((ch) => {
+            doc.fillColor(darkText).fontSize(7.5).font('Helvetica-Bold').text(`• ${ch.name}`, 50, chY, { width: 155 });
+            doc.fillColor(accentEmerald).fontSize(7.5).font('Helvetica-Bold').text(`${Number(ch.accuracy).toFixed(0)}% Acc`, 215, chY, { width: 70, align: 'right' });
+            chY += 19;
+          });
         }
 
-        // Right Box: Strategy & Risk
-        doc.rect(305, currentY, halfBoxWidth, boxHeight).fillAndStroke(lightBg, borderColor);
-        doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold').text('Attempt Strategy & Accuracy Risk', 315, currentY + 10);
+        // Right Box: Critical Focus Chapters
+        doc.rect(303, p2Y, colW, boxH).fillAndStroke(lightBg, borderColor);
+        doc.fillColor(accentRose).fontSize(8.5).font('Helvetica-Bold').text('⚠ High Negative / Revision Focus Areas', 313, p2Y + 9);
+        if (criticalChapters.length === 0) {
+          doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text('No critical failure zones detected.', 313, p2Y + 28);
+        } else {
+          let chY = p2Y + 26;
+          criticalChapters.slice(0, 4).forEach((ch) => {
+            doc.fillColor(darkText).fontSize(7.5).font('Helvetica-Bold').text(`• ${ch.name}`, 313, chY, { width: 155 });
+            doc.fillColor(accentRose).fontSize(7.5).font('Helvetica-Bold').text(`${Number(ch.accuracy).toFixed(0)}% Acc`, 478, chY, { width: 70, align: 'right' });
+            chY += 19;
+          });
+        }
 
-        const avoidableLoss = data.strategy?.avoidableLossMarks ?? (data.attempt.wrongAnswers * 1);
-        const riskCategory = data.strategy?.riskCategory ?? (data.attempt.accuracy < 60 ? 'HIGH_RISK' : 'BALANCED');
+        p2Y += boxH + 18;
 
-        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Avoidable Negative Loss: ~${avoidableLoss} marks`, 315, currentY + 28);
-        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Risk Profile: ${riskCategory.replace('_', ' ')}`, 315, currentY + 42);
-        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(`Over-Attempt Penalty: ${data.strategy?.overAttemptingScore ?? 0} pts`, 315, currentY + 56);
+        // 2. Time Management & Pacing Analytics
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Time Management & Question Pacing Analysis', 40, p2Y);
+        p2Y += 16;
 
-        currentY += boxHeight + 15;
+        doc.rect(40, p2Y, 515, 80).fillAndStroke(lightBg, borderColor);
+
+        const pacing = data.timeAnalysis?.pacingMetrics || { rushedCount: 0, optimalPaceCount: 0, overthoughtCount: 0 };
+        const avgTimeQ = data.timeAnalysis?.averageTimePerQuestionSeconds || data.attempt.averageTimePerQuestion || 0;
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Pacing Distribution', 52, p2Y + 10);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Optimal Pace: ${pacing.optimalPaceCount} questions`, 52, p2Y + 28);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Rushed (<20s): ${pacing.rushedCount} questions`, 52, p2Y + 44);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Overthought: ${pacing.overthoughtCount} questions`, 52, p2Y + 60);
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Speed Benchmarks', 220, p2Y + 10);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Average Time / Question: ${Number(avgTimeQ).toFixed(1)}s`, 220, p2Y + 28);
+        const timeCorr = data.timeAnalysis?.timeOnCorrectSeconds ? `${Math.round(data.timeAnalysis.timeOnCorrectSeconds)}s` : 'N/A';
+        const timeWrong = data.timeAnalysis?.timeOnWrongSeconds ? `${Math.round(data.timeAnalysis.timeOnWrongSeconds)}s` : 'N/A';
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Time on Correct Answers: ${timeCorr}`, 220, p2Y + 44);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Time on Wrong Answers: ${timeWrong}`, 220, p2Y + 60);
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Pacing Extremes', 390, p2Y + 10);
+        const fastSec = data.timeAnalysis?.fastestQuestionSeconds !== undefined ? `${data.timeAnalysis.fastestQuestionSeconds}s` : 'N/A';
+        const slowSec = data.timeAnalysis?.slowestQuestionSeconds !== undefined ? `${data.timeAnalysis.slowestQuestionSeconds}s` : 'N/A';
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Fastest Response: ${fastSec}`, 390, p2Y + 28);
+        doc.fillColor(darkText).fontSize(8).font('Helvetica').text(`Slowest Response: ${slowSec}`, 390, p2Y + 44);
+        const timeWasted = data.timeAnalysis?.timeWastedSeconds ? `${Math.round(data.timeAnalysis.timeWastedSeconds / 60)}m wasted` : 'Low time waste';
+        doc.fillColor(mutedText).fontSize(8).font('Helvetica').text(`Time Waste Index: ${timeWasted}`, 390, p2Y + 60);
+
+        p2Y += 98;
+
+        // 3. Attempt Strategy & Negative Marking Penalty
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Attempt Strategy & Negative Marking Impact', 40, p2Y);
+        p2Y += 16;
+
+        doc.rect(40, p2Y, 515, 90).fillAndStroke(lightBg, borderColor);
+
+        const negPenalty = data.strategy?.negativeMarkingPenalty ?? data.strategy?.avoidableLossMarks ?? (data.attempt.wrongAnswers * 1);
+        const potScore = data.strategy?.scoreWithoutNegativeMarking ?? (data.attempt.score + negPenalty);
+        const riskProf = (data.strategy?.riskCategory || (data.attempt.accuracy < 60 ? 'HIGH_RISK' : 'BALANCED')).replace(/_/g, ' ');
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Negative Marking Diagnostic', 52, p2Y + 10);
+        doc.fillColor(accentRose).fontSize(12).font('Helvetica-Bold').text(`-${negPenalty} Marks Lost`, 52, p2Y + 26);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text('Avoidable Negative Loss', 52, p2Y + 44);
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Projected Potential Score', 200, p2Y + 10);
+        doc.fillColor(accentEmerald).fontSize(12).font('Helvetica-Bold').text(`${potScore} / ${data.attempt.maxScore}`, 200, p2Y + 26);
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text('If wrong guesses were skipped', 200, p2Y + 44);
+
+        doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Strategy Risk Profile', 360, p2Y + 10);
+        doc.fillColor(darkText).fontSize(11).font('Helvetica-Bold').text(riskProf, 360, p2Y + 26);
+        const attemptRatioStr = data.strategy?.attemptRatio ? `${Number(data.strategy.attemptRatio).toFixed(1)}% exam attempted` : `${data.attempt.totalQuestions - data.attempt.unattempted} questions attempted`;
+        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(attemptRatioStr, 360, p2Y + 44);
+
+        const gainMsg = data.strategy?.potentialScoreGainMessage || `Eliminating low-confidence guesses could recover approximately ~${negPenalty} marks.`;
+        doc.rect(52, p2Y + 62, 491, 20).fill('#EEF2FF');
+        doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('Strategic Takeaway:', 60, p2Y + 67);
+        doc.fillColor(darkText).fontSize(7.5).font('Helvetica').text(gainMsg, 155, p2Y + 67, { width: 380, lineBreak: false });
+
+        // Page 2 Footer
+        const p2FooterY = 780;
+        doc.rect(40, p2FooterY, 515, 0.5).fill(borderColor);
+        doc.fillColor(mutedText).fontSize(7).font('Helvetica').text(
+          `Page 2 of 3   •   Brainros Assessment Engine   •   Actionable Recommendations continue on Page 3`,
+          40,
+          p2FooterY + 6,
+          { width: 515, align: 'center' },
+        );
 
         // ═══════════════════════════════════════════════════════════════
-        // RECOMMENDATIONS & ACTIONABLE FEEDBACK
+        // PAGE 3: RECOMMENDATIONS & QUESTION-BY-QUESTION AUDIT
         // ═══════════════════════════════════════════════════════════════
-        doc.fillColor(secondaryColor).fontSize(12).font('Helvetica-Bold').text('Actionable Feedback & Recommendations', 40, currentY);
-        currentY += 18;
+        doc.addPage();
 
-        doc.rect(40, currentY, 515, 65).fillAndStroke(lightBg, borderColor);
+        // Header
+        doc.rect(40, 40, 515, 38).fill(secondaryColor);
+        doc.fillColor('#FFFFFF').fontSize(13).font('Helvetica-Bold').text('BRAINROS — Personalized Recommendations & Question Audit', 55, 52);
+        doc.fillColor('#94A3B8').fontSize(7.5).font('Helvetica').text(`Candidate: ${data.student.name}`, 320, 54, { width: 220, align: 'right' });
 
-        const defaultRecs = [
-          data.attempt.accuracy < 70
-            ? 'Focus on reducing negative marks by skipping low-confidence questions.'
-            : 'Excellent accuracy! Maintain this discipline in mock and live exam simulations.',
-          data.attempt.unattempted > 15
-            ? 'Work on question scanning speed to increase overall attempt rate without sacrificing accuracy.'
-            : 'Strong coverage across exam sections. Continue reviewing chapter-level weak areas.',
-        ];
+        let p3Y = 95;
 
-        const recs = (data.strategy?.recommendations && data.strategy.recommendations.length > 0)
-          ? data.strategy.recommendations
-          : defaultRecs;
+        // 1. Actionable Recommendations
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Actionable Performance Recommendations', 40, p3Y);
+        p3Y += 16;
 
-        let recY = currentY + 12;
+        const recs = data.recommendations && data.recommendations.length > 0
+          ? data.recommendations
+          : [
+              {
+                priority: 'HIGH',
+                title: 'Eliminate Negative Guessing in Low-Confidence Sections',
+                description: 'A significant portion of score loss came from wrong attempts. Skip uncertain questions during Phase 1.',
+                actionStep: 'Adopt the 2-Round exam attempt strategy: complete confident questions first before attempting moderate ones.',
+              },
+              {
+                priority: 'MEDIUM',
+                title: 'Strengthen Concept Clarity in Critical Focus Chapters',
+                description: 'Review foundational theory and practice standard difficulty problems in marked weak chapters.',
+                actionStep: 'Complete 20-30 targeted practice problems daily in chapters with under 50% accuracy.',
+              },
+            ];
+
         recs.slice(0, 3).forEach((rec) => {
-          doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('•', 52, recY);
-          doc.fillColor(darkText).fontSize(8).font('Helvetica').text(rec, 65, recY, { width: 475 });
-          recY += 16;
+          doc.rect(40, p3Y, 515, 48).fillAndStroke(lightBg, borderColor);
+
+          const prioColor = rec.priority === 'HIGH' ? accentRose : rec.priority === 'MEDIUM' ? accentAmber : primaryColor;
+          doc.rect(48, p3Y + 8, 42, 14).fill(prioColor);
+          doc.fillColor('#FFFFFF').fontSize(6.5).font('Helvetica-Bold').text((rec.priority || 'NORMAL').toUpperCase(), 50, p3Y + 11, { width: 38, align: 'center' });
+
+          doc.fillColor(darkText).fontSize(8.5).font('Helvetica-Bold').text(rec.title, 98, p3Y + 8);
+          doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(rec.description, 98, p3Y + 22, { width: 445 });
+          if (rec.actionStep) {
+            doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text(`Action: ${rec.actionStep}`, 98, p3Y + 34, { width: 445 });
+          }
+
+          p3Y += 56;
         });
 
-        // ═══════════════════════════════════════════════════════════════
-        // FOOTER
-        // ═══════════════════════════════════════════════════════════════
-        const footerY = 770;
-        doc.rect(40, footerY, 515, 0.5).fill(borderColor);
-        doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(
-          `Brainros Exam Management System  •  Generated on ${new Date().toLocaleString('en-IN')}  •  Confidential Student Report`,
+        p3Y += 10;
+
+        // 2. Question-by-Question Response Audit Summary Table
+        doc.fillColor(secondaryColor).fontSize(11).font('Helvetica-Bold').text('Question-by-Question Response Audit Breakdown', 40, p3Y);
+        p3Y += 16;
+
+        // Mini table header
+        doc.rect(40, p3Y, 515, 18).fill(secondaryColor);
+        doc.fillColor('#FFFFFF').fontSize(7.5).font('Helvetica-Bold');
+        doc.text('Q#', 50, p3Y + 5);
+        doc.text('SECTION', 85, p3Y + 5);
+        doc.text('STATUS', 240, p3Y + 5);
+        doc.text('TIME SPENT', 340, p3Y + 5);
+        doc.text('MARKS AWARDED', 440, p3Y + 5);
+        p3Y += 18;
+
+        const reviews = data.questionsReview || [];
+        if (reviews.length === 0) {
+          doc.rect(40, p3Y, 515, 24).fillAndStroke('#FFFFFF', borderColor);
+          doc.fillColor(mutedText).fontSize(8).font('Helvetica').text('Detailed question audit recorded in student portal review.', 50, p3Y + 7);
+          p3Y += 24;
+        } else {
+          // Render up to 18 questions on page 3
+          reviews.slice(0, 16).forEach((q, idx) => {
+            const rowBg = idx % 2 === 0 ? '#FFFFFF' : lightBg;
+            doc.rect(40, p3Y, 515, 18).fillAndStroke(rowBg, borderColor);
+
+            doc.fillColor(darkText).fontSize(7.5).font('Helvetica-Bold').text(`Q${q.displayOrder || idx + 1}`, 50, p3Y + 5);
+            doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text(q.sectionName || 'General', 85, p3Y + 5);
+
+            if (!q.isAttempted) {
+              doc.fillColor(mutedText).fontSize(7.5).font('Helvetica').text('— Skipped', 240, p3Y + 5);
+            } else if (q.isCorrect) {
+              doc.fillColor(accentEmerald).fontSize(7.5).font('Helvetica-Bold').text('✓ Correct', 240, p3Y + 5);
+            } else {
+              doc.fillColor(accentRose).fontSize(7.5).font('Helvetica-Bold').text('✗ Incorrect', 240, p3Y + 5);
+            }
+
+            const qTimeStr = q.timeSpentSeconds ? `${q.timeSpentSeconds}s` : '—';
+            doc.fillColor(darkText).fontSize(7.5).font('Helvetica').text(qTimeStr, 340, p3Y + 5);
+
+            const marksStr = q.marksAwarded !== undefined ? (q.marksAwarded > 0 ? `+${q.marksAwarded}` : `${q.marksAwarded}`) : '0';
+            doc.fillColor(q.marksAwarded > 0 ? accentEmerald : q.marksAwarded < 0 ? accentRose : mutedText).fontSize(7.5).font('Helvetica-Bold').text(marksStr, 440, p3Y + 5);
+
+            p3Y += 18;
+          });
+
+          if (reviews.length > 16) {
+            doc.rect(40, p3Y, 515, 16).fillAndStroke(lightBg, borderColor);
+            doc.fillColor(mutedText).fontSize(7).font('Helvetica-Bold').text(`... and ${reviews.length - 16} more questions detailed in student portal review`, 50, p3Y + 4);
+            p3Y += 16;
+          }
+        }
+
+        // Official Verification Footer
+        const p3FooterY = 770;
+        doc.rect(40, p3FooterY, 515, 0.5).fill(borderColor);
+        doc.fillColor(mutedText).fontSize(7).font('Helvetica').text(
+          `Brainros Exam Management System  •  Automated Performance Audit  •  Generated on ${new Date().toLocaleString('en-IN')}  •  Strictly Confidential`,
           40,
-          footerY + 8,
+          p3FooterY + 6,
           { width: 515, align: 'center' },
         );
 

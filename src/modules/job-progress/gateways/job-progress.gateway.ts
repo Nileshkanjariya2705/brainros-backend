@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { TokenService } from '../../auth/services/token.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   JobProgressEventDto,
   SubscribeJobPayload,
@@ -38,7 +39,10 @@ export class JobProgressGateway
 
   private readonly logger = new Logger(JobProgressGateway.name);
 
-  constructor(private readonly tokenService: TokenService) {}
+  constructor(
+    private readonly tokenService: TokenService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async handleConnection(socket: AuthenticatedSocket) {
     try {
@@ -72,10 +76,36 @@ export class JobProgressGateway
       }
 
       const payload = await this.tokenService.verifyAccessToken(token);
+      const userId = payload.sub || payload.userId;
+
+      // Authoritative database resolution of user roles
+      let roles: string[] = [];
+      let institutionId = payload.institutionId;
+
+      try {
+        const user = await this.prisma.user.findUnique({
+          where: { id: userId },
+          include: {
+            userRoles: {
+              include: { role: true },
+            },
+          },
+        });
+        if (user) {
+          roles = user.userRoles?.map((ur) => ur.role.name) || [];
+        }
+      } catch (dbErr: any) {
+        this.logger.warn(`Failed to fetch database roles for socket user ${userId}: ${dbErr.message}`);
+      }
+
+      if (roles.length === 0 && (payload.roles || payload.role)) {
+        roles = payload.roles || [payload.role];
+      }
+
       socket.user = {
-        userId: payload.sub || payload.userId,
-        roles: payload.roles || (payload.role ? [payload.role] : []),
-        institutionId: payload.institutionId,
+        userId,
+        roles,
+        institutionId,
       };
 
       // Auto-join personal user channel
@@ -144,14 +174,19 @@ export class JobProgressGateway
     }
 
     const roles = socket.user.roles || [];
-    const isAuthorized =
-      roles.includes('SUPER_ADMIN') ||
-      roles.includes('ADMIN') ||
-      roles.includes('INSTITUTION_ADMIN');
+    const isAuthorized = roles.some((r) => {
+      const upper = String(r).toUpperCase().trim();
+      return (
+        upper === 'SUPER_ADMIN' ||
+        upper === 'ADMIN' ||
+        upper === 'INSTITUTION_ADMIN' ||
+        upper.includes('ADMIN')
+      );
+    });
 
     if (!isAuthorized) {
       this.logger.warn(
-        `[WebSocket] Unauthorized exam job subscription attempt by user ${socket.user.userId}`,
+        `[WebSocket] Unauthorized exam job subscription attempt by user ${socket.user.userId} with roles: [${roles.join(', ')}]`,
       );
       return { status: 'error', message: 'Forbidden: Insufficient privileges for exam monitoring' };
     }

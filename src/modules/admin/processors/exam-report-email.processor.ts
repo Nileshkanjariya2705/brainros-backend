@@ -9,6 +9,8 @@ import { NotificationChannel, NotificationStatus } from '@prisma/client';
 
 import { JobProgressService } from '../../job-progress/services/job-progress.service';
 
+import { ResultService } from '../../result/result.service';
+
 export interface ExamReportEmailJobData {
   notificationId?: string;
   examId: string;
@@ -31,6 +33,7 @@ export class ExamReportEmailProcessor extends WorkerHost {
     private readonly pdfService: ExamReportPdfService,
     private readonly auditLogService: AuditLogService,
     private readonly jobProgressService: JobProgressService,
+    private readonly resultService: ResultService,
   ) {
     super();
   }
@@ -119,10 +122,20 @@ export class ExamReportEmailProcessor extends WorkerHost {
         message: `Generating PDF report for ${attempt.student.name}...`,
       });
 
-      // 3. Prepare PDF Data
+      // 3. Fetch comprehensive analysis & question-level review from ResultService (pure read-only)
+      let fullAnalysis: any = null;
+      let reviewData: any[] = [];
+      try {
+        fullAnalysis = await this.resultService.getFullAnalysis(attemptId);
+        reviewData = await this.resultService.getAnswerReview(attemptId);
+      } catch (e: any) {
+        this.logger.warn(`Could not compute dynamic fullAnalysis for attempt '${attemptId}': ${e.message}`);
+      }
+
+      // 4. Prepare Rich PDF Data
       const rankData = attempt.candidateRanks[0];
-      const timeAnalysis = attempt.timeAnalyses[0];
-      const strategyAnalysis = attempt.strategyAnalyses[0];
+      const fallbackTimeAnalysis = attempt.timeAnalyses[0];
+      const fallbackStrategyAnalysis = attempt.strategyAnalyses[0];
 
       const pdfData: ExamReportPdfData = {
         student: {
@@ -135,6 +148,7 @@ export class ExamReportEmailProcessor extends WorkerHost {
           examDate: attempt.exam.examDate || attempt.startedAt || attempt.createdAt,
           totalMarks: attempt.exam.totalMarks,
           durationMinutes: attempt.exam.durationMinutes,
+          examTargetName: fullAnalysis?.examTargetName,
         },
         attempt: {
           id: attempt.id,
@@ -147,8 +161,13 @@ export class ExamReportEmailProcessor extends WorkerHost {
           correctAnswers: attempt.result.correctAnswers,
           wrongAnswers: attempt.result.wrongAnswers,
           unattempted: attempt.result.unattempted,
-          timeUsedSeconds: attempt.result.timeUsedSeconds ?? undefined,
-          averageTimePerQuestion: attempt.result.averageTimePerQuestion ?? undefined,
+          timeUsedSeconds: attempt.result.timeUsedSeconds ?? fullAnalysis?.overall?.timeUsedSeconds ?? undefined,
+          formattedTimeUsed: fullAnalysis?.overall?.formattedTimeUsed,
+          averageTimePerQuestion: attempt.result.averageTimePerQuestion ?? fullAnalysis?.overall?.averageTimePerQuestionSeconds ?? undefined,
+          negativeMarksLost: fullAnalysis?.overall?.negativeMarksLost ?? (attempt.result.wrongAnswers * 1),
+          potentialMarks: fullAnalysis?.overall?.potentialMarks,
+          overallStatus: fullAnalysis?.overall?.overallStatus,
+          speedAccuracyQuadrant: fullAnalysis?.overall?.speedAccuracyQuadrant,
         },
         rank: rankData
           ? {
@@ -157,39 +176,112 @@ export class ExamReportEmailProcessor extends WorkerHost {
               percentile: rankData.percentile ? Number(rankData.percentile) : undefined,
             }
           : undefined,
-        subjects: attempt.result.subjectResults?.map((sr) => ({
-          name: sr.subject?.name || 'Subject',
-          score: sr.score,
-          maxScore: sr.maxScore,
-          accuracy: sr.accuracy,
-          correct: sr.correctAnswers,
-          wrong: sr.wrongAnswers,
-          unattempted: sr.unattempted,
-          performanceStatus: sr.performanceStatus || undefined,
-        })),
-        chapters: attempt.result.chapterResults?.map((cr) => ({
-          name: cr.chapter?.name || 'Chapter',
-          subjectName: cr.chapter?.subject?.name,
-          accuracy: cr.accuracy,
-          performanceStatus: cr.performanceStatus || undefined,
-        })),
-        timeAnalysis: timeAnalysis
+        subjects: fullAnalysis?.subjects?.items?.length
+          ? fullAnalysis.subjects.items.map((sub: any) => ({
+              name: sub.subjectName || sub.name || 'Subject',
+              score: sub.score,
+              maxScore: sub.maxScore,
+              accuracy: sub.accuracy,
+              percentage: sub.percentage,
+              correct: sub.correct,
+              wrong: sub.wrong,
+              unattempted: sub.unattempted,
+              timeSpentSeconds: sub.timeSpentSeconds,
+              avgTimePerQuestionSeconds: sub.avgTimePerQuestionSeconds,
+              performanceStatus: sub.status,
+              isStrongest: sub.isStrongest,
+              isWeakest: sub.isWeakest,
+            }))
+          : attempt.result.subjectResults?.map((sr) => ({
+              name: sr.subject?.name || 'Subject',
+              score: sr.score,
+              maxScore: sr.maxScore,
+              accuracy: sr.accuracy,
+              correct: sr.correctAnswers,
+              wrong: sr.wrongAnswers,
+              unattempted: sr.unattempted,
+              performanceStatus: sr.performanceStatus || undefined,
+            })),
+        chapters: {
+          mastered: fullAnalysis?.chapters?.mastered?.map((ch: any) => ({
+            name: ch.chapterName || ch.name,
+            subjectName: ch.subjectName,
+            accuracy: ch.accuracy,
+            totalQuestions: ch.totalQuestions,
+            performanceStatus: ch.status,
+          })),
+          revisionNeeded: fullAnalysis?.chapters?.revisionNeeded?.map((ch: any) => ({
+            name: ch.chapterName || ch.name,
+            subjectName: ch.subjectName,
+            accuracy: ch.accuracy,
+            totalQuestions: ch.totalQuestions,
+            performanceStatus: ch.status,
+          })),
+          criticalFocus: fullAnalysis?.chapters?.criticalFocus?.map((ch: any) => ({
+            name: ch.chapterName || ch.name,
+            subjectName: ch.subjectName,
+            accuracy: ch.accuracy,
+            totalQuestions: ch.totalQuestions,
+            performanceStatus: ch.status,
+          })),
+        },
+        timeAnalysis: fullAnalysis?.timeAnalysis
           ? {
-              averageTimePerQuestionSeconds: (timeAnalysis.data as any)?.avgTimePerQuestion || (timeAnalysis.data as any)?.averageTimePerQuestion,
-              fastestQuestionSeconds: (timeAnalysis.data as any)?.fastestQuestionTimeSeconds,
-              slowestQuestionSeconds: (timeAnalysis.data as any)?.slowestQuestionTimeSeconds,
+              totalExamDurationMinutes: fullAnalysis.timeAnalysis.totalExamDurationMinutes,
+              totalTimeUsedSeconds: fullAnalysis.timeAnalysis.totalTimeUsedSeconds,
+              averageTimePerQuestionSeconds: fullAnalysis.timeAnalysis.averageTimePerQuestionSeconds,
+              timeOnCorrectSeconds: fullAnalysis.timeAnalysis.timeOnCorrectQuestionsSeconds,
+              timeOnWrongSeconds: fullAnalysis.timeAnalysis.timeOnWrongQuestionsSeconds,
+              timeOnUnattemptedSeconds: fullAnalysis.timeAnalysis.timeOnUnattemptedQuestionsSeconds,
+              timeWastedSeconds: fullAnalysis.timeAnalysis.timeWastedSeconds,
+              fastestQuestionSeconds: fullAnalysis.timeAnalysis.fastestQuestion?.timeSeconds,
+              slowestQuestionSeconds: fullAnalysis.timeAnalysis.slowestQuestion?.timeSeconds,
+              pacingMetrics: fullAnalysis.timeAnalysis.pacingMetrics,
+            }
+          : fallbackTimeAnalysis
+          ? {
+              averageTimePerQuestionSeconds: (fallbackTimeAnalysis.data as any)?.avgTimePerQuestion,
+              fastestQuestionSeconds: (fallbackTimeAnalysis.data as any)?.fastestQuestionTimeSeconds,
+              slowestQuestionSeconds: (fallbackTimeAnalysis.data as any)?.slowestQuestionTimeSeconds,
             }
           : undefined,
-        strategy: strategyAnalysis
+        strategy: fullAnalysis?.attemptStrategy
           ? {
-              overAttemptingScore: (strategyAnalysis.data as any)?.overAttemptCount || 0,
-              avoidableLossMarks: strategyAnalysis.avoidableNegativeMarks,
-              riskCategory: strategyAnalysis.primaryClassification,
-              recommendations: Array.isArray(strategyAnalysis.recommendations)
-                ? (strategyAnalysis.recommendations as any[]).map((r: any) => typeof r === 'string' ? r : r.title || r.description || JSON.stringify(r))
+              negativeMarkingPenalty: fullAnalysis.attemptStrategy.negativeMarkingPenalty,
+              marksLostToGuessing: fullAnalysis.attemptStrategy.marksLostToGuessing,
+              scoreWithoutNegativeMarking: fullAnalysis.attemptStrategy.scoreWithoutNegativeMarking,
+              attemptRatio: fullAnalysis.attemptStrategy.attemptRatio,
+              accuracyVsSpeedProfile: fullAnalysis.attemptStrategy.accuracyVsSpeedProfile,
+              strategicTakeaways: fullAnalysis.attemptStrategy.strategicTakeaways,
+              potentialScoreGainMessage: fullAnalysis.attemptStrategy.potentialScoreGainMessage,
+            }
+          : fallbackStrategyAnalysis
+          ? {
+              overAttemptingScore: (fallbackStrategyAnalysis.data as any)?.overAttemptCount || 0,
+              avoidableLossMarks: fallbackStrategyAnalysis.avoidableNegativeMarks,
+              riskCategory: fallbackStrategyAnalysis.primaryClassification,
+              recommendations: Array.isArray(fallbackStrategyAnalysis.recommendations)
+                ? (fallbackStrategyAnalysis.recommendations as any[]).map((r: any) => typeof r === 'string' ? r : r.title || r.description || JSON.stringify(r))
                 : [],
             }
           : undefined,
+        recommendations: fullAnalysis?.recommendations?.map((rec: any) => ({
+          category: rec.category,
+          priority: rec.priority,
+          title: rec.title,
+          description: rec.description,
+          actionStep: rec.actionStep,
+          impactScore: rec.impactScore,
+        })),
+        questionsReview: reviewData?.map((q: any) => ({
+          displayOrder: q.displayOrder,
+          sectionName: q.sectionName,
+          questionText: q.questionText,
+          isAttempted: q.isAttempted,
+          isCorrect: q.isCorrect,
+          marksAwarded: q.marksAwarded,
+          timeSpentSeconds: q.timeSpentSeconds,
+        })),
       };
 
       // 4. Generate PDF buffer
