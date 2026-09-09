@@ -320,6 +320,7 @@ model Student {
   classId             String            @map("class_id") @db.Uuid
   examTargetId        String            @map("exam_target_id") @db.Uuid
   preferredLanguageId String            @map("preferred_language_id") @db.Uuid
+  admissionYear       Int?              @map("admission_year")
   status              StudentStatus     @default(ACTIVE)
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
@@ -343,6 +344,7 @@ model Student {
   @@index([stateId])
   @@index([districtId])
   @@index([institutionId])
+  @@index([admissionYear])
   @@map("students")
 }
 

@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   AdminStudentsQueryDto,
+  SuperAdminRegistrationsQueryDto,
   AddStudentParentDto,
   SortOrderEnum,
 } from '../dto/admin-students.dto';
@@ -302,7 +303,471 @@ export class AdminStudentsService {
   }
 
   /**
-   * Fetch dynamic master data filter options
+   * Helper: Calculate Today's start and end UTC timestamps according to Asia/Kolkata timezone
+   */
+  private getTodayBounds(timeZone = 'Asia/Kolkata'): { start: Date; end: Date } {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.format(now); // "YYYY-MM-DD"
+    const [year, month, day] = parts.split('-').map(Number);
+    const localMidnightUtcMs =
+      Date.UTC(year, month - 1, day, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+    const start = new Date(localMidnightUtcMs);
+    const end = new Date(localMidnightUtcMs + 24 * 60 * 60 * 1000 - 1);
+    return { start, end };
+  }
+
+  /**
+   * Build WHERE clause for Super Admin Registration queries with combined filters
+   */
+  private buildSuperAdminRegistrationWhere(query: SuperAdminRegistrationsQueryDto): Prisma.StudentWhereInput {
+    const where: Prisma.StudentWhereInput = {};
+
+    // 1. Date Filter (e.g. 'today' or specific date string)
+    if (query.date) {
+      const lower = query.date.toLowerCase().trim();
+      if (lower === 'today') {
+        const { start, end } = this.getTodayBounds();
+        where.createdAt = { gte: start, lte: end };
+      } else if (lower !== 'all') {
+        const specificDate = new Date(query.date);
+        if (!isNaN(specificDate.getTime())) {
+          const startDate = new Date(specificDate.getFullYear(), specificDate.getMonth(), specificDate.getDate(), 0, 0, 0);
+          const endDate = new Date(specificDate.getFullYear(), specificDate.getMonth(), specificDate.getDate(), 23, 59, 59, 999);
+          where.createdAt = { gte: startDate, lte: endDate };
+        }
+      }
+    }
+
+    // 2. Exam Target Filter ('ALL' | 'NEET' | 'JEE' | 'CET' | targetId)
+    if (query.examTarget && query.examTarget.toUpperCase() !== 'ALL') {
+      const targetVal = query.examTarget.trim();
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(targetVal);
+      if (isUuid) {
+        where.examTargetId = targetVal;
+      } else {
+        where.examTarget = {
+          name: { contains: targetVal, mode: 'insensitive' as Prisma.QueryMode },
+        };
+      }
+    } else if (query.examTargetId && query.examTargetId.toUpperCase() !== 'ALL') {
+      where.examTargetId = query.examTargetId;
+    }
+
+    // 3. State Filter
+    if (query.stateId && query.stateId.toUpperCase() !== 'ALL') {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(query.stateId);
+      if (isUuid) {
+        where.stateId = query.stateId;
+      } else {
+        where.OR = [
+          ...(where.OR || []),
+          { state: { contains: query.stateId, mode: 'insensitive' as Prisma.QueryMode } },
+          { stateRef: { name: { contains: query.stateId, mode: 'insensitive' as Prisma.QueryMode } } },
+        ];
+      }
+    }
+
+    // 4. District Filter
+    if (query.districtId && query.districtId.toUpperCase() !== 'ALL') {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(query.districtId);
+      if (isUuid) {
+        where.districtId = query.districtId;
+      } else {
+        where.OR = [
+          ...(where.OR || []),
+          { district: { contains: query.districtId, mode: 'insensitive' as Prisma.QueryMode } },
+          { districtRef: { name: { contains: query.districtId, mode: 'insensitive' as Prisma.QueryMode } } },
+        ];
+      }
+    }
+
+    // 5. Institution / School Filter
+    if (query.institutionId && query.institutionId.toUpperCase() !== 'ALL') {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(query.institutionId);
+      if (isUuid) {
+        where.batchMemberships = {
+          some: {
+            batch: {
+              institutionId: query.institutionId,
+            },
+          },
+        };
+      } else {
+        where.OR = [
+          ...(where.OR || []),
+          { schoolCollege: { contains: query.institutionId, mode: 'insensitive' as Prisma.QueryMode } },
+          {
+            batchMemberships: {
+              some: {
+                batch: {
+                  institution: {
+                    name: { contains: query.institutionId, mode: 'insensitive' as Prisma.QueryMode },
+                  },
+                },
+              },
+            },
+          },
+        ];
+      }
+    }
+
+    // 6. Status Filter
+    if (query.status && query.status.toUpperCase() !== 'ALL') {
+      where.status = query.status as StudentStatus;
+    }
+
+    // 7. Search Filter (Debounced from client)
+    if (query.search && query.search.trim().length > 0) {
+      const searchTerm = query.search.trim();
+      const searchOr: Prisma.StudentWhereInput[] = [
+        { name: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        { studentId: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        { studentCode: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        { schoolCollege: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        { state: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        { district: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+        {
+          user: {
+            OR: [
+              { email: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+              { mobileNumber: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+              { phone: { contains: searchTerm, mode: 'insensitive' as Prisma.QueryMode } },
+            ],
+          },
+        },
+      ];
+
+      if (where.OR) {
+        where.AND = [
+          ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+          { OR: searchOr },
+        ];
+      } else {
+        where.OR = searchOr;
+      }
+    }
+
+    return where;
+  }
+
+  /**
+   * Super Admin: Get server-side paginated, sorted, filtered registration listing
+   */
+  async getSuperAdminRegistrations(query: SuperAdminRegistrationsQueryDto) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const where = this.buildSuperAdminRegistrationWhere(query);
+
+    // Whitelisted sorting
+    const sortOrder = query.sortOrder === SortOrderEnum.ASC ? 'asc' : 'desc';
+    let orderBy: Prisma.StudentOrderByWithRelationInput = { createdAt: 'desc' };
+
+    switch (query.sortBy) {
+      case 'name':
+        orderBy = { name: sortOrder };
+        break;
+      case 'studentId':
+        orderBy = { studentId: sortOrder };
+        break;
+      case 'status':
+        orderBy = { status: sortOrder };
+        break;
+      case 'schoolCollege':
+      case 'institution':
+        orderBy = { schoolCollege: sortOrder };
+        break;
+      case 'email':
+        orderBy = { user: { email: sortOrder } };
+        break;
+      case 'examTarget':
+        orderBy = { examTarget: { name: sortOrder } };
+        break;
+      case 'state':
+        orderBy = { state: sortOrder };
+        break;
+      case 'district':
+        orderBy = { district: sortOrder };
+        break;
+      case 'createdAt':
+      default:
+        orderBy = { createdAt: sortOrder };
+        break;
+    }
+
+    const [students, total] = await Promise.all([
+      this.prisma.student.findMany({
+        where,
+        orderBy,
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          studentId: true,
+          studentCode: true,
+          name: true,
+          state: true,
+          district: true,
+          schoolCollege: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              mobileNumber: true,
+              phone: true,
+              status: true,
+              isActive: true,
+            },
+          },
+          examTarget: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          stateRef: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          districtRef: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          batchMemberships: {
+            where: { status: 'ACTIVE' },
+            select: {
+              id: true,
+              batch: {
+                select: {
+                  id: true,
+                  name: true,
+                  institution: {
+                    select: {
+                      id: true,
+                      name: true,
+                      code: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.student.count({ where }),
+    ]);
+
+    const items = students.map((s) => {
+      const institutions = s.batchMemberships
+        .map((bm) => ({
+          id: bm.batch.institution.id,
+          name: bm.batch.institution.name,
+          code: bm.batch.institution.code,
+          batchName: bm.batch.name,
+        }))
+        .filter(
+          (inst, idx, self) =>
+            idx === self.findIndex((t) => t.id === inst.id),
+        );
+
+      const instituteName =
+        institutions.length > 0
+          ? institutions.map((i) => i.name).join(', ')
+          : s.schoolCollege || '—';
+
+      return {
+        id: s.id,
+        studentId: s.studentId,
+        studentCode: s.studentCode || s.studentId,
+        name: s.name,
+        email: s.user?.email || '—',
+        mobile: s.user?.mobileNumber || s.user?.phone || '—',
+        state: s.stateRef?.name || s.state || '—',
+        stateId: s.stateRef?.id || undefined,
+        district: s.districtRef?.name || s.district || '—',
+        districtId: s.districtRef?.id || undefined,
+        schoolCollege: s.schoolCollege || '—',
+        instituteName,
+        institutions,
+        examTarget: s.examTarget ? { id: s.examTarget.id, name: s.examTarget.name } : null,
+        status: s.status,
+        createdAt: s.createdAt,
+      };
+    });
+
+    return {
+      items,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize) || 1,
+      },
+    };
+  }
+
+  /**
+   * Super Admin: Registration real-time statistics
+   */
+  async getSuperAdminRegistrationStats(query: SuperAdminRegistrationsQueryDto = {}) {
+    const todayBounds = this.getTodayBounds();
+
+    const [
+      totalRegistrations,
+      todayRegistrations,
+      activeRegistrations,
+      pendingRegistrations,
+      examTargetsList,
+    ] = await Promise.all([
+      this.prisma.student.count(),
+      this.prisma.student.count({
+        where: {
+          createdAt: {
+            gte: todayBounds.start,
+            lte: todayBounds.end,
+          },
+        },
+      }),
+      this.prisma.student.count({
+        where: { status: 'ACTIVE' },
+      }),
+      this.prisma.student.count({
+        where: { status: 'PENDING' },
+      }),
+      this.prisma.examTarget.findMany({
+        select: {
+          id: true,
+          name: true,
+          _count: {
+            select: { students: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+
+    const examTargetMap: Record<string, number> = {};
+    const examTargets = examTargetsList.map((t) => {
+      examTargetMap[t.name.toUpperCase()] = t._count.students;
+      return {
+        id: t.id,
+        name: t.name,
+        count: t._count.students,
+      };
+    });
+
+    return {
+      totalRegistrations,
+      todayRegistrations,
+      neetRegistrations: examTargetMap['NEET'] || 0,
+      jeeRegistrations:
+        (examTargetMap['JEE'] || 0) + (examTargetMap['JEE MAIN'] || 0) + (examTargetMap['JEE ADVANCED'] || 0),
+      cetRegistrations:
+        (examTargetMap['CET'] || 0) + (examTargetMap['MHT CET'] || 0) + (examTargetMap['GUJCET'] || 0),
+      activeRegistrations,
+      pendingRegistrations,
+      examTargets,
+    };
+  }
+
+  /**
+   * Super Admin: Dynamic filter options (states, districts cascading by stateId, institutions, exam targets)
+   */
+  async getSuperAdminFilterOptions(stateId?: string) {
+    const districtWhere: Prisma.DistrictWhereInput = { isActive: true };
+    if (stateId && stateId.toUpperCase() !== 'ALL') {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(stateId);
+      if (isUuid) {
+        districtWhere.stateId = stateId;
+      } else {
+        districtWhere.state = { name: { contains: stateId, mode: 'insensitive' as Prisma.QueryMode } };
+      }
+    }
+
+    const [states, districts, examTargets, institutions, distinctSchools] =
+      await Promise.all([
+        this.prisma.state.findMany({
+          where: { isActive: true },
+          select: { id: true, name: true, code: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.district.findMany({
+          where: districtWhere,
+          select: { id: true, name: true, code: true, stateId: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.examTarget.findMany({
+          select: { id: true, name: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.institution.findMany({
+          where: { status: { in: ['ACTIVE', 'APPROVED'] } },
+          select: { id: true, name: true, code: true, state: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.student.findMany({
+          where: { schoolCollege: { not: '' } },
+          select: { schoolCollege: true, state: true },
+          distinct: ['schoolCollege'],
+          take: 100,
+        }),
+      ]);
+
+    const institutionList = institutions.map((i) => ({
+      id: i.id,
+      name: i.name,
+      code: i.code,
+      state: i.state || '',
+      type: 'INSTITUTION',
+    }));
+
+    const standaloneSchools = distinctSchools
+      .filter(
+        (s) =>
+          s.schoolCollege &&
+          !institutions.some((i) => i.name.toLowerCase() === s.schoolCollege.toLowerCase()),
+      )
+      .map((s) => ({
+        id: s.schoolCollege,
+        name: s.schoolCollege,
+        code: 'SCHOOL',
+        state: s.state || '',
+        type: 'SCHOOL',
+      }));
+
+    return {
+      states,
+      districts,
+      examTargets,
+      institutions: [...institutionList, ...standaloneSchools],
+      statuses: [
+        { label: 'All Statuses', value: 'ALL' },
+        { label: 'Active', value: 'ACTIVE' },
+        { label: 'Pending', value: 'PENDING' },
+        { label: 'Suspended', value: 'SUSPENDED' },
+        { label: 'Inactive', value: 'INACTIVE' },
+      ],
+    };
+  }
+
+  /**
+   * Fetch dynamic master data filter options for /admin/students
    */
   async getFilterOptions() {
     const [states, districts, classes, examTargets, institutions] =

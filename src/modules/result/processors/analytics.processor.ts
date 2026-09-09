@@ -54,6 +54,7 @@ export class AnalyticsProcessor extends WorkerHost {
         stage: 'ANALYTICS',
         attemptId,
         examId: attempt.examId,
+        studentId: attempt.studentId,
         userId: (attempt as any)?.student?.userId,
         message: 'Calculating time & strategy analytics...',
       });
@@ -73,15 +74,17 @@ export class AnalyticsProcessor extends WorkerHost {
       await this.jobProgressService.publishProgress(
         ANALYTICS_QUEUE_NAME,
         jobId,
-        70,
+        100,
         100,
         {
           stage: 'ANALYTICS',
           stageIndex: 2,
-          totalStages: 3,
+          totalStages: 4,
+          percentage: 100,
           message: 'Analytics completed. Preparing ranking...',
           attemptId,
           examId: attempt.examId,
+          studentId: attempt.studentId,
           userId: (attempt as any)?.student?.userId,
         },
       );
@@ -113,8 +116,10 @@ export class AnalyticsProcessor extends WorkerHost {
 
       await this.jobProgressService.publishCompleted(ANALYTICS_QUEUE_NAME, jobId, {
         message: 'Analytics stage completed. Enqueued ranking stage.',
+        stage: 'ANALYTICS',
         attemptId,
         examId: attempt.examId,
+        studentId: attempt.studentId,
         userId: (attempt as any)?.student?.userId,
       });
 
@@ -128,10 +133,11 @@ export class AnalyticsProcessor extends WorkerHost {
         `[AnalyticsWorker] Failed analytics for attempt '${attemptId}': ${err.message}`,
         err.stack,
       );
+      const safeErrorMsg = 'Result processing failed during subject and strategy analytics.';
       await this.jobProgressService.publishFailed(
         ANALYTICS_QUEUE_NAME,
         jobId,
-        err.message || 'Analytics calculation failed.',
+        safeErrorMsg,
       );
       throw err;
     }

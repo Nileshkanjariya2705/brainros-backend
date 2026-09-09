@@ -394,6 +394,15 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
       dataQualityStatus: DataQualityStatus.VALID,
       source: 'OFFICIAL_SOURCE',
     },
+    {
+      examName: 'MHT-CET 2024 (Official State Ranking)',
+      examType: 'MHT_CET',
+      totalMarks: 200,
+      totalCandidates: 375000,
+      durationMinutes: 180,
+      dataQualityStatus: DataQualityStatus.VALID,
+      source: 'OFFICIAL_SOURCE',
+    },
   ];
 
   for (const he of historicalExams) {
@@ -401,9 +410,13 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
     const hExam = existing || (await prisma.historicalExam.create({ data: he }));
     inc('historical_exams', !existing);
 
-    // Seed score ranges
+    // Delete previous ranges if any to avoid duplication
+    await prisma.historicalScoreRange.deleteMany({ where: { historicalExamId: hExam.id } });
+
+    let ranges: Array<{ minScore: number; maxScore: number; minRank: number; maxRank: number; repScore: number; count: number }> = [];
+
     if (he.examType === 'NEET') {
-      const ranges = [
+      ranges = [
         { minScore: 700, maxScore: 720, minRank: 1, maxRank: 100, repScore: 710, count: 100 },
         { minScore: 650, maxScore: 699, minRank: 101, maxRank: 4500, repScore: 675, count: 4400 },
         { minScore: 600, maxScore: 649, minRank: 4501, maxRank: 20000, repScore: 625, count: 15500 },
@@ -412,23 +425,44 @@ export async function seedMasterData(ctx: SeedContext): Promise<SeederResult> {
         { minScore: 300, maxScore: 399, minRank: 220001, maxRank: 480000, repScore: 350, count: 260000 },
         { minScore: 150, maxScore: 299, minRank: 480001, maxRank: 1100000, repScore: 225, count: 620000 },
       ];
-      for (const r of ranges) {
-        await prisma.historicalScoreRange.create({
-          data: {
-            historicalExamId: hExam.id,
-            minScore: r.minScore,
-            maxScore: r.maxScore,
-            representativeScore: r.repScore,
-            minRank: r.minRank,
-            maxRank: r.maxRank,
-            candidateCount: r.count,
-            totalCandidates: he.totalCandidates,
-            percentileMin: ((he.totalCandidates - r.maxRank) / he.totalCandidates) * 100,
-            percentileMax: ((he.totalCandidates - r.minRank) / he.totalCandidates) * 100,
-          },
-        });
-        inc('historical_score_ranges', true);
-      }
+    } else if (he.examType === 'JEE_MAIN') {
+      ranges = [
+        { minScore: 270, maxScore: 300, minRank: 1, maxRank: 800, repScore: 285, count: 800 },
+        { minScore: 240, maxScore: 269, minRank: 801, maxRank: 3500, repScore: 255, count: 2700 },
+        { minScore: 200, maxScore: 239, minRank: 3501, maxRank: 12000, repScore: 220, count: 8500 },
+        { minScore: 160, maxScore: 199, minRank: 12001, maxRank: 32000, repScore: 180, count: 20000 },
+        { minScore: 120, maxScore: 159, minRank: 32001, maxRank: 70000, repScore: 140, count: 38000 },
+        { minScore: 80, maxScore: 119, minRank: 70001, maxRank: 150000, repScore: 100, count: 80000 },
+        { minScore: 40, maxScore: 79, minRank: 150001, maxRank: 350000, repScore: 60, count: 200000 },
+      ];
+    } else if (he.examType === 'MHT_CET') {
+      ranges = [
+        { minScore: 180, maxScore: 200, minRank: 1, maxRank: 350, repScore: 190, count: 350 },
+        { minScore: 160, maxScore: 179, minRank: 351, maxRank: 1800, repScore: 170, count: 1450 },
+        { minScore: 140, maxScore: 159, minRank: 1801, maxRank: 5500, repScore: 150, count: 3700 },
+        { minScore: 120, maxScore: 139, minRank: 5501, maxRank: 14000, repScore: 130, count: 8500 },
+        { minScore: 100, maxScore: 119, minRank: 14001, maxRank: 32000, repScore: 110, count: 18000 },
+        { minScore: 70, maxScore: 99, minRank: 32001, maxRank: 75000, repScore: 85, count: 43000 },
+        { minScore: 40, maxScore: 69, minRank: 75001, maxRank: 160000, repScore: 55, count: 85000 },
+      ];
+    }
+
+    for (const r of ranges) {
+      await prisma.historicalScoreRange.create({
+        data: {
+          historicalExamId: hExam.id,
+          minScore: r.minScore,
+          maxScore: r.maxScore,
+          representativeScore: r.repScore,
+          minRank: r.minRank,
+          maxRank: r.maxRank,
+          candidateCount: r.count,
+          totalCandidates: he.totalCandidates,
+          percentileMin: ((he.totalCandidates - r.maxRank) / he.totalCandidates) * 100,
+          percentileMax: ((he.totalCandidates - r.minRank) / he.totalCandidates) * 100,
+        },
+      });
+      inc('historical_score_ranges', true);
     }
   }
 

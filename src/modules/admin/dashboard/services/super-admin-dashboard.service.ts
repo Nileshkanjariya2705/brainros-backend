@@ -18,6 +18,28 @@ export class SuperAdminDashboardService {
   ) {}
 
   /**
+   * Helper: Calculate Today's start and end UTC timestamps according to application timezone (Asia/Kolkata)
+   */
+  public getTodayBoundsInTimezone(timeZone = 'Asia/Kolkata'): { start: Date; end: Date } {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.format(now); // "YYYY-MM-DD"
+    const [year, month, day] = parts.split('-').map(Number);
+
+    // Asia/Kolkata is UTC+05:30 (330 minutes)
+    const localMidnightUtcMs =
+      Date.UTC(year, month - 1, day, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+    const start = new Date(localMidnightUtcMs);
+    const end = new Date(localMidnightUtcMs + 24 * 60 * 60 * 1000 - 1);
+    return { start, end };
+  }
+
+  /**
    * Helper: Parse Date Range Filter into start and end Date objects.
    */
   private parseDateRange(filter: SuperAdminAnalyticsFilterDto): {
@@ -25,7 +47,7 @@ export class SuperAdminDashboardService {
     endDate?: Date;
   } {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayBounds = this.getTodayBoundsInTimezone();
 
     if (filter.from || filter.to) {
       return {
@@ -36,7 +58,7 @@ export class SuperAdminDashboardService {
 
     switch (filter.dateRange) {
       case DateRangePreset.TODAY:
-        return { startDate: todayStart, endDate: now };
+        return { startDate: todayBounds.start, endDate: todayBounds.end };
       case DateRangePreset.LAST_7_DAYS:
         return {
           startDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
@@ -108,7 +130,7 @@ export class SuperAdminDashboardService {
   }
 
   /**
-   * 1. Overview KPI Cards (Total Students, Active Students, Exams Conducted, Total Attempts)
+   * 1. Overview KPI Cards (Total Students, Today, Exam Targets, Active Students, Exams Conducted, Total Attempts)
    */
   async getOverview(filter: SuperAdminAnalyticsFilterDto = {}) {
     const cacheKey = `super-admin:overview:${JSON.stringify(filter)}`;
@@ -121,6 +143,7 @@ export class SuperAdminDashboardService {
 
     const studentWhere = this.buildStudentWhere(filter);
     const { startDate, endDate } = this.parseDateRange(filter);
+    const todayBounds = this.getTodayBoundsInTimezone();
 
     const examWhere: any = {
       status: { name: { in: ['COMPLETED', 'ENDED'] } },
@@ -140,13 +163,24 @@ export class SuperAdminDashboardService {
 
     const [
       totalStudents,
+      todayStudents,
       activeStudents,
       examsConducted,
       totalAttempts,
       completedAttempts,
       totalInstitutions,
+      examTargetsList,
     ] = await Promise.all([
       this.prisma.student.count({ where: studentWhere }),
+      this.prisma.student.count({
+        where: {
+          ...studentWhere,
+          createdAt: {
+            gte: todayBounds.start,
+            lte: todayBounds.end,
+          },
+        },
+      }),
       this.prisma.student.count({
         where: {
           ...studentWhere,
@@ -163,6 +197,20 @@ export class SuperAdminDashboardService {
         },
       }),
       this.prisma.institution.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.examTarget.findMany({
+        select: {
+          id: true,
+          name: true,
+          _count: {
+            select: {
+              students: {
+                where: studentWhere,
+              },
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
     ]);
 
     const activePercentage =
@@ -170,8 +218,26 @@ export class SuperAdminDashboardService {
         ? Number(((activeStudents / totalStudents) * 100).toFixed(1))
         : 0;
 
+    const examTargetMap: Record<string, number> = {};
+    const examTargetStats = examTargetsList.map((t) => {
+      examTargetMap[t.name.toUpperCase()] = t._count.students;
+      return {
+        id: t.id,
+        name: t.name,
+        count: t._count.students,
+      };
+    });
+
     const result = {
       totalStudents,
+      totalRegistrations: totalStudents,
+      todayRegistrations: todayStudents,
+      neetRegistrations: examTargetMap['NEET'] || 0,
+      jeeRegistrations:
+        (examTargetMap['JEE'] || 0) + (examTargetMap['JEE MAIN'] || 0) + (examTargetMap['JEE ADVANCED'] || 0),
+      cetRegistrations:
+        (examTargetMap['CET'] || 0) + (examTargetMap['MHT CET'] || 0) + (examTargetMap['GUJCET'] || 0),
+      examTargetStats,
       activeStudents,
       activePercentage,
       examsConducted,

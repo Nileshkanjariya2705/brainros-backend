@@ -1,10 +1,11 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { RedisService } from '../../redis/redis.service';
 import { SecurityEventService } from '../services/security-event.service';
 import { TwoFactorConfig } from '../config/two-factor.config';
 import { TwoFactorDotInProvider } from './two-factor-dot-in.provider';
 import { TwoFactorProvider } from '../otp/two-factor.provider';
 import { DevelopmentOtpProvider } from './development-otp.provider';
+import { TwilioVerifyProvider } from './twilio-verify.provider';
 import {
   ITwoFactorProvider,
   OtpPurpose,
@@ -22,6 +23,8 @@ export class TwoFactorService {
     private readonly twoFactorDotInProvider: TwoFactorDotInProvider,
     private readonly msg91Provider: TwoFactorProvider,
     private readonly devProvider: DevelopmentOtpProvider,
+    @Optional()
+    private readonly twilioVerifyProvider?: TwilioVerifyProvider,
   ) {}
 
   /**
@@ -30,12 +33,47 @@ export class TwoFactorService {
    */
   getActiveProvider(): ITwoFactorProvider {
     if (this.config.enable2FA) {
-      if (this.config.otpProvider === '2FACTOR') {
-        // 2Factor.in Provider (Available if configured in .env):
+      // Explicit provider selection based on OTP_PROVIDER env var
+      if (
+        this.config.otpProvider === 'TWILIO' &&
+        this.twilioVerifyProvider &&
+        typeof this.twilioVerifyProvider.sendOtp === 'function'
+      ) {
+        return this.twilioVerifyProvider;
+      }
+      if (
+        this.config.otpProvider === '2FACTOR' &&
+        this.twoFactorDotInProvider &&
+        typeof this.twoFactorDotInProvider.sendOtp === 'function'
+      ) {
         return this.twoFactorDotInProvider;
       }
-      // MSG91 OTP Provider (Default / Active):
-      return this.msg91Provider;
+      if (
+        this.config.otpProvider === 'MSG91' &&
+        this.msg91Provider &&
+        typeof this.msg91Provider.sendOtp === 'function'
+      ) {
+        return this.msg91Provider;
+      }
+      // Fallback chain: Twilio → 2Factor → MSG91
+      if (
+        this.twilioVerifyProvider &&
+        typeof this.twilioVerifyProvider.sendOtp === 'function'
+      ) {
+        return this.twilioVerifyProvider;
+      }
+      if (
+        this.twoFactorDotInProvider &&
+        typeof this.twoFactorDotInProvider.sendOtp === 'function'
+      ) {
+        return this.twoFactorDotInProvider;
+      }
+      if (
+        this.msg91Provider &&
+        typeof this.msg91Provider.sendOtp === 'function'
+      ) {
+        return this.msg91Provider;
+      }
     }
     return this.devProvider;
   }
@@ -261,17 +299,27 @@ export class TwoFactorService {
       );
     }
 
-    // 2. Retrieve OTP session info from Redis
-    const sessionDataStr = await this.redisService.get(otpKeyStr);
-    if (!sessionDataStr) {
-      throw new BadRequestException(
-        'OTP has expired or has not been requested.',
-      );
+    // 2. Retrieve OTP session info from Redis if available
+    let sessionData: TwoFactorSessionData | undefined = undefined;
+    try {
+      const sessionDataStr = await this.redisService.get(otpKeyStr);
+      if (sessionDataStr) {
+        sessionData = JSON.parse(sessionDataStr);
+      } else if (!this.config.enable2FA) {
+        throw new BadRequestException(
+          'OTP has expired or has not been requested.',
+        );
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+      if (!this.config.enable2FA) {
+        throw new BadRequestException(
+          'OTP has expired or has not been requested.',
+        );
+      }
     }
 
-    const sessionData: TwoFactorSessionData = JSON.parse(sessionDataStr);
-
-    // 3. Verify OTP via the active provider
+    // 3. Verify OTP via the active provider (Twilio Verify in REAL mode)
     // REAL mode: calls Twilio VerificationCheck. Never falls back to 12345.
     // DEV mode: verifies against devBypassOtp hash locally.
     const isValid = await provider.verifyOtp(

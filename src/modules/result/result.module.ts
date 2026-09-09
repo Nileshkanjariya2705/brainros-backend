@@ -25,6 +25,8 @@ import { RankingProcessor } from './processors/ranking.processor';
 import { ResultReconciliationProcessor } from './processors/result-reconciliation.processor';
 import { ExamWindowEndProcessor } from './processors/exam-window-end.processor';
 
+import { ResultProcessingMonitorService } from './services/result-processing-monitor.service';
+
 @Module({
   imports: [
     PrismaModule,
@@ -47,6 +49,7 @@ import { ExamWindowEndProcessor } from './processors/exam-window-end.processor';
     ResultReadinessService,
     ResultAccessService,
     ExamPublicationService,
+    ResultProcessingMonitorService,
     EvaluationProcessor,
     AnalyticsProcessor,
     RankingProcessor,
@@ -59,6 +62,7 @@ import { ExamWindowEndProcessor } from './processors/exam-window-end.processor';
     ResultReadinessService,
     ResultAccessService,
     ExamPublicationService,
+    ResultProcessingMonitorService,
     BullModule,
   ],
 })

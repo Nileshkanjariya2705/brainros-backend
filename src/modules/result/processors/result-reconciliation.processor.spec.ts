@@ -5,6 +5,7 @@ import { RedisService } from '../../redis/redis.service';
 import { ResultService } from '../result.service';
 import { ResultReadinessService } from '../services/result-readiness.service';
 import { ResultAccessService } from '../services/result-access.service';
+import { JobProgressService } from '../../job-progress/services/job-progress.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import {
   EVALUATION_QUEUE_NAME,
@@ -65,6 +66,17 @@ describe('ResultReconciliationProcessor (Background Recovery & Reconciliation)',
         { provide: ResultAccessService, useValue: mockResultAccessService },
         { provide: getQueueToken(EVALUATION_QUEUE_NAME), useValue: mockQueue },
         { provide: getQueueToken(EXAM_WINDOW_END_QUEUE_NAME), useValue: mockQueue },
+        {
+          provide: JobProgressService,
+          useValue: {
+            publishStarted: jest.fn().mockResolvedValue({}),
+            publishProgress: jest.fn().mockResolvedValue({}),
+            publishCompleted: jest.fn().mockResolvedValue({}),
+            publishFailed: jest.fn().mockResolvedValue({}),
+            publishRetrying: jest.fn().mockResolvedValue({}),
+            getJobStatus: jest.fn().mockResolvedValue(null),
+          },
+        },
       ],
     }).compile();
 

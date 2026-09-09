@@ -733,16 +733,22 @@ export class AnalysisEngineService {
     const recs: ActionableRecommendation[] = [];
     let idCounter = 1;
 
-    // 1. Critical chapters (High impact)
-    for (const chap of params.criticalFocusChapters.slice(0, 3)) {
+    // 1. Critical chapters (High impact, filtered by minimum sample size)
+    const validCritical = params.criticalFocusChapters.filter(
+      (c) => c.totalQuestions >= 2,
+    );
+    for (const chap of validCritical.slice(0, 3)) {
       const potentialGain =
         (chap.wrong + chap.unattempted) * params.defaultMarks;
+      const isLowSample = chap.totalQuestions < 4;
       recs.push({
         id: `rec-${idCounter++}`,
         category: 'CHAPTER_REVISION',
-        priority: 'HIGH',
+        priority: isLowSample ? 'MEDIUM' : 'HIGH',
         title: `Master ${chap.chapterName} (${chap.subjectName})`,
-        description: `Accuracy is currently ${chap.accuracy}% with ${chap.wrong} wrong answer(s). Immediate conceptual revision required.`,
+        description: isLowSample
+          ? `Current test data indicates ${chap.accuracy}% accuracy (${chap.wrong} incorrect out of ${chap.totalQuestions} questions). Review key concepts.`
+          : `Accuracy is currently ${chap.accuracy}% across ${chap.totalQuestions} questions (${chap.wrong} incorrect). Immediate conceptual revision required.`,
         impactScore: potentialGain,
         actionStep: `Solve 25+ practice problems from ${chap.chapterName} focusing on core formulas and high-yield questions.`,
       });

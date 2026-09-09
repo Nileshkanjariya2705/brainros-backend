@@ -16,6 +16,9 @@ import {
   RecentResultItem,
 } from '../interfaces/student-dashboard.interface';
 
+import { RecommendationEngineService } from '../../recommendation/services/recommendation-engine.service';
+import { StudentTargetPredictionService } from '../../predicted-rank/services/student-target-prediction.service';
+
 @Injectable()
 export class StudentDashboardService {
   private readonly logger = new Logger(StudentDashboardService.name);
@@ -23,6 +26,8 @@ export class StudentDashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly recommendationEngine: RecommendationEngineService,
+    private readonly targetPredictionService: StudentTargetPredictionService,
   ) {}
 
   /**
@@ -250,17 +255,40 @@ export class StudentDashboardService {
           stateRank: stateRankRecord ? stateRankRecord.rank : null,
           categoryRank: categoryRankRecord ? categoryRankRecord.rank : null,
         };
-
-        if (overallRank.predictedRankMin || overallRank.predictedRankMax) {
-          predictedRank = {
-            predictedRankMin: overallRank.predictedRankMin,
-            predictedRankMax: overallRank.predictedRankMax,
-            confidence: (overallRank.predictionConfidence as any) || 'MEDIUM',
-            modelVersion: overallRank.predictionModelVersion || 'v2.4',
-            isEstimated: true,
-          };
-        }
       }
+    }
+
+    // Fetch target-based predicted rank
+    try {
+      const targetPred = await this.targetPredictionService.getStudentTargetPrediction(userId);
+      predictedRank = {
+        available: targetPred.available,
+        reason: targetPred.reason || null,
+        targetExam: targetPred.targetExam || null,
+        targetExamName: targetPred.targetExamName || null,
+        predictedRank: targetPred.predictedRank || null,
+        predictedRankMin: targetPred.rankRange?.min || null,
+        predictedRankMax: targetPred.rankRange?.max || null,
+        confidence: targetPred.confidence || null,
+        confidenceScore: targetPred.confidenceScore || null,
+        scoreUsed: targetPred.scoreUsed || null,
+        normalizedPercentage: targetPred.normalizedPercentage || null,
+        attemptsUsed: targetPred.attemptsUsed || 0,
+        trend: targetPred.trend || null,
+        modelVersion: targetPred.modelVersion || 'v1.0.0',
+        explanation: targetPred.explanation || null,
+        isEstimated: true,
+      };
+    } catch (err) {
+      this.logger.warn(`Failed to get student target predicted rank: ${err.message}`);
+      predictedRank = {
+        available: false,
+        reason: 'INSUFFICIENT_DATA',
+        predictedRankMin: null,
+        predictedRankMax: null,
+        confidence: null,
+        isEstimated: true,
+      };
     }
 
     // 7. Subject Performance & Subject Trends
@@ -403,102 +431,46 @@ export class StudentDashboardService {
       recentScores,
     };
 
-    // 12. Contextual Recommendations
-    const recommendations: DashboardRecommendationItem[] = [];
-    if (subjects.length > 0) {
-      const weakest = [...subjects].sort((a, b) => a.accuracy - b.accuracy)[0];
-      const strongest = [...subjects].sort((a, b) => b.accuracy - a.accuracy)[0];
+    // 12. Contextual Recommendations generated via RecommendationEngineService
+    const engineRecs = await this.recommendationEngine.generateStudentRecommendations(
+      student.id,
+      {
+        lookbackAttempts: 5,
+        maxRecommendations: 4,
+      },
+    );
 
-      if (weakest && weakest.accuracy < 70) {
-        // Query an approved & accessible Subject-wise Mock Test
-        const recommendedMock = await this.prisma.exam.findFirst({
-          where: {
-            status: {
-              name: { in: ['APPROVED', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'ENDED'] },
-            },
-            ...(targetIds.length > 0
-              ? {
-                  OR: [
-                    { examTargetId: { in: targetIds } },
-                    { examTarget: { name: 'General' } },
-                  ],
-                }
-              : {}),
-            sections: {
-              some: {
-                subjectId: weakest.subjectId,
-              },
-            },
-          },
-          select: {
-            id: true,
-            title: true,
-            totalQuestions: true,
-            durationMinutes: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (recommendedMock) {
-          recommendations.push({
-            id: 'rec-weak-subject',
-            type: 'WARNING',
-            message: `${weakest.subjectName} accuracy (${weakest.accuracy}%) is below target. Practice a subject-wise mock test to improve.`,
-            actionLabel: `Practice ${weakest.subjectName} Mock Test`,
-            actionType: 'PRACTICE_MOCK',
-            targetUrl: `/student/mock-tests?mockTestId=${recommendedMock.id}`,
-            subjectId: weakest.subjectId,
-            subjectName: weakest.subjectName,
-            mockTestId: recommendedMock.id,
-            mockTestName: recommendedMock.title,
-          });
-        } else {
-          recommendations.push({
-            id: 'rec-weak-subject',
-            type: 'WARNING',
-            message: `${weakest.subjectName} accuracy (${weakest.accuracy}%) is below target. Focus revision on key concepts.`,
-            actionLabel: null,
-            actionType: 'PRACTICE_MOCK',
-            targetUrl: null,
-            subjectId: weakest.subjectId,
-            subjectName: weakest.subjectName,
-            mockTestId: null,
-            mockTestName: null,
-            fallbackMessage: 'No subject mock test is currently available.',
-          });
-        }
+    const recommendations: DashboardRecommendationItem[] = engineRecs.map((rec) => {
+      let uiType: 'WARNING' | 'OPPORTUNITY' | 'STRENGTH' | 'TIP' = 'WARNING';
+      if (rec.type === 'STRONG_SUBJECT' || rec.type === 'IMPROVEMENT_TREND') {
+        uiType = 'STRENGTH';
+      } else if (rec.type === 'NEGATIVE_MARKING' || rec.type === 'OVER_ATTEMPTING' || rec.type === 'UNDER_ATTEMPTING') {
+        uiType = 'OPPORTUNITY';
+      } else if (rec.type === 'TIME_MANAGEMENT') {
+        uiType = 'TIP';
       }
 
-      if (strongest && strongest.accuracy >= 80) {
-        recommendations.push({
-          id: 'rec-strong-subject',
-          type: 'STRENGTH',
-          message: `${strongest.subjectName} is your strongest subject with ${strongest.accuracy}% accuracy. Keep maintaining mastery.`,
-        });
-      }
-    }
-
-    if (attemptStrategy && attemptStrategy.avoidableNegativeMarks > 15) {
-      recommendations.push({
-        id: 'rec-strategy-risk',
-        type: 'OPPORTUNITY',
-        message: `You lost ~${attemptStrategy.avoidableNegativeMarks} marks to high-risk attempts. Eliminate guesswork to boost score.`,
-        actionLabel: 'View Strategy Analysis',
-        actionType: 'VIEW_STRATEGY',
-        targetUrl: `/exam/result/${latestAttempt?.id}`,
-      });
-    }
-
-    if (timeManagement && timeManagement.status === 'SLOW') {
-      recommendations.push({
-        id: 'rec-time-mgmt',
-        type: 'TIP',
-        message: `Average time per question (${timeManagement.averageTimePerQuestionSeconds}s) is high. Practice speed drills.`,
-        actionLabel: 'View Time Analysis',
-        actionType: 'VIEW_ANALYSIS',
-        targetUrl: `/exam/result/${latestAttempt?.id}`,
-      });
-    }
+      return {
+        id: rec.id,
+        type: uiType,
+        title: rec.title,
+        message: rec.message,
+        reason: rec.reason,
+        priority: rec.priority,
+        priorityScore: rec.priorityScore,
+        confidence: rec.confidence,
+        actionLabel: rec.action.label,
+        actionType: rec.action.type,
+        targetUrl: rec.action.targetUrl,
+        mockTestId: rec.action.mockTestId,
+        mockTestName: rec.action.mockTestTitle,
+        subjectId: rec.subjectId,
+        subjectName: rec.subjectName,
+        chapterId: rec.chapterId,
+        chapterName: rec.chapterName,
+        metrics: rec.metrics,
+      };
+    });
 
     // 13. Recent Results Table (Latest 5 completed)
     const recentResults: RecentResultItem[] = [];

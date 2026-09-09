@@ -76,6 +76,7 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
     const configServiceMock = {
       get: jest.fn((key: string) => {
         if (key === 'ENABLE_2FA') return enable2FA ? 'true' : 'false';
+        if (key === 'OTP_PROVIDER') return '2FACTOR';
         if (key === 'DEV_BYPASS_OTP') return '12345';
         if (key === 'OTP_MAX_VERIFY_ATTEMPTS') return '5';
         if (key === 'OTP_RESEND_COOLDOWN_SECONDS') return '60';
@@ -91,8 +92,9 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
       redisServiceMock as RedisService,
       { log: jest.fn().mockResolvedValue(undefined) } as any,
       twoFactorDotInProviderMock as TwoFactorDotInProvider,
-      {} as any,
+      twoFactorDotInProviderMock as any,
       devProviderMock as DevelopmentOtpProvider,
+      twoFactorDotInProviderMock as any,
     );
 
     const otpService = new OtpService(

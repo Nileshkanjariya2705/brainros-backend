@@ -58,10 +58,21 @@ export interface RankSummaryWidget {
 }
 
 export interface PredictedRankWidget {
+  available: boolean;
+  reason?: string | null;
+  targetExam?: string | null;
+  targetExamName?: string | null;
+  predictedRank?: number | null;
   predictedRankMin: number | null;
   predictedRankMax: number | null;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  confidenceScore?: number | null;
+  scoreUsed?: number | null;
+  normalizedPercentage?: number | null;
+  attemptsUsed?: number | null;
+  trend?: 'IMPROVING' | 'STABLE' | 'DECLINING' | null;
   modelVersion?: string | null;
+  explanation?: string | null;
   isEstimated: boolean;
 }
 
@@ -86,15 +97,32 @@ export interface WeakAreaItem {
 export interface DashboardRecommendationItem {
   id: string;
   type: 'WARNING' | 'OPPORTUNITY' | 'STRENGTH' | 'TIP';
+  title?: string;
   message: string;
+  reason?: string;
+  priority?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'STRENGTH';
+  priorityScore?: number;
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
   actionLabel?: string | null;
-  actionType?: 'PRACTICE' | 'PRACTICE_MOCK' | 'VIEW_STRATEGY' | 'VIEW_ANALYSIS' | 'VIEW_EXAMS';
+  actionType?: 'PRACTICE' | 'PRACTICE_MOCK' | 'VIEW_STRATEGY' | 'VIEW_ANALYSIS' | 'VIEW_EXAMS' | 'REVIEW_CONCEPTS';
   targetUrl?: string | null;
   subjectId?: string | null;
   subjectName?: string | null;
+  chapterId?: string | null;
+  chapterName?: string | null;
   mockTestId?: string | null;
   mockTestName?: string | null;
   fallbackMessage?: string | null;
+  metrics?: {
+    accuracy?: number;
+    sampleSize?: number;
+    wrongCount?: number;
+    unattemptedCount?: number;
+    avgTimeSeconds?: number;
+    negativeMarksLost?: number;
+    trendDelta?: number;
+    potentialScoreGain?: number;
+  };
 }
 
 export interface TimeManagementWidget {

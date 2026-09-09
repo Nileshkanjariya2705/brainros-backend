@@ -32,6 +32,7 @@ import { FeatureFlagModule } from './modules/feature-flag/feature-flag.module';
 import { HealthModule } from './modules/health/health.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { JobProgressModule } from './modules/job-progress/job-progress.module';
+import { RecommendationModule } from './modules/recommendation/recommendation.module';
 
 
 @Module({
@@ -137,6 +138,7 @@ import { JobProgressModule } from './modules/job-progress/job-progress.module';
     RegionalLanguageModule,
     FeatureFlagModule,
     JobProgressModule,
+    RecommendationModule,
   ],
   providers: [],
 })

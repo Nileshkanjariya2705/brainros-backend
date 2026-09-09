@@ -18,6 +18,7 @@ import { AdminUserSearchController } from './controllers/admin-user-search.contr
 import { AdminStudentBulkController } from './controllers/admin-student-bulk.controller';
 import { CompletedExamReportsController } from './controllers/completed-exam-reports.controller';
 import { AdminStudentsController } from './controllers/admin-students.controller';
+import { SuperAdminRegistrationsController } from './controllers/super-admin-registrations.controller';
 import { AdminSchoolsController } from './controllers/admin-schools.controller';
 
 // Services & Processors
@@ -71,6 +72,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     AdminStudentBulkController,
     CompletedExamReportsController,
     AdminStudentsController,
+    SuperAdminRegistrationsController,
     AdminSchoolsController,
   ],
   providers: [

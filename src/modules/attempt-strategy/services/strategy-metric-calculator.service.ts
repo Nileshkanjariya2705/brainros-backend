@@ -9,20 +9,21 @@ export class StrategyMetricCalculatorService {
   private readonly logger = new Logger(StrategyMetricCalculatorService.name);
 
   /**
-   * Compute normalized strategy metrics from attempt, exam questions, answers, and time logs
+   * Compute normalized strategy metrics and signals from attempt, exam questions, answers, and time logs
    */
   calculateMetrics(params: {
     attempt: any;
     examQuestions: any[];
     answers: any[];
     timeLogs: any[];
+    historicalAttempts?: any[];
   }): {
     summary: StrategySummaryMetrics;
     metricMap: Map<string, StrategyMetricItem>;
   } {
     const { attempt, examQuestions, answers, timeLogs } = params;
-    const exam = attempt.exam;
-    const result = attempt.result;
+    const exam = attempt.exam || {};
+    const result = attempt.result || {};
 
     const totalQuestions = examQuestions.length || 1;
     const totalMaxScore = result?.maxScore ?? exam.totalMarks ?? 100;
@@ -30,17 +31,31 @@ export class StrategyMetricCalculatorService {
 
     const answerMap = new Map(answers.map((a) => [a.examQuestionId, a]));
 
-    // Map time logs
+    // Map time spent per question
     const questionTimeMap = new Map<string, number>();
-    for (const log of timeLogs) {
+    let loggedTimeSum = 0;
+    for (const log of timeLogs || []) {
       const prev = questionTimeMap.get(log.examQuestionId) || 0;
-      questionTimeMap.set(
-        log.examQuestionId,
-        prev + (log.timeSpentSeconds || 0),
-      );
+      const t = log.timeSpentSeconds || 0;
+      questionTimeMap.set(log.examQuestionId, prev + t);
+      loggedTimeSum += t;
     }
 
-    const totalTimeAvailableSeconds = (exam.durationMinutes || 60) * 60;
+    const durationMinutes = exam.durationMinutes || 60;
+    const totalTimeAvailableSeconds = durationMinutes * 60;
+    const actualTimeUsedSeconds =
+      result.timeUsedSeconds ?? (loggedTimeSum > 0 ? loggedTimeSum : totalTimeAvailableSeconds);
+
+    const unusedTimeSeconds = Math.max(
+      0,
+      totalTimeAvailableSeconds - actualTimeUsedSeconds,
+    );
+    const unusedTimeMinutes = Math.round((unusedTimeSeconds / 60) * 10) / 10;
+    const unusedTimePercentage =
+      totalTimeAvailableSeconds > 0
+        ? Math.round((unusedTimeSeconds / totalTimeAvailableSeconds) * 10000) / 100
+        : 0;
+
     const benchmarkSeconds =
       totalQuestions > 0
         ? Math.round(totalTimeAvailableSeconds / totalQuestions)
@@ -63,22 +78,49 @@ export class StrategyMetricCalculatorService {
     let reviewedCorrectCount = 0;
     let reviewedWrongCount = 0;
 
+    // Per-subject tracking of risky attempts
+    const subjectWeaknessMap: Record<
+      string,
+      { subjectName: string; highRiskAttempts: number; highRiskWrong: number; avoidableLoss: number }
+    > = {};
+
     for (const eq of examQuestions) {
-      const q = eq.question;
+      const q = eq.question || {};
       const ans = answerMap.get(eq.id);
       const timeSpent = questionTimeMap.get(eq.id) || 0;
 
-      const negMark = eq.negativeMarks ?? exam.defaultNegativeMarks ?? 1;
-      const isHighRiskQuestion =
-        q.difficultyLevel === 'HARD' ||
-        q.difficultyLevel === 'VERY_HARD' ||
-        (exam.defaultNegativeMarks && negMark > exam.defaultNegativeMarks);
+      // Exact negative marking configured for this exam / question
+      const rawNeg = eq.negativeMarks ?? exam.defaultNegativeMarks;
+      const negMark = typeof rawNeg === 'number' && rawNeg > 0 ? rawNeg : 0;
+
+      const subjectName =
+        q.chapter?.subject?.name ||
+        eq.section?.name ||
+        'General';
+
+      if (!subjectWeaknessMap[subjectName]) {
+        subjectWeaknessMap[subjectName] = {
+          subjectName,
+          highRiskAttempts: 0,
+          highRiskWrong: 0,
+          avoidableLoss: 0,
+        };
+      }
+
+      // High-risk question definition:
+      // 1. Difficulty is HARD or VERY_HARD
+      // 2. OR excessive negative penalty compared to default
+      const isDifficult =
+        q.difficultyLevel === 'HARD' || q.difficultyLevel === 'VERY_HARD';
+      const isHighPenalty =
+        exam.defaultNegativeMarks && negMark > exam.defaultNegativeMarks;
+      const isHighRiskQuestion = isDifficult || isHighPenalty;
 
       const isAttempted =
         !!ans &&
         (!!ans.selectedOptionId ||
-          ans.numericalAnswer !== null ||
-          !!ans.selectedOptions);
+          (ans.numericalAnswer !== null && ans.numericalAnswer !== undefined) ||
+          (Array.isArray(ans.selectedOptions) && ans.selectedOptions.length > 0));
 
       if (ans?.isMarkedForReview) {
         reviewedQuestionCount++;
@@ -92,6 +134,7 @@ export class StrategyMetricCalculatorService {
 
       if (isHighRiskQuestion) {
         highRiskAttemptCount++;
+        subjectWeaknessMap[subjectName].highRiskAttempts++;
       }
 
       if (timeSpent > benchmarkSeconds * 1.5) {
@@ -116,6 +159,8 @@ export class StrategyMetricCalculatorService {
         if (isHighRiskQuestion) {
           highRiskWrongCount++;
           avoidableNegativeMarks += negMark;
+          subjectWeaknessMap[subjectName].highRiskWrong++;
+          subjectWeaknessMap[subjectName].avoidableLoss += negMark;
         }
 
         if (timeSpent > benchmarkSeconds * 1.5) {
@@ -147,7 +192,22 @@ export class StrategyMetricCalculatorService {
         ? Math.round((totalNegativeMarksLost / totalMaxScore) * 10000) / 100
         : 0;
 
-    // Conservative Projected Improvement Model
+    const avgTimePerQuestion =
+      attemptedCount > 0
+        ? Math.round(actualTimeUsedSeconds / attemptedCount)
+        : benchmarkSeconds;
+
+    // Sample size classification
+    const sampleSizeLevel: 'INSUFFICIENT' | 'LOW' | 'MODERATE' | 'HIGH' =
+      totalQuestions < 5 || attemptedCount < 2
+        ? 'INSUFFICIENT'
+        : totalQuestions < 15
+          ? 'LOW'
+          : totalQuestions < 40
+            ? 'MODERATE'
+            : 'HIGH';
+
+    // Projected Improvement Model (conservative recovery of avoidable losses)
     const projectedImprovementMarks =
       Math.round(avoidableNegativeMarks * 100) / 100;
     const projectedScore =
@@ -178,13 +238,18 @@ export class StrategyMetricCalculatorService {
       reviewedQuestionCount,
       reviewedCorrectCount,
       reviewedWrongCount,
+      unusedTimeMinutes,
+      unusedTimePercentage,
+      averageTimePerQuestionSeconds: avgTimePerQuestion,
       projectedImprovementMarks,
       projectedScore,
       actualObtainedMarks,
       maxScore: totalMaxScore,
+      sampleSizeLevel,
+      subjectWeaknessMap,
     };
 
-    // Build metric map for rule engine
+    // Register metric map for rules & transparent evaluation
     const metricMap = new Map<string, StrategyMetricItem>();
     const register = (
       code: string,
@@ -194,14 +259,11 @@ export class StrategyMetricCalculatorService {
       metricMap.set(code, { metricCode: code, value, unit });
     };
 
+    register('TOTAL_QUESTIONS', summary.totalQuestions, 'COUNT');
     register('ATTEMPTED_COUNT', summary.attemptedCount, 'COUNT');
     register('ATTEMPTED_PERCENTAGE', summary.attemptedPercentage, 'PERCENTAGE');
     register('UNATTEMPTED_COUNT', summary.unattemptedCount, 'COUNT');
-    register(
-      'UNATTEMPTED_PERCENTAGE',
-      summary.unattemptedPercentage,
-      'PERCENTAGE',
-    );
+    register('UNATTEMPTED_PERCENTAGE', summary.unattemptedPercentage, 'PERCENTAGE');
     register('CORRECT_COUNT', summary.correctCount, 'COUNT');
     register('WRONG_COUNT', summary.wrongCount, 'COUNT');
     register('ACCURACY', summary.accuracy, 'PERCENTAGE');
@@ -209,36 +271,31 @@ export class StrategyMetricCalculatorService {
     register('HIGH_RISK_WRONG_COUNT', summary.highRiskWrongCount, 'COUNT');
     register('HIGH_RISK_ACCURACY', summary.highRiskAccuracy, 'PERCENTAGE');
     register('NEGATIVE_MARKS_LOST', summary.negativeMarksLost, 'MARKS');
-    register(
-      'AVOIDABLE_NEGATIVE_MARKS',
-      summary.avoidableNegativeMarks,
-      'MARKS',
-    );
+    register('AVOIDABLE_NEGATIVE_MARKS', summary.avoidableNegativeMarks, 'MARKS');
     register(
       'NEGATIVE_MARKING_IMPACT_PERCENTAGE',
       summary.negativeMarkingImpactPercentage,
       'PERCENTAGE',
     );
     register('TIME_HEAVY_WRONG_COUNT', summary.timeHeavyWrongCount, 'COUNT');
+    register('TIME_HEAVY_ATTEMPT_COUNT', summary.timeHeavyAttemptCount, 'COUNT');
+    register('UNUSED_TIME_MINUTES', summary.unusedTimeMinutes, 'COUNT');
+    register('UNUSED_TIME_PERCENTAGE', summary.unusedTimePercentage, 'PERCENTAGE');
     register(
-      'TIME_HEAVY_ATTEMPT_COUNT',
-      summary.timeHeavyAttemptCount,
-      'COUNT',
+      'AVERAGE_TIME_PER_QUESTION',
+      summary.averageTimePerQuestionSeconds,
+      'SECONDS',
     );
     register('REVIEWED_QUESTION_COUNT', summary.reviewedQuestionCount, 'COUNT');
     register('REVIEWED_CORRECT_COUNT', summary.reviewedCorrectCount, 'COUNT');
     register('REVIEWED_WRONG_COUNT', summary.reviewedWrongCount, 'COUNT');
-    register(
-      'PROJECTED_IMPROVEMENT_MARKS',
-      summary.projectedImprovementMarks,
-      'MARKS',
-    );
+    register('PROJECTED_IMPROVEMENT_MARKS', summary.projectedImprovementMarks, 'MARKS');
 
     return { summary, metricMap };
   }
 
   // ── Helper: Check answer correctness ──────────────────────────
-  private isAnswerCorrect(question: any, answer: any): boolean {
+  public isAnswerCorrect(question: any, answer: any): boolean {
     const code = question.questionType?.code;
     if (!answer) return false;
 

@@ -230,3 +230,77 @@ export class DashboardQueryDto {
   @IsDateString()
   to?: string;
 }
+
+export class InstituteStudentQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  batchId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  admissionYear?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc';
+}
+
+export class InstituteRankQueryDto {
+  @IsOptional()
+  @IsUUID()
+  examId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  batchId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 10;
+}
+
+export class ExportInstituteStudentsDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  batchId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  admissionYear?: number;
+}

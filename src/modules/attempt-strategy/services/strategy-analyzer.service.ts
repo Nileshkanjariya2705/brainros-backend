@@ -10,12 +10,13 @@ import {
   DetailedStrategyAnalysis,
   StrategySummaryMetrics,
   StrategyRecommendationItem,
+  StrategyTrend,
 } from '../interfaces/attempt-strategy.interface';
 
 @Injectable()
 export class StrategyAnalyzerService {
   private readonly logger = new Logger(StrategyAnalyzerService.name);
-  private readonly CURRENT_ALGORITHM_VERSION = 'v1.0.0';
+  private readonly CURRENT_ALGORITHM_VERSION = 'v2.0.0';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -97,7 +98,62 @@ export class StrategyAnalyzerService {
       },
     });
 
-    // 4. Calculate normalized metrics
+    // 4. Historical Lookback: Query student's past attempts to evaluate behavioral trajectory
+    let historicalTrend: StrategyTrend = 'INSUFFICIENT_HISTORY';
+    let pastAttemptsCount = 0;
+
+    try {
+      const pastAttempts: any[] = await this.prisma.attempt.findMany({
+        where: {
+          studentId: attempt.studentId,
+          status: { name: 'EVALUATED' },
+          id: { not: attemptId },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+        include: {
+          strategyAnalyses: {
+            orderBy: { strategyVersion: 'desc' },
+            take: 1,
+          },
+          result: true,
+        },
+      });
+
+      pastAttemptsCount = pastAttempts.length;
+
+      if (pastAttempts.length >= 2) {
+        const riskyCounts = pastAttempts
+          .map((a) => {
+            const sa = a.strategyAnalyses?.[0];
+            const data = sa?.data as any;
+            return (
+              data?.metrics?.highRiskAttemptCount ??
+              (a.result ? Math.ceil((a.result.wrongAnswers || 0) * 0.5) : 0)
+            );
+          })
+          .filter((v) => typeof v === 'number');
+
+        if (riskyCounts.length >= 2) {
+          // Check if sequence is decreasing or increasing over time (ordered oldest to newest)
+          const chronological = [...riskyCounts].reverse();
+          const first = chronological[0];
+          const last = chronological[chronological.length - 1];
+
+          if (first - last >= 3) {
+            historicalTrend = 'IMPROVING';
+          } else if (last - first >= 3) {
+            historicalTrend = 'DECLINING';
+          } else {
+            historicalTrend = 'STABLE';
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Could not compute historical trend for attempt ${attemptId}: ${err}`);
+    }
+
+    // 5. Calculate normalized metrics & structured signals
     const { summary, metricMap } = this.metricCalculator.calculateMetrics({
       attempt,
       examQuestions,
@@ -105,7 +161,7 @@ export class StrategyAnalyzerService {
       timeLogs: attempt.timeLogs,
     });
 
-    // 5. Load active strategy rules
+    // 6. Load active strategy rules
     const dbRules = await this.prisma.strategyRule.findMany({
       where: {
         isActive: true,
@@ -136,13 +192,14 @@ export class StrategyAnalyzerService {
       configVersion: r.configVersion,
     }));
 
-    // 6. Evaluate rules
-    const { classifications, recommendations, primaryClassification } =
-      this.ruleEngine.evaluateRules({
-        rules: mappedRules,
-        metrics: summary,
-        metricMap,
-      });
+    // 7. Evaluate Intelligent Decision Engine
+    const decision = this.ruleEngine.evaluateDecisionEngine({
+      rules: mappedRules,
+      metrics: summary,
+      metricMap,
+      historicalTrend,
+      historicalAttemptsCount: pastAttemptsCount,
+    });
 
     const report: DetailedStrategyAnalysis = {
       attemptId,
@@ -151,27 +208,34 @@ export class StrategyAnalyzerService {
       strategyVersion,
       algorithmVersion: this.CURRENT_ALGORITHM_VERSION,
       generatedAt: new Date().toISOString(),
-      primaryClassification,
-      classifications,
+      primaryClassification: decision.primaryClassification,
+      confidence: decision.confidence,
+      confidenceScore: decision.confidenceScore,
+      trend: decision.trend,
+      whyStatement: decision.whyStatement,
+      signals: decision.signals,
+      classifications: decision.classifications,
+      secondaryClassifications: decision.secondaryClassifications,
       metrics: summary,
-      recommendations,
+      recommendations: decision.recommendations,
+      actionRecommendation: decision.actionRecommendation,
       projectedImprovement: {
         estimatedAvoidableLossMarks: summary.avoidableNegativeMarks,
         projectedScore: summary.projectedScore,
         actualScore: summary.actualObtainedMarks,
         disclaimer:
-          'Projected score improvement is an estimate based on eliminating avoidable losses from high-risk incorrect attempts.',
+          'Estimated avoidable loss is calculated from the exam marking scheme on high-risk incorrect answers, not a guaranteed score.',
       },
     };
 
-    // 7. Persist & cache
+    // 8. Persist & cache
     await this.prisma.strategyAnalysis.upsert({
       where: { attemptId_strategyVersion: { attemptId, strategyVersion } },
       update: {
-        primaryClassification,
-        classifications,
+        primaryClassification: decision.primaryClassification,
+        classifications: decision.classifications,
         metrics: summary as any,
-        recommendations: recommendations as any,
+        recommendations: decision.recommendations as any,
         projectedImprovementMarks: summary.projectedImprovementMarks,
         projectedScore: summary.projectedScore,
         avoidableNegativeMarks: summary.avoidableNegativeMarks,
@@ -181,10 +245,10 @@ export class StrategyAnalyzerService {
         attemptId,
         strategyVersion,
         algorithmVersion: this.CURRENT_ALGORITHM_VERSION,
-        primaryClassification,
-        classifications,
+        primaryClassification: decision.primaryClassification,
+        classifications: decision.classifications,
         metrics: summary as any,
-        recommendations: recommendations as any,
+        recommendations: decision.recommendations as any,
         projectedImprovementMarks: summary.projectedImprovementMarks,
         projectedScore: summary.projectedScore,
         avoidableNegativeMarks: summary.avoidableNegativeMarks,

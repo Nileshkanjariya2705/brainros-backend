@@ -39,17 +39,25 @@ export class EvaluationProcessor extends WorkerHost {
       `[EvaluationWorker] Starting evaluation job for attempt '${attemptId}' (Job ID: ${jobId})`,
     );
 
-    // Retrieve attempt owner to attach userId
+    // Retrieve attempt owner to attach userId, examId, and studentId
     const attempt = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
-      select: { student: { select: { userId: true } } },
+      select: {
+        examId: true,
+        studentId: true,
+        student: { select: { userId: true } },
+      },
     });
     const userId = (attempt as any)?.student?.userId;
+    const examId = attempt?.examId;
+    const studentId = attempt?.studentId;
 
     await this.jobProgressService.publishStarted(EVALUATION_QUEUE_NAME, jobId, {
       type: 'EXAM_EVALUATION',
       stage: 'EVALUATION',
       attemptId,
+      examId,
+      studentId,
       userId,
       message: 'Evaluating exam responses...',
     });
@@ -61,15 +69,18 @@ export class EvaluationProcessor extends WorkerHost {
       await this.jobProgressService.publishProgress(
         EVALUATION_QUEUE_NAME,
         jobId,
-        50,
+        100,
         100,
         {
           stage: 'EVALUATION',
           stageIndex: 1,
-          totalStages: 3,
+          totalStages: 4,
           message: 'Evaluation completed. Marking result...',
           attemptId,
+          examId,
+          studentId,
           userId,
+          percentage: 100,
         },
       );
 
@@ -98,9 +109,12 @@ export class EvaluationProcessor extends WorkerHost {
       );
 
       await this.jobProgressService.publishCompleted(EVALUATION_QUEUE_NAME, jobId, {
-        message: 'Evaluation stage completed successfully.',
+        message: 'Evaluation stage completed successfully. Enqueueing analytics...',
         resultSummary: { attemptId, score: result?.totalScore },
+        stage: 'EVALUATION',
         attemptId,
+        examId,
+        studentId,
         userId,
       });
 
@@ -115,10 +129,13 @@ export class EvaluationProcessor extends WorkerHost {
         err.stack,
       );
 
+      // Safe sanitized message for Super Admin UI
+      const safeErrorMsg = 'Result evaluation failed during question scoring.';
+
       await this.jobProgressService.publishFailed(
         EVALUATION_QUEUE_NAME,
         jobId,
-        err.message || 'Evaluation failed.',
+        safeErrorMsg,
       );
 
       // Mark result as FAILED if error persists
@@ -129,7 +146,14 @@ export class EvaluationProcessor extends WorkerHost {
         if (res) {
           await this.prisma.result.update({
             where: { id: res.id },
-            data: { resultStatus: ResultStatusEnum.FAILED },
+            data: {
+              resultStatus: ResultStatusEnum.FAILED,
+              metadata: {
+                ...(res.metadata as object || {}),
+                failureReason: safeErrorMsg,
+                failedAt: new Date().toISOString(),
+              },
+            },
           });
         }
       } catch {}

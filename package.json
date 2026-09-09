@@ -50,7 +50,8 @@
     "@ngrok/ngrok": "^1.7.0",
     "@prisma/adapter-pg": "6.19.3",
     "@prisma/client": "6.19.3",
-    "@supabase/supabase-js": "^2.115.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.116.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
@@ -85,6 +86,7 @@
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
+    "twilio": "^6.1.0",
     "typescript": "^5.7.3",
     "uuid": "^14.0.2"
   },

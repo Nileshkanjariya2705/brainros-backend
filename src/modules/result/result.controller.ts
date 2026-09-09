@@ -4,12 +4,17 @@ import {
   Post,
   Param,
   Body,
+  Query,
   UseGuards,
   HttpStatus,
 } from '@nestjs/common';
 import { ResultService } from './result.service';
 import { ResultAccessService } from './services/result-access.service';
 import { ResultReadinessService } from './services/result-readiness.service';
+import {
+  ResultProcessingMonitorService,
+  ExamProcessingJobsQueryDto,
+} from './services/result-processing-monitor.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -22,6 +27,7 @@ export class ResultController {
     private readonly resultService: ResultService,
     private readonly resultAccessService: ResultAccessService,
     private readonly readinessService: ResultReadinessService,
+    private readonly monitorService: ResultProcessingMonitorService,
   ) {}
 
   @Post('results/:attemptId/calculate')
@@ -164,6 +170,109 @@ export class ResultController {
     return {
       statusCode: HttpStatus.OK,
       message: 'Exam processing status retrieved successfully',
+      data,
+    };
+  }
+
+  /**
+   * 1. Super Admin Real-Time Exam Processing Summary
+   * GET /super-admin/exams/:examId/results/processing-summary
+   */
+  @Get([
+    'super-admin/exams/:examId/results/processing-summary',
+    'admin/exams/:examId/results/processing-summary',
+  ])
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  async getExamProcessingSummary(@Param('examId') examId: string) {
+    const data = await this.monitorService.getExamProcessingSummary(examId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Exam processing summary retrieved successfully',
+      data,
+    };
+  }
+
+  /**
+   * 2. Super Admin Real-Time Job-by-Job Paginated Table
+   * GET /super-admin/exams/:examId/results/processing-jobs
+   */
+  @Get([
+    'super-admin/exams/:examId/results/processing-jobs',
+    'admin/exams/:examId/results/processing-jobs',
+  ])
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  async getExamProcessingJobs(
+    @Param('examId') examId: string,
+    @Query() query: ExamProcessingJobsQueryDto,
+  ) {
+    const data = await this.monitorService.getExamProcessingJobs(examId, query);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Exam processing jobs retrieved successfully',
+      data,
+    };
+  }
+
+  /**
+   * 3. Super Admin Inspection Details for a Single Job
+   * GET /super-admin/exams/:examId/results/processing-jobs/:jobId
+   */
+  @Get([
+    'super-admin/exams/:examId/results/processing-jobs/:jobId',
+    'admin/exams/:examId/results/processing-jobs/:jobId',
+  ])
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  async getJobDetail(
+    @Param('examId') examId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    const data = await this.monitorService.getJobDetail(examId, jobId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Job details retrieved successfully',
+      data,
+    };
+  }
+
+  /**
+   * 4. Super Admin Batch Retry for all Failed Jobs
+   * POST /super-admin/exams/:examId/results/processing-jobs/retry-failed
+   */
+  @Post([
+    'super-admin/exams/:examId/results/processing-jobs/retry-failed',
+    'admin/exams/:examId/results/processing-jobs/retry-failed',
+  ])
+  @Roles('SUPER_ADMIN')
+  async retryFailedJobs(
+    @Param('examId') examId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const data = await this.monitorService.retryFailedJobs(examId, userId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: data.message,
+      data,
+    };
+  }
+
+  /**
+   * 5. Super Admin Retry for a Single Job
+   * POST /super-admin/exams/:examId/results/processing-jobs/:jobId/retry
+   */
+  @Post([
+    'super-admin/exams/:examId/results/processing-jobs/:jobId/retry',
+    'admin/exams/:examId/results/processing-jobs/:jobId/retry',
+  ])
+  @Roles('SUPER_ADMIN')
+  async retrySingleJob(
+    @Param('examId') examId: string,
+    @Param('jobId') jobId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const data = await this.monitorService.retrySingleJob(examId, jobId, userId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: data.message,
       data,
     };
   }

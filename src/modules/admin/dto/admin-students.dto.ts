@@ -91,6 +91,65 @@ export class AdminStudentsQueryDto {
   createdTo?: string;
 }
 
+export class SuperAdminRegistrationsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number = 20;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string = 'createdAt';
+
+  @IsOptional()
+  @IsEnum(SortOrderEnum)
+  sortOrder?: SortOrderEnum = SortOrderEnum.DESC;
+
+  @IsOptional()
+  @IsString()
+  date?: string; // 'all' | 'today' | 'YYYY-MM-DD'
+
+  @IsOptional()
+  @IsString()
+  stateId?: string;
+
+  @IsOptional()
+  @IsString()
+  districtId?: string;
+
+  @IsOptional()
+  @IsString()
+  institutionId?: string;
+
+  @IsOptional()
+  @IsString()
+  examTarget?: string; // 'ALL' | 'NEET' | 'JEE' | 'CET' or target name / UUID
+
+  @IsOptional()
+  @IsString()
+  examTargetId?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  classId?: string;
+}
+
 export class AddStudentParentDto {
   @IsString()
   @IsNotEmpty({ message: 'Parent name is required.' })

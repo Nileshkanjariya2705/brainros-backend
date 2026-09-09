@@ -11,8 +11,11 @@ import { PerformanceTrendController } from './controllers/performance-trend.cont
 import { AdminPerformanceTrendController } from './controllers/admin-performance-trend.controller';
 import { StudentDashboardController } from './controllers/student-dashboard.controller';
 
+import { RecommendationModule } from '../recommendation/recommendation.module';
+import { PredictedRankModule } from '../predicted-rank/predicted-rank.module';
+
 @Module({
-  imports: [PrismaModule, RedisModule],
+  imports: [PrismaModule, RedisModule, RecommendationModule, PredictedRankModule],
   controllers: [
     PerformanceTrendController,
     AdminPerformanceTrendController,

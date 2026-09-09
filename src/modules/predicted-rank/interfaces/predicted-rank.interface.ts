@@ -1,8 +1,16 @@
 export type PredictionStatusEnum =
-  'PENDING' | 'PROCESSING' | 'COMPLETED' | 'UNAVAILABLE' | 'FAILED';
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'UNAVAILABLE'
+  | 'FAILED';
 
 export type DataQualityStatusEnum =
-  'PENDING_VALIDATION' | 'VALID' | 'INVALID' | 'PARTIALLY_VALID' | 'ARCHIVED';
+  | 'PENDING_VALIDATION'
+  | 'VALID'
+  | 'INVALID'
+  | 'PARTIALLY_VALID'
+  | 'ARCHIVED';
 
 export interface PredictionInput {
   attemptId: string;
@@ -32,6 +40,29 @@ export interface PredictionOutput {
   configVersion: number;
   datasetVersion: number;
   explanation?: Record<string, any>;
+}
+
+export interface StudentTargetPredictionResult {
+  available: boolean;
+  reason?: 'INSUFFICIENT_DATA' | 'NO_TARGET_EXAM' | 'PREDICTION_UNAVAILABLE' | string;
+  targetExam?: string;
+  targetExamName?: string;
+  predictedRank?: number;
+  rankRange?: {
+    min: number;
+    max: number;
+  };
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidenceScore?: number;
+  scoreUsed?: number;
+  normalizedPercentage?: number;
+  attemptsUsed?: number;
+  historicalYearsUsed?: number[];
+  trend?: 'IMPROVING' | 'STABLE' | 'DECLINING';
+  modelCode?: string;
+  modelVersion?: string;
+  explanation?: string;
+  generatedAt?: string;
 }
 
 export interface RankPredictionModel {

@@ -41,7 +41,10 @@ export class TwoFactorConfig {
   private readonly logger = new Logger(TwoFactorConfig.name);
 
   readonly enable2FA: boolean;
-  readonly otpProvider: '2FACTOR' | 'MSG91';
+  readonly otpProvider: 'TWILIO' | '2FACTOR' | 'MSG91';
+  readonly twilioAccountSid: string;
+  readonly twilioAuthToken: string;
+  readonly twilioVerifyServiceSid: string;
   readonly twoFactorApiKey: string;
   readonly twoFactorTemplateName: string;
   readonly devBypassOtp: string;
@@ -63,16 +66,39 @@ export class TwoFactorConfig {
 
     this.enable2FA = parseSafeBoolean(rawEnable, 'ENABLE_REAL_OTP', false);
 
+    // Twilio Verify Credentials
+    this.twilioAccountSid = (
+      this.configService.get<string>('TWILIO_ACCOUNT_SID') ??
+      process.env.TWILIO_ACCOUNT_SID ??
+      ''
+    ).trim();
+
+    this.twilioAuthToken = (
+      this.configService.get<string>('TWILIO_AUTH_TOKEN') ??
+      process.env.TWILIO_AUTH_TOKEN ??
+      ''
+    ).trim();
+
+    this.twilioVerifyServiceSid = (
+      this.configService.get<string>('TWILIO_VERIFY_SERVICE_SID') ??
+      process.env.TWILIO_VERIFY_SERVICE_SID ??
+      ''
+    ).trim();
+
     const rawProvider = String(
       this.configService.get<string>('OTP_PROVIDER') ||
         process.env.OTP_PROVIDER ||
-        'MSG91',
+        (this.twilioAccountSid && this.twilioVerifyServiceSid ? 'TWILIO' : 'TWILIO'),
     )
       .trim()
       .toUpperCase();
 
-    this.otpProvider = rawProvider === '2FACTOR' ? '2FACTOR' : 'MSG91';
-
+    this.otpProvider =
+      rawProvider === '2FACTOR'
+        ? '2FACTOR'
+        : rawProvider === 'MSG91'
+          ? 'MSG91'
+          : 'TWILIO';
 
     // 2Factor.in API Key
     this.twoFactorApiKey =
@@ -82,9 +108,9 @@ export class TwoFactorConfig {
       process.env.TWOFACTOR_API_KEY ??
       '';
 
-    if (this.enable2FA && !this.twoFactorApiKey) {
+    if (this.enable2FA && this.otpProvider === 'TWILIO' && (!this.twilioAccountSid || !this.twilioVerifyServiceSid)) {
       this.logger.warn(
-        '[SECURITY] ENABLE_REAL_OTP is true but TWO_FACTOR_API_KEY is missing in environment variables.',
+        '[SECURITY] ENABLE_REAL_OTP is true and OTP_PROVIDER is TWILIO, but TWILIO_ACCOUNT_SID or TWILIO_VERIFY_SERVICE_SID is missing.',
       );
     }
 
@@ -100,7 +126,7 @@ export class TwoFactorConfig {
       this.configService.get<string>('DEV_OTP_CODE') ??
       process.env.DEV_BYPASS_OTP ??
       process.env.DEV_OTP_CODE ??
-      '123456';
+      '12345';
 
     this.otpTtl =
       Number(

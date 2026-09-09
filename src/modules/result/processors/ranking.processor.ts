@@ -86,14 +86,23 @@ export class RankingProcessor extends WorkerHost {
       );
 
       // 2. Trigger Result Readiness & Publication Check
+      let readiness: any = null;
       if (attemptId) {
         await this.readinessService.onAttemptWorkflowCompleted(attemptId);
+        readiness = await this.readinessService.checkExamReadiness(examId);
       } else {
-        await this.readinessService.checkExamReadiness(examId);
+        readiness = await this.readinessService.checkExamReadiness(examId);
+      }
+
+      // 3. If overall exam has completed all stages, broadcast readiness
+      if (readiness?.ready) {
+        this.jobProgressService.emitExamCompleted(examId, 'READY_TO_PUBLISH');
+        this.logger.log(`[RankingWorker] Exam '${examId}' is READY_TO_PUBLISH. Emitted completion event.`);
       }
 
       await this.jobProgressService.publishCompleted(RANKING_QUEUE_NAME, jobId, {
         message: 'Ranking & readiness verification completed successfully.',
+        stage: 'RANKING',
         attemptId,
         examId,
         userId,
@@ -109,10 +118,11 @@ export class RankingProcessor extends WorkerHost {
         `[RankingWorker] Failed ranking for exam '${examId}': ${err.message}`,
         err.stack,
       );
+      const safeErrorMsg = 'Result processing failed during batch ranking calculation.';
       await this.jobProgressService.publishFailed(
         RANKING_QUEUE_NAME,
         jobId,
-        err.message || 'Ranking calculation failed.',
+        safeErrorMsg,
       );
       throw err;
     }

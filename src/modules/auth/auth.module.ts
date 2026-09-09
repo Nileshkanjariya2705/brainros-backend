@@ -16,6 +16,8 @@ import { TwoFactorProvider } from './otp/two-factor.provider';
 
 import { TwoFactorDotInProvider } from './two-factor/two-factor-dot-in.provider';
 import { DevelopmentOtpProvider } from './two-factor/development-otp.provider';
+import { TwilioOtpService } from './two-factor/twilio-otp.service';
+import { TwilioVerifyProvider } from './two-factor/twilio-verify.provider';
 import { TwoFactorService } from './two-factor/two-factor.service';
 import { TwoFactorConfig } from './config/two-factor.config';
 import { RedisModule } from '../redis/redis.module';
@@ -35,7 +37,8 @@ import { RedisModule } from '../redis/redis.module';
 
   providers: [
     TwoFactorConfig,
-
+    TwilioOtpService,
+    TwilioVerifyProvider,
     TwoFactorDotInProvider,
     DevelopmentOtpProvider,
     TwoFactorService,
@@ -57,6 +60,8 @@ import { RedisModule } from '../redis/redis.module';
     SessionService,
     TokenService,
     TwoFactorConfig,
+    TwilioOtpService,
+    TwilioVerifyProvider,
     TwoFactorService,
     OtpService,
     TwoFactorDotInProvider,

@@ -373,4 +373,17 @@ export class JobProgressService {
 
     return event;
   }
+
+  /**
+   * Broadcasts exam-level completion / readiness event
+   */
+  emitExamCompleted(examId: string, status: string = 'READY_TO_PUBLISH') {
+    if (this.gateway) {
+      try {
+        this.gateway.emitExamCompletion(examId, status);
+      } catch (err: any) {
+        this.logger.warn(`Failed to emit exam completion WebSocket event: ${err.message}`);
+      }
+    }
+  }
 }

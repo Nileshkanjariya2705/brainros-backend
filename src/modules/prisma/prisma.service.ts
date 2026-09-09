@@ -175,9 +175,11 @@ export class PrismaService
     try {
       await this.$disconnect();
     } catch {}
-    try {
-      await this.pool.end();
-    } catch {}
+    // NOTE: Do NOT call this.pool.end() here.
+    // $disconnect() handles Prisma cleanup. Calling pool.end() permanently
+    // destroys the underlying pg pool, but during NestJS hot-reload (--watch)
+    // the PrismaClient adapter may still reference the ended pool on the
+    // next request cycle, causing "Cannot use a pool after calling end on the pool".
     this.logger.log('[Database] Disconnected cleanly.');
   }
 }

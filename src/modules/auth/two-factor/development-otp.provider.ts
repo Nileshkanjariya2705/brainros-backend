@@ -58,7 +58,10 @@ export class DevelopmentOtpProvider implements ITwoFactorProvider {
     const cleanOtp = (otp || '').trim();
     const expectedOtp = (this.config.devBypassOtp || '123456').trim();
 
-    // Development OTP bypass (accepts 123456 and legacy 12345)
+    // Temporary database OTP login flow disabled.
+    // Real Twilio Verify OTP is now used for login.
+    // Re-enable only if explicitly required.
+    /*
     if (
       cleanOtp === expectedOtp ||
       cleanOtp === '123456' ||
@@ -66,6 +69,7 @@ export class DevelopmentOtpProvider implements ITwoFactorProvider {
     ) {
       return true;
     }
+    */
 
     // Check against session hash if available
     if (sessionData?.otpHash) {

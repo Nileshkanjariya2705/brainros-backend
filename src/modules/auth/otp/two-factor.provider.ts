@@ -151,6 +151,11 @@ export class TwoFactorProvider implements ITwoFactorProvider {
       ).toLowerCase() === 'true';
 
     const cleanOtp = (otp || '').trim();
+
+    // Temporary database OTP login flow disabled.
+    // Real Twilio Verify OTP is now used for login.
+    // Re-enable only if explicitly required.
+    /*
     const bypassOtp = (
       this.configService.get('DEV_BYPASS_OTP') ??
       this.configService.get('DEV_LOGIN_OTP') ??
@@ -174,6 +179,7 @@ export class TwoFactorProvider implements ITwoFactorProvider {
         return true;
       }
     }
+    */
 
     const authKey = this.getAuthKey();
     const formattedMobile = this.formatMobile(targetMobileOrSession);
@@ -218,7 +224,10 @@ export class TwoFactorProvider implements ITwoFactorProvider {
         return true;
       }
 
-      // If MSG91 control API returns invalid authkey (due to MSG91 Widget key usage), fall back safely to Master OTP code check
+      // Temporary database OTP login flow disabled.
+      // Real Twilio Verify OTP is now used for login.
+      // Re-enable only if explicitly required.
+      /*
       if (resData.message && resData.message.toLowerCase().includes('invalid authkey')) {
         this.logger.warn(
           `[MSG91 OTP] MSG91 returned 'Invalid authkey' (Widget Key restricted). Checking master bypass code...`,
@@ -227,6 +236,7 @@ export class TwoFactorProvider implements ITwoFactorProvider {
           return true;
         }
       }
+      */
 
       return false;
     } catch (err) {

@@ -5,12 +5,28 @@ export type StrategyCategory =
   | 'TIME_MANAGEMENT'
   | 'QUESTION_SELECTION'
   | 'REVIEW_BEHAVIOR'
-  | 'SCORE_IMPROVEMENT';
+  | 'SCORE_IMPROVEMENT'
+  | 'KNOWLEDGE_DIAGNOSTIC';
 
 export type StrategyOperator =
-  'GT' | 'GTE' | 'LT' | 'LTE' | 'EQ' | 'BETWEEN' | 'PERCENT_GT' | 'PERCENT_LT';
+  | 'GT'
+  | 'GTE'
+  | 'LT'
+  | 'LTE'
+  | 'EQ'
+  | 'BETWEEN'
+  | 'PERCENT_GT'
+  | 'PERCENT_LT';
 
 export type StrategySeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export type StrategyConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type StrategyTrend =
+  | 'IMPROVING'
+  | 'STABLE'
+  | 'DECLINING'
+  | 'INSUFFICIENT_HISTORY';
 
 export type StrategyClassificationCode =
   | 'BALANCED'
@@ -18,7 +34,25 @@ export type StrategyClassificationCode =
   | 'UNDER_ATTEMPTING'
   | 'HIGH_RISK_ATTEMPTING'
   | 'TIME_HEAVY'
-  | 'NEGATIVE_MARKING_HEAVY';
+  | 'NEGATIVE_MARKING_HEAVY'
+  | 'KNOWLEDGE_GAP'
+  | 'INSUFFICIENT_DATA';
+
+export interface StrategySignal {
+  code: string;
+  name: string;
+  value: number | string;
+  weight: StrategySeverity;
+  evidence: string;
+  impact?: string;
+}
+
+export interface StrategyAction {
+  type: string;
+  label: string;
+  targetUrl: string;
+  description?: string;
+}
 
 export interface StrategyMetricItem {
   metricCode: string;
@@ -52,10 +86,13 @@ export interface StrategyRecommendationItem {
   message: string;
   severity: StrategySeverity;
   priority: number;
+  confidence?: StrategyConfidence;
+  reason?: string;
   targetType?: 'EXAM' | 'SUBJECT' | 'CHAPTER';
   targetId?: string;
   evidence: Record<string, any>;
   estimatedImpactMarks: number;
+  action?: StrategyAction;
 }
 
 export interface StrategySummaryMetrics {
@@ -78,10 +115,18 @@ export interface StrategySummaryMetrics {
   reviewedQuestionCount: number;
   reviewedCorrectCount: number;
   reviewedWrongCount: number;
+  unusedTimeMinutes: number;
+  unusedTimePercentage: number;
+  averageTimePerQuestionSeconds: number;
   projectedImprovementMarks: number;
   projectedScore: number;
   actualObtainedMarks: number;
   maxScore: number;
+  sampleSizeLevel: 'INSUFFICIENT' | 'LOW' | 'MODERATE' | 'HIGH';
+  subjectWeaknessMap?: Record<
+    string,
+    { subjectName: string; highRiskAttempts: number; highRiskWrong: number; avoidableLoss: number }
+  >;
 }
 
 export interface DetailedStrategyAnalysis {
@@ -92,9 +137,16 @@ export interface DetailedStrategyAnalysis {
   algorithmVersion: string;
   generatedAt: string;
   primaryClassification: StrategyClassificationCode;
+  confidence: StrategyConfidence;
+  confidenceScore: number; // 0 - 100
+  trend: StrategyTrend;
+  whyStatement: string;
+  signals: StrategySignal[];
   classifications: StrategyClassificationCode[];
+  secondaryClassifications: StrategyClassificationCode[];
   metrics: StrategySummaryMetrics;
   recommendations: StrategyRecommendationItem[];
+  actionRecommendation?: StrategyAction;
   projectedImprovement: {
     estimatedAvoidableLossMarks: number;
     projectedScore: number;

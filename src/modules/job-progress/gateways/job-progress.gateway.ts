@@ -134,6 +134,57 @@ export class JobProgressGateway
     return { status: 'ok', unsubscribed: roomName };
   }
 
+  @SubscribeMessage('subscribe_exam_jobs')
+  async handleSubscribeExamJobs(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { examId?: string },
+  ) {
+    if (!socket.user) {
+      throw new UnauthorizedException('Socket connection is not authenticated.');
+    }
+
+    const roles = socket.user.roles || [];
+    const isAuthorized =
+      roles.includes('SUPER_ADMIN') ||
+      roles.includes('ADMIN') ||
+      roles.includes('INSTITUTION_ADMIN');
+
+    if (!isAuthorized) {
+      this.logger.warn(
+        `[WebSocket] Unauthorized exam job subscription attempt by user ${socket.user.userId}`,
+      );
+      return { status: 'error', message: 'Forbidden: Insufficient privileges for exam monitoring' };
+    }
+
+    if (!data?.examId) {
+      return { status: 'error', message: 'examId is required' };
+    }
+
+    const roomName = `exam:${data.examId}`;
+    socket.join(roomName);
+
+    this.logger.log(
+      `[WebSocket] Administrator ${socket.user.userId} subscribed to exam room ${roomName}`,
+    );
+
+    return { status: 'ok', subscribed: roomName };
+  }
+
+  @SubscribeMessage('unsubscribe_exam_jobs')
+  async handleUnsubscribeExamJobs(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { examId?: string },
+  ) {
+    if (!data?.examId) {
+      return { status: 'error', message: 'examId is required' };
+    }
+
+    const roomName = `exam:${data.examId}`;
+    socket.leave(roomName);
+
+    return { status: 'ok', unsubscribed: roomName };
+  }
+
   /**
    * Broadcasts job progress event to authorized subscription rooms.
    */
@@ -152,5 +203,22 @@ export class JobProgressGateway
       this.server.to(userRoom).emit('job.event', event);
       this.server.to(userRoom).emit(event.event, event);
     }
+
+    // Broadcast to exam room if examId is present
+    if (event.job.examId) {
+      const examRoom = `exam:${event.job.examId}`;
+      this.server.to(examRoom).emit('job.event', event);
+      this.server.to(examRoom).emit(event.event, event);
+    }
+  }
+
+  /**
+   * Dedicated broadcast for exam result processing completion and publication readiness.
+   */
+  emitExamCompletion(examId: string, status: string = 'READY_TO_PUBLISH') {
+    if (!this.server) return;
+    const payload = { examId, status, timestamp: new Date().toISOString() };
+    this.server.to(`exam:${examId}`).emit('exam.result.processing.completed', payload);
+    this.server.emit('exam.result.processing.completed', payload);
   }
 }

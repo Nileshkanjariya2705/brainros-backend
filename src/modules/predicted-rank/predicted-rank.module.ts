@@ -7,12 +7,18 @@ import { HistoricalInterpolationModel } from './services/historical-interpolatio
 import { PredictionGeneratorService } from './services/prediction-generator.service';
 import { PredictionEvaluationService } from './services/prediction-evaluation.service';
 import { PredictionQueryService } from './services/prediction-query.service';
+import { StudentTargetPredictionService } from './services/student-target-prediction.service';
 import { PredictedRankController } from './controllers/predicted-rank.controller';
+import { StudentPredictedRankController } from './controllers/student-predicted-rank.controller';
 import { AdminPredictedRankController } from './controllers/admin-predicted-rank.controller';
 
 @Module({
   imports: [PrismaModule, RedisModule],
-  controllers: [PredictedRankController, AdminPredictedRankController],
+  controllers: [
+    PredictedRankController,
+    StudentPredictedRankController,
+    AdminPredictedRankController,
+  ],
   providers: [
     HistoricalDatasetService,
     HistoricalDatasetSelectorService,
@@ -20,6 +26,7 @@ import { AdminPredictedRankController } from './controllers/admin-predicted-rank
     PredictionGeneratorService,
     PredictionEvaluationService,
     PredictionQueryService,
+    StudentTargetPredictionService,
   ],
   exports: [
     HistoricalDatasetService,
@@ -28,6 +35,8 @@ import { AdminPredictedRankController } from './controllers/admin-predicted-rank
     PredictionGeneratorService,
     PredictionEvaluationService,
     PredictionQueryService,
+    StudentTargetPredictionService,
   ],
 })
 export class PredictedRankModule {}
+

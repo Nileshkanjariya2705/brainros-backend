@@ -191,6 +191,10 @@ export class BulkUploadActivationService {
       // Generate unique studentId
       const studentId = `BRN-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
+      const parsedAdmissionYear = data.admissionYear
+        ? parseInt(String(data.admissionYear).replace(/\D/g, ''), 10) || null
+        : null;
+
       const student = await tx.student.create({
         data: {
           userId: user.id,
@@ -199,6 +203,8 @@ export class BulkUploadActivationService {
           state: data.state || 'Not Specified',
           district: data.district || 'Not Specified',
           schoolCollege: data.schoolCollege || 'Not Specified',
+          institutionId: institutionId || null,
+          admissionYear: parsedAdmissionYear,
           classId: classRecord.id,
           examTargetId: examTarget.id,
           preferredLanguageId: language.id,

@@ -17,6 +17,7 @@ const OPTIONAL_COLUMNS = [
   'class',
   'examTarget',
   'preferredLanguage',
+  'admissionYear',
 ];
 
 @Injectable()
@@ -236,6 +237,13 @@ export class BulkUploadParserService {
         raw.preferredlanguage ||
         raw.language ||
         raw['preferred language'] ||
+        '',
+      admissionYear:
+        raw.admissionyear ||
+        raw['admission year'] ||
+        raw['admission_year'] ||
+        raw.admission_yr ||
+        raw.year ||
         '',
     };
   }
