@@ -22,6 +22,9 @@ import {
   TranslationValidationSummary,
 } from '../dto/exam-manager.dto';
 import { QuestionDifficultyEnum, QuestionTypeEnum } from '@prisma/client';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { ExamImportJobData } from '../processors/exam-import.processor';
 
 @Injectable()
 export class ExamPaperImportService {
@@ -32,10 +35,772 @@ export class ExamPaperImportService {
     private readonly prisma: PrismaService,
     private readonly parserService: ExamPaperParserService,
     private readonly validatorService: ExamPaperValidatorService,
+    @InjectQueue('exam-import-queue') private readonly examImportQueue: Queue,
   ) {
     if (!fs.existsSync(this.storageDir)) {
       fs.mkdirSync(this.storageDir, { recursive: true });
     }
+  }
+
+  /**
+   * Preview Question Paper upload with comprehensive validation metrics & diagnostics
+   */
+  async previewQuestionPaperUpload(
+    file: { originalname: string; size: number; buffer: Buffer },
+    examId: string,
+  ) {
+    this.validateFile(file);
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: true,
+        sections: { include: { subject: true } },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    const parsedRows = await this.parserService.parseBuffer(
+      file.buffer,
+      file.originalname,
+    );
+
+    const validationResult = await this.validatorService.validatePaper(
+      parsedRows,
+    );
+
+    // Exam compatibility check
+    const examErrors: Array<{ row: number; column?: string; message: string }> = [
+      ...validationResult.errors,
+    ];
+
+    if (parsedRows.length > 0) {
+      const firstRowTarget = (parsedRows[0].examTarget || '').trim().toUpperCase();
+      const examTargetName = (exam.examTarget?.name || '').trim().toUpperCase();
+      if (
+        firstRowTarget &&
+        examTargetName &&
+        !examTargetName.includes(firstRowTarget) &&
+        !firstRowTarget.includes(examTargetName)
+      ) {
+        examErrors.push({
+          row: 1,
+          column: 'exam_target',
+          message: `Incompatible paper: Uploaded paper specifies target '${parsedRows[0].examTarget}', but selected exam target is '${exam.examTarget?.name}'.`,
+        });
+        validationResult.isValid = false;
+      }
+    }
+
+    // Collect subjects, chapters, question types
+    const subjectsSet = new Set<string>();
+    const chaptersSet = new Set<string>();
+    const questionTypesSet = new Set<string>();
+
+    const previewRows = validationResult.validatedRows.map((vr) => {
+      const d = vr.data;
+      if (d.subject) subjectsSet.add(d.subject);
+      if (d.chapter) chaptersSet.add(d.chapter);
+      if (d.questionType) questionTypesSet.add(d.questionType);
+
+      const rowHasExamError = examErrors.some((e) => e.row === vr.rowNumber);
+
+      return {
+        rowNumber: vr.rowNumber,
+        questionText: d.questionText || '',
+        questionType: d.questionType || 'SINGLE_CORRECT',
+        subject: d.subject || '',
+        chapter: d.chapter || '',
+        options: {
+          A: d.optionA || '',
+          B: d.optionB || '',
+          C: d.optionC || '',
+          D: d.optionD || '',
+        },
+        correctAnswer: d.correctAnswer || '',
+        marks: d.marks || 4,
+        negativeMarks: d.negativeMarks || 1,
+        isValid: vr.isValid && !rowHasExamError,
+        errors: [
+          ...vr.errors,
+          ...examErrors.filter((e) => e.row === vr.rowNumber).map((e) => e.message),
+        ],
+        warnings: vr.warnings,
+      };
+    });
+
+    return {
+      isValid: validationResult.isValid && examErrors.length === 0,
+      examId: exam.id,
+      examTitle: exam.title,
+      examTarget: exam.examTarget?.name || 'General',
+      totalQuestions: parsedRows.length,
+      validQuestions: previewRows.filter((r) => r.isValid).length,
+      invalidQuestions: previewRows.filter((r) => !r.isValid).length,
+      subjects: Array.from(subjectsSet),
+      chapters: Array.from(chaptersSet),
+      questionTypes: Array.from(questionTypesSet),
+      errors: examErrors,
+      warnings: validationResult.warnings,
+      previewRows: previewRows.slice(0, 100),
+    };
+  }
+
+  /**
+   * Submit Question Paper for asynchronous background processing via BullMQ
+   */
+  async submitQuestionPaperUpload(
+    file: { originalname: string; size: number; buffer: Buffer },
+    examId: string,
+    userId: string,
+  ) {
+    this.validateFile(file);
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    // Idempotency: avoid duplicate active jobs if submitted recently
+    const activeImport = await (this.prisma as any).examImport.findFirst({
+      where: {
+        createdExamId: examId,
+        status: 'PROCESSING',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (activeImport) {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      if (activeImport.startedAt && activeImport.startedAt > tenMinutesAgo) {
+        return {
+          message: 'Question paper has been queued for processing.',
+          importId: activeImport.id,
+          jobId: activeImport.id,
+        };
+      }
+    }
+
+    const ext = path.extname(file.originalname).toLowerCase();
+    const storedFileName = `${Date.now()}_${path.basename(file.originalname)}`;
+    const storagePath = path.join(this.storageDir, storedFileName);
+    await fs.promises.writeFile(storagePath, file.buffer);
+
+    const importSession = await (this.prisma as any).examImport.create({
+      data: {
+        fileName: file.originalname,
+        fileType: ext.replace('.', '').toUpperCase(),
+        storageKey: storagePath,
+        fileSize: file.size,
+        status: 'PROCESSING',
+        createdById: userId,
+        createdExamId: examId,
+        createdExamTitle: exam.title,
+        startedAt: new Date(),
+      },
+    });
+
+    const job = await this.examImportQueue.add(
+      'process-exam-paper',
+      {
+        importId: importSession.id,
+        examId,
+        userId,
+        filePath: storagePath,
+        originalFileName: file.originalname,
+      },
+      {
+        jobId: importSession.id,
+        removeOnComplete: false,
+        removeOnFail: false,
+      },
+    );
+
+    return {
+      message: 'Question paper has been queued for processing.',
+      importId: importSession.id,
+      jobId: String(job.id),
+    };
+  }
+
+  /**
+   * Background Execution of Question Paper import (invoked by BullMQ Worker)
+   * Enforces safe replacement: existing questions are preserved if import fails
+   */
+  async executeBackgroundExamImport(
+    data: ExamImportJobData,
+    progressCallback: (
+      current: number,
+      total: number,
+      stage: string,
+      message: string,
+    ) => Promise<void>,
+  ) {
+    const { importId, examId, userId, filePath, originalFileName } = data;
+
+    await progressCallback(5, 100, 'PARSING', 'Reading and parsing file...');
+
+    const buffer = await fs.promises.readFile(filePath);
+    const parsedRows = await this.parserService.parseBuffer(buffer, originalFileName);
+
+    await progressCallback(15, 100, 'VALIDATING', 'Validating questions & structure...');
+    const validationResult = await this.validatorService.validatePaper(parsedRows);
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: true,
+        sections: { include: { subject: true } },
+      },
+    });
+
+    if (!exam) {
+      throw new Error(`Exam with ID '${examId}' not found.`);
+    }
+
+    // Compatibility check
+    if (parsedRows.length > 0) {
+      const firstRowTarget = (parsedRows[0].examTarget || '').trim().toUpperCase();
+      const examTargetName = (exam.examTarget?.name || '').trim().toUpperCase();
+      if (
+        firstRowTarget &&
+        examTargetName &&
+        !examTargetName.includes(firstRowTarget) &&
+        !firstRowTarget.includes(examTargetName)
+      ) {
+        validationResult.errors.push({
+          row: 1,
+          column: 'exam_target',
+          message: `Uploaded question paper is for target '${parsedRows[0].examTarget}', but selected exam is for '${exam.examTarget?.name}'.`,
+        });
+        validationResult.isValid = false;
+      }
+    }
+
+    // Record staged rows
+    const stagingData = validationResult.validatedRows.map((r) => ({
+      importId,
+      rowNumber: r.rowNumber,
+      status: r.isValid ? 'VALID' : 'INVALID',
+      examCode: r.data.examCode,
+      examTitle: r.data.examName,
+      subjectName: r.data.subject,
+      sectionName: r.data.sectionName,
+      questionNumber: r.data.questionNumber,
+      rawData: r.data as any,
+      normalizedData: r.data as any,
+      dtoData: r.data as any,
+      errors: r.errors,
+      warnings: r.warnings,
+    }));
+
+    await (this.prisma as any).examImportRow.createMany({
+      data: stagingData,
+    });
+
+    // Check if validation failed: safe replacement preserves old paper
+    if (!validationResult.isValid || validationResult.errors.length > 0) {
+      const errorSummary = `Validation failed with ${validationResult.errors.length} error(s). Existing question paper remained intact.`;
+      await (this.prisma as any).examImport.update({
+        where: { id: importId },
+        data: {
+          status: 'FAILED',
+          totalRows: validationResult.totalRows,
+          validRows: validationResult.validRows,
+          invalidRows: validationResult.invalidRows,
+          errorSummary,
+          completedAt: new Date(),
+        },
+      });
+      throw new BadRequestException(errorSummary);
+    }
+
+    await progressCallback(25, 100, 'PROCESSING', 'Processing questions and options...');
+
+    // Execute atomic safe transaction attaching/replacing questions on exam
+    const totalRows = validationResult.validatedRows.length;
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Resolve default preferred language
+      let defaultLang = await tx.preferredLanguage.findFirst({
+        where: { code: 'en' },
+      });
+      if (!defaultLang) defaultLang = await tx.preferredLanguage.findFirst();
+
+      // 2. Sections resolution
+      const sectionNameToDbRecord = new Map<string, any>();
+      for (let sIdx = 0; sIdx < validationResult.sections.length; sIdx++) {
+        const sec = validationResult.sections[sIdx];
+        let subject = await tx.subject.findFirst({
+          where: {
+            examTargetId: exam.examTargetId,
+            name: { equals: sec.subject, mode: 'insensitive' },
+          },
+        });
+        if (!subject) {
+          subject = await tx.subject.create({
+            data: {
+              examTargetId: exam.examTargetId,
+              name: sec.subject,
+              code: sec.subject.toUpperCase().slice(0, 4),
+              displayOrder: sIdx + 1,
+            },
+          });
+        }
+
+        let examSection = await tx.examSection.findFirst({
+          where: {
+            examId: exam.id,
+            name: { equals: sec.name, mode: 'insensitive' },
+          },
+        });
+
+        if (!examSection) {
+          examSection = await tx.examSection.create({
+            data: {
+              examId: exam.id,
+              subjectId: subject.id,
+              name: sec.name,
+              totalQuestions: sec.questionCount,
+              displayOrder: sIdx + 1,
+            },
+          });
+        } else {
+          examSection = await tx.examSection.update({
+            where: { id: examSection.id },
+            data: {
+              subjectId: subject.id,
+              totalQuestions: sec.questionCount,
+            },
+          });
+        }
+
+        sectionNameToDbRecord.set(`${sec.subject}::${sec.name}`, {
+          section: examSection,
+          subject,
+        });
+      }
+
+      // 3. Create questions, options, translations, answers, explanations
+      const newExamQuestionsData: Array<{
+        examId: string;
+        sectionId: string;
+        questionId: string;
+        displayOrder: number;
+        marks: number;
+        negativeMarks: number;
+      }> = [];
+
+      for (let qIdx = 0; qIdx < totalRows; qIdx++) {
+        const row = validationResult.validatedRows[qIdx];
+        const data = row.data;
+
+        const secKey = `${data.subject || 'General'}::${
+          data.sectionName || `${data.subject || 'General'} Section`
+        }`;
+        const secData =
+          sectionNameToDbRecord.get(secKey) ||
+          Array.from(sectionNameToDbRecord.values())[0];
+
+        const subject = secData.subject;
+        const examSection = secData.section;
+
+        // Resolve Chapter
+        let chapter = data.chapter
+          ? await tx.chapter.findFirst({
+              where: {
+                subjectId: subject.id,
+                name: { equals: data.chapter, mode: 'insensitive' },
+              },
+            })
+          : null;
+
+        if (!chapter) {
+          chapter = await tx.chapter.findFirst({
+            where: { subjectId: subject.id },
+          });
+          if (!chapter) {
+            chapter = await tx.chapter.create({
+              data: {
+                subjectId: subject.id,
+                name: data.chapter || `${subject.name} General Chapter`,
+              },
+            });
+          }
+        }
+
+        const diffLevel = (
+          ['EASY', 'MEDIUM', 'HARD', 'VERY_HARD'].includes(data.difficulty || '')
+            ? data.difficulty
+            : 'MEDIUM'
+        ) as QuestionDifficultyEnum;
+
+        const qType = (
+          [
+            'SINGLE_CORRECT',
+            'MULTIPLE_CORRECT',
+            'NUMERICAL',
+            'ASSERTION_REASON',
+            'MATCH_FOLLOWING',
+            'CASE_BASED',
+          ].includes(data.questionType || '')
+            ? data.questionType
+            : 'SINGLE_CORRECT'
+        ) as QuestionTypeEnum;
+
+        // Create Question
+        const question = await tx.question.create({
+          data: {
+            subjectId: subject.id,
+            chapterId: chapter.id,
+            difficultyLevel: diffLevel,
+            type: qType,
+            status: 'APPROVED',
+            marks: data.marks || 4.0,
+            negativeMarks: data.negativeMarks || 1.0,
+            passage: data.passageText || null,
+            assertion: data.assertionText || null,
+            reason: data.reasonText || null,
+            defaultLanguageId: defaultLang ? defaultLang.id : (undefined as any),
+            createdById: userId,
+            approvedById: userId,
+            approvedAt: new Date(),
+          },
+        });
+
+        // Question Translation
+        if (defaultLang) {
+          await tx.questionTranslation.create({
+            data: {
+              questionId: question.id,
+              languageId: defaultLang.id,
+              questionText: data.questionText,
+              passageText: data.passageText || null,
+              assertionText: data.assertionText || null,
+              reasonText: data.reasonText || null,
+              explanation: data.explanation || null,
+            },
+          });
+        }
+
+        // Options
+        const optionKeys = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
+        const correctAnswers = (data.correctAnswer || '')
+          .toUpperCase()
+          .split(/[\s,;]+/)
+          .map((s) => s.trim());
+
+        const correctOptionIds: string[] = [];
+
+        for (let oIdx = 0; oIdx < optionKeys.length; oIdx++) {
+          const key = optionKeys[oIdx];
+          const optText = (data as any)[`option${key}`];
+
+          if (optText && optText.trim()) {
+            const isCorrect = correctAnswers.includes(key);
+            const opt = await tx.questionOption.create({
+              data: {
+                questionId: question.id,
+                optionKey: key,
+                optionText: optText.trim(),
+                isCorrect,
+                displayOrder: oIdx + 1,
+              },
+            });
+
+            if (isCorrect) correctOptionIds.push(opt.id);
+
+            if (defaultLang) {
+              await tx.questionOptionTranslation.create({
+                data: {
+                  optionId: opt.id,
+                  languageId: defaultLang.id,
+                  optionText: optText.trim(),
+                },
+              });
+            }
+          }
+        }
+
+        // Answer
+        await tx.questionAnswer.create({
+          data: {
+            questionId: question.id,
+            answerType: qType,
+            correctOptionIds:
+              correctOptionIds.length > 0 ? correctOptionIds : undefined,
+            numericalAnswer:
+              qType === 'NUMERICAL' ? parseFloat(data.correctAnswer) : null,
+          },
+        });
+
+        // Explanation
+        if (data.explanation && data.explanation.trim()) {
+          await tx.questionExplanation.create({
+            data: {
+              questionId: question.id,
+              explanation: data.explanation.trim(),
+            },
+          });
+        }
+
+        newExamQuestionsData.push({
+          examId: exam.id,
+          sectionId: examSection.id,
+          questionId: question.id,
+          displayOrder: qIdx + 1,
+          marks: data.marks || 4.0,
+          negativeMarks: data.negativeMarks || 1.0,
+        });
+
+        // Incremental progress
+        if ((qIdx + 1) % 20 === 0 || qIdx === totalRows - 1) {
+          await progressCallback(
+            qIdx + 1,
+            totalRows,
+            'PROCESSING',
+            `Processed ${qIdx + 1} of ${totalRows} questions...`,
+          );
+        }
+      }
+
+      // 4. Safe replacement: delete previous examQuestions links for this exam
+      await tx.examQuestion.deleteMany({
+        where: { examId: exam.id },
+      });
+
+      // 5. Insert new examQuestions
+      for (const eqData of newExamQuestionsData) {
+        await tx.examQuestion.create({
+          data: eqData,
+        });
+      }
+
+      // 6. Update exam metrics
+      await tx.exam.update({
+        where: { id: exam.id },
+        data: {
+          totalQuestions: validationResult.totalQuestions,
+          totalMarks: validationResult.totalMarks,
+          durationMinutes: validationResult.durationMinutes || exam.durationMinutes,
+        },
+      });
+
+      // 7. Create or update ExamVersion
+      const latestVersion = await tx.examVersion.findFirst({
+        where: { examId: exam.id },
+        orderBy: { versionNumber: 'desc' },
+      });
+      const newVersionNumber = (latestVersion?.versionNumber || 0) + 1;
+
+      const examVersion = await tx.examVersion.create({
+        data: {
+          examId: exam.id,
+          versionNumber: newVersionNumber,
+          status: 'GENERATED',
+          totalQuestions: validationResult.totalQuestions,
+          durationMinutes: validationResult.durationMinutes || exam.durationMinutes,
+          totalMarks: validationResult.totalMarks,
+          generatedById: userId,
+        },
+      });
+
+      // Update schedule to link to this version if schedule exists
+      await tx.examSchedule.updateMany({
+        where: { examId: exam.id },
+        data: { examVersionId: examVersion.id },
+      });
+
+      // 8. Update import session
+      await (tx as any).examImport.update({
+        where: { id: importId },
+        data: {
+          status: 'COMPLETED',
+          totalRows: validationResult.totalRows,
+          validRows: validationResult.validRows,
+          invalidRows: 0,
+          examCount: 1,
+          questionsCreated: validationResult.totalQuestions,
+          sectionsCreated: validationResult.sections.length,
+          createdExamId: exam.id,
+          createdExamTitle: exam.title,
+          completedAt: new Date(),
+        },
+      });
+    });
+
+    await progressCallback(
+      totalRows,
+      totalRows,
+      'COMPLETED',
+      `Completed: ${totalRows} of ${totalRows} questions imported successfully.`,
+    );
+
+    return {
+      success: true,
+      questionsCreated: validationResult.totalQuestions,
+      sectionsCreated: validationResult.sections.length,
+    };
+  }
+
+  /**
+   * Dedicated Read-Only View of complete question paper
+   * Shows questions and options in exact persisted order without student randomization
+   */
+  async getExamQuestionPaper(examId: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: { select: { id: true, name: true, description: true } },
+        status: { select: { id: true, name: true } },
+        sections: {
+          orderBy: { displayOrder: 'asc' },
+          include: { subject: { select: { id: true, name: true, code: true } } },
+        },
+        examQuestions: {
+          orderBy: { displayOrder: 'asc' },
+          include: {
+            section: { select: { id: true, name: true } },
+            question: {
+              include: {
+                subject: { select: { id: true, name: true } },
+                chapter: { select: { id: true, name: true } },
+                options: {
+                  orderBy: { displayOrder: 'asc' },
+                  include: { translations: true },
+                },
+                answer: true,
+                explanation: true,
+                translations: true,
+              },
+            },
+          },
+        },
+        schedules: {
+          orderBy: { startTime: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    const questions = exam.examQuestions.map((eq, idx) => {
+      const q = eq.question;
+      const translation = q.translations?.[0];
+      const questionText = translation?.questionText || (q as any).questionText || '';
+      const explanationText = q.explanation?.explanation || translation?.explanation || '';
+
+      const options = (q.options || []).map((opt) => ({
+        id: opt.id,
+        optionKey: opt.optionKey,
+        optionText: opt.translations?.[0]?.optionText || opt.optionText || '',
+        isCorrect: opt.isCorrect,
+        displayOrder: opt.displayOrder,
+      }));
+
+      return {
+        id: q.id,
+        questionNumber: idx + 1,
+        displayOrder: eq.displayOrder,
+        questionText,
+        passageText: translation?.passageText || q.passage || null,
+        assertionText: translation?.assertionText || q.assertion || null,
+        reasonText: translation?.reasonText || q.reason || null,
+        type: q.type,
+        difficultyLevel: q.difficultyLevel,
+        subject: q.subject?.name || eq.section?.name || 'General',
+        chapter: q.chapter?.name || null,
+        section: eq.section?.name || null,
+        marks: eq.marks ?? q.marks,
+        negativeMarks: eq.negativeMarks ?? q.negativeMarks,
+        options,
+        correctAnswer: q.correctAnswer,
+        explanation: explanationText,
+      };
+    });
+
+    return {
+      id: exam.id,
+      title: exam.title,
+      description: exam.description,
+      examTarget: exam.examTarget,
+      status: exam.status?.name || 'DRAFT',
+      durationMinutes: exam.durationMinutes,
+      totalMarks: exam.totalMarks,
+      totalQuestions: questions.length,
+      schedule: exam.schedules?.[0] || null,
+      sections: exam.sections.map((s) => ({
+        id: s.id,
+        name: s.name,
+        subject: s.subject?.name || '',
+        totalQuestions: s.totalQuestions,
+      })),
+      questions,
+    };
+  }
+
+  /**
+   * Retry failed question paper upload from stored storageKey
+   */
+  async retryQuestionPaperUpload(examId: string, userId: string) {
+    const exam = await this.prisma.exam.findUnique({ where: { id: examId } });
+    if (!exam) throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+
+    const latestFailedImport = await (this.prisma as any).examImport.findFirst({
+      where: {
+        createdExamId: examId,
+        status: 'FAILED',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestFailedImport || !latestFailedImport.storageKey) {
+      throw new BadRequestException('No previous failed import found to retry for this exam.');
+    }
+
+    if (!fs.existsSync(latestFailedImport.storageKey)) {
+      throw new BadRequestException('The stored import file is no longer available on disk. Please upload again.');
+    }
+
+    await (this.prisma as any).examImport.update({
+      where: { id: latestFailedImport.id },
+      data: {
+        status: 'PROCESSING',
+        startedAt: new Date(),
+        errorSummary: null,
+      },
+    });
+
+    const job = await this.examImportQueue.add(
+      'process-exam-paper',
+      {
+        importId: latestFailedImport.id,
+        examId,
+        userId,
+        filePath: latestFailedImport.storageKey,
+        originalFileName: latestFailedImport.fileName,
+      },
+      {
+        jobId: latestFailedImport.id,
+        removeOnComplete: false,
+        removeOnFail: false,
+      },
+    );
+
+    return {
+      message: 'Question paper upload has been requeued for processing.',
+      importId: latestFailedImport.id,
+      jobId: String(job.id),
+    };
   }
 
   /**
@@ -1723,9 +2488,23 @@ export class ExamPaperImportService {
       where: { isActive: true },
     });
 
+    // Fetch latest import sessions for all returned exams
+    const examIds = exams.map((e) => e.id);
+    const recentImports = await (this.prisma as any).examImport.findMany({
+      where: { createdExamId: { in: examIds } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const importMap = new Map<string, any>();
+    for (const imp of recentImports) {
+      if (!importMap.has(imp.createdExamId)) {
+        importMap.set(imp.createdExamId, imp);
+      }
+    }
+
     const items = await Promise.all(
       exams.map(async (exam) => {
-        const totalQ = exam._count.examQuestions || exam.totalQuestions || 1;
+        const totalQ = exam._count.examQuestions || 0;
         const translationCoverage: Record<string, number> = {};
 
         for (const lang of allLanguages) {
@@ -1741,7 +2520,7 @@ export class ExamPaperImportService {
                 },
               },
             });
-            const pct = Math.min(100, Math.round((count / totalQ) * 100));
+            const pct = Math.min(100, Math.round((count / (totalQ || 1)) * 100));
             if (pct > 0) {
               translationCoverage[lCode] = pct;
             }
@@ -1756,6 +2535,17 @@ export class ExamPaperImportService {
           .filter(Boolean)
           .join(', ') || 'All Subjects';
 
+        const latestImport = importMap.get(exam.id);
+        let questionPaperStatus: 'NOT_UPLOADED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' = 'NOT_UPLOADED';
+
+        if (latestImport?.status === 'PROCESSING') {
+          questionPaperStatus = 'PROCESSING';
+        } else if ((exam._count.examQuestions || 0) > 0) {
+          questionPaperStatus = 'COMPLETED';
+        } else if (latestImport?.status === 'FAILED') {
+          questionPaperStatus = 'FAILED';
+        }
+
         return {
           id: exam.id,
           title: exam.title,
@@ -1764,10 +2554,16 @@ export class ExamPaperImportService {
           typeLabel,
           examTarget: exam.examTarget,
           subjectsSummary,
-          totalQuestions: exam.totalQuestions,
+          totalQuestions: totalQ,
           totalMarks: exam.totalMarks,
           durationMinutes: exam.durationMinutes,
           status: exam.status?.name || 'DRAFT',
+          questionPaperStatus,
+          latestImportId: latestImport?.id || null,
+          importStatus: latestImport?.status || null,
+          importError: latestImport?.errorSummary || null,
+          validRows: latestImport?.validRows || 0,
+          totalRows: latestImport?.totalRows || 0,
           createdAt: exam.createdAt,
           updatedAt: exam.updatedAt,
           createdBy: {

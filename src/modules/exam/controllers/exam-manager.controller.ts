@@ -274,5 +274,95 @@ export class ExamManagerController {
   getExamById(@Param('id') id: string) {
     return this.examService.findExamById(id);
   }
+
+  /**
+   * Preview Question Paper upload (validates CSV/Excel & compatibility without persisting)
+   * POST /admin/exam-manager/exams/:examId/preview-upload
+   */
+  @Post('exams/:examId/preview-upload')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(FileInterceptor('file'))
+  async previewQuestionPaperUpload(
+    @Param('examId') examId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Question paper file is required.');
+    }
+    const data = await this.examPaperImportService.previewQuestionPaperUpload(
+      file,
+      examId,
+    );
+    return {
+      statusCode: 200,
+      message: data.isValid
+        ? 'Question paper validated successfully.'
+        : 'Validation completed with errors.',
+      data,
+    };
+  }
+
+  /**
+   * Submit Question Paper for background BullMQ processing with inline WebSocket progress
+   * POST /admin/exam-manager/exams/:examId/submit-upload
+   */
+  @Post('exams/:examId/submit-upload')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(FileInterceptor('file'))
+  async submitQuestionPaperUpload(
+    @Param('examId') examId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: { userId: string },
+  ) {
+    if (!file) {
+      throw new BadRequestException('Question paper file is required.');
+    }
+    const result = await this.examPaperImportService.submitQuestionPaperUpload(
+      file,
+      examId,
+      user.userId,
+    );
+    return {
+      statusCode: 202,
+      message: result.message,
+      data: result,
+    };
+  }
+
+  /**
+   * Dedicated Read-Only View of Question Paper with all questions, options & answers
+   * GET /admin/exam-manager/exams/:examId/question-paper
+   */
+  @Get('exams/:examId/question-paper')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async getExamQuestionPaper(@Param('examId') examId: string) {
+    const data = await this.examPaperImportService.getExamQuestionPaper(examId);
+    return {
+      statusCode: 200,
+      message: 'Question paper retrieved successfully.',
+      data,
+    };
+  }
+
+  /**
+   * Retry failed question paper upload
+   * POST /admin/exam-manager/exams/:examId/retry-upload
+   */
+  @Post('exams/:examId/retry-upload')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async retryQuestionPaperUpload(
+    @Param('examId') examId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const result = await this.examPaperImportService.retryQuestionPaperUpload(
+      examId,
+      user.userId,
+    );
+    return {
+      statusCode: 200,
+      message: result.message,
+      data: result,
+    };
+  }
 }
 

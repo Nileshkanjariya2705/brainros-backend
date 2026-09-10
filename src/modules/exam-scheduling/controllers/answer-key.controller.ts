@@ -29,7 +29,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/status
    */
   @Get('status')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
   async getAnswerKeyStatus(@Param('scheduleId', ParseUUIDPipe) scheduleId: string) {
     const data = await this.answerKeyService.getAnswerKeyStatus(scheduleId);
     return {
@@ -44,7 +44,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/template
    */
   @Get('template')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
   async getAnswerKeyTemplate(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @Res() res: Response,
@@ -65,7 +65,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/questions
    */
   @Get('questions')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
   async getAnswerKeyQuestions(@Param('scheduleId', ParseUUIDPipe) scheduleId: string) {
     const data = await this.answerKeyService.getAnswerKeyTemplate(scheduleId);
     return {
@@ -80,13 +80,14 @@ export class AnswerKeyController {
    * POST /admin/schedules/:scheduleId/answer-key
    */
   @Post()
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async uploadAnswerKey(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { rows?: AnswerKeyRowInput[] | string },
     @CurrentUser('id') userId: string,
+    @CurrentUser('roles') userRoles: string[],
   ) {
     let rowsToProcess: AnswerKeyRowInput[] = [];
 
@@ -112,6 +113,7 @@ export class AnswerKeyController {
       scheduleId,
       rowsToProcess,
       userId,
+      userRoles || [],
     );
 
     return {

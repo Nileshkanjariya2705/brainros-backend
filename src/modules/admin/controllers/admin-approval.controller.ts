@@ -34,6 +34,12 @@ export class AdminApprovalController {
     return this.approvalService.getApprovalRequests(filter);
   }
 
+  @Get('queue-types')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  async getQueueTypes() {
+    return this.approvalService.getQueueTypesAndCounts();
+  }
+
   @Get(':id')
   @Roles('SUPER_ADMIN', 'ADMIN')
   async getApprovalById(@Param('id') id: string) {

@@ -35,7 +35,7 @@ export class AdminStudentBulkController {
    * Download sample student registration CSV/Excel template
    */
   @Get('bulk-template')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async downloadTemplate(
     @Query('format') format: 'csv' | 'xlsx' = 'xlsx',
     @Res() res: Response,
@@ -53,7 +53,7 @@ export class AdminStudentBulkController {
    * Upload and stage/validate student spreadsheet
    */
   @Post('bulk-upload')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async uploadStudents(
     @UploadedFile() file: Express.Multer.File,
@@ -81,7 +81,7 @@ export class AdminStudentBulkController {
    * Edit a single staged student row and re-run validation
    */
   @Patch('bulk-upload/rows/:rowId')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async updateRow(
     @Param('rowId') rowId: string,
     @Body() dto: UpdateBulkStudentRowDto,
@@ -99,7 +99,7 @@ export class AdminStudentBulkController {
    * List previous bulk student upload batches
    */
   @Get('bulk-uploads')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async getUploadHistory(@Query() query: BulkStudentUploadQueryDto) {
     return this.bulkRegistrationService.getUploadHistory(
       query.page,
@@ -112,7 +112,7 @@ export class AdminStudentBulkController {
    * Get validation preview and row details for a batch
    */
   @Get('bulk-upload/:id/preview')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async getUploadPreview(
     @Param('id') uploadId: string,
     @Query('page') page = 1,
@@ -131,7 +131,7 @@ export class AdminStudentBulkController {
    * Confirm and register valid students in the batch
    */
   @Post('bulk-upload/:id/confirm')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async confirmRegistration(
     @Param('id') uploadId: string,
     @Req() req: any,
@@ -139,6 +139,7 @@ export class AdminStudentBulkController {
     const actor = {
       userId: req.user?.userId || req.user?.id,
       email: req.user?.email,
+      roles: req.user?.roles || [],
     };
 
     return this.bulkRegistrationService.confirmAndRegisterStudents(
@@ -151,7 +152,7 @@ export class AdminStudentBulkController {
    * Download error report for a batch
    */
   @Get('bulk-upload/:id/error-report')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async downloadErrorReport(
     @Param('id') uploadId: string,
     @Query('format') format: 'csv' | 'xlsx' = 'xlsx',

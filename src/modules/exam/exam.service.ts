@@ -305,6 +305,13 @@ export class ExamService {
           examTarget: { select: { id: true, name: true } },
           status: { select: { id: true, name: true } },
           createdBy: { select: { id: true, email: true } },
+          schedules: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            include: {
+              examVersion: { select: { id: true, versionNumber: true } },
+            },
+          },
           _count: {
             select: { examQuestions: true, attempts: true, sections: true },
           },

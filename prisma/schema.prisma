@@ -175,6 +175,7 @@ enum AttemptRiskLevel {
 
 model User {
   id                 String                  @id @default(uuid()) @db.Uuid
+  name               String?
   phone              String?                 @unique
   mobileNumber       String?                 @unique @map("mobile_number")
   email              String?                 @unique
@@ -225,6 +226,8 @@ model User {
   answerKeyUploads            ExamSchedule[]          @relation("AnswerKeyUploadedBy")
   reviewedAnalysisReports     ExamAnalysisReport[]    @relation("ReportReviewedBy")
   approvedAnalysisReports     ExamAnalysisReport[]    @relation("ReportApprovedBy")
+  billsCreated                Bill[]                  @relation("BillsCreated")
+  billsApproved               Bill[]                  @relation("BillsApproved")
 
   @@index([status])
   @@index([email])
@@ -2053,6 +2056,7 @@ model Institution {
   batches     InstitutionBatch[]
   bulkUploads BulkUpload[]
   reportJobs  ReportJob[]
+  bills       Bill[]
   stateRef    State?            @relation(fields: [stateId], references: [id])
   districtRef District?         @relation(fields: [districtId], references: [id])
   students    Student[]
@@ -2062,6 +2066,57 @@ model Institution {
   @@index([stateId])
   @@index([districtId])
   @@map("institutions")
+}
+
+enum BillStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  GENERATED
+  SENT
+  PAID
+  OVERDUE
+}
+
+model Bill {
+  id                String        @id @default(uuid()) @db.Uuid
+  billNumber        String        @unique @map("bill_number")
+  institutionId     String        @map("institution_id") @db.Uuid
+  createdById       String        @map("created_by_id") @db.Uuid
+  billDate          DateTime      @default(now()) @map("bill_date")
+  billingMonth      Int?          @map("billing_month")
+  billingYear       Int?          @map("billing_year")
+  studentCount      Int           @default(0) @map("student_count")
+  pricePerStudent   Float         @default(300) @map("price_per_student")
+  description       String?
+  amount            Float
+  tax               Float         @default(0)
+  totalAmount       Float         @map("total_amount")
+  status            BillStatus    @default(DRAFT)
+  rejectionReason   String?       @map("rejection_reason")
+  emailStatus       String?       @default("IDLE") @map("email_status")
+  emailFailedReason String?       @map("email_failed_reason")
+  approvedById      String?       @map("approved_by_id") @db.Uuid
+  approvedAt        DateTime?     @map("approved_at")
+  sentAt            DateTime?     @map("sent_at")
+  pdfStorageKey     String?       @map("pdf_storage_key")
+  metadata          Json?
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  institution       Institution   @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  createdBy         User          @relation("BillsCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  approvedBy        User?         @relation("BillsApproved", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([institutionId, billingYear, billingMonth])
+  @@index([institutionId])
+  @@index([createdById])
+  @@index([status])
+  @@index([billNumber])
+  @@index([billingYear, billingMonth])
+  @@map("bills")
 }
 
 model InstitutionAdmin {
@@ -2882,6 +2937,19 @@ model ExamAnalysisReport {
   @@index([status])
   @@map("exam_analysis_reports")
 }
+
+model SystemSetting {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  value       String
+  description String?
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
 
 
 

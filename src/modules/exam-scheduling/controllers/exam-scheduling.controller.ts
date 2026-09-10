@@ -5,6 +5,7 @@ import {
   Patch,
   Param,
   Body,
+  Query,
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -16,7 +17,7 @@ import { ExamLifecycleService } from '../services/exam-lifecycle.service';
 import { ExamScheduleService } from '../services/exam-schedule.service';
 import { ExamAccessService } from '../services/exam-access.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
-import { AdminScheduleExamDto } from '../dto/admin-schedule-exam.dto';
+import { AdminScheduleExamDto, CheckQuestionAvailabilityDto } from '../dto/admin-schedule-exam.dto';
 import {
   CancelExamDto,
   ActionReasonDto,
@@ -31,6 +32,18 @@ export class ExamSchedulingController {
     private readonly scheduleService: ExamScheduleService,
     private readonly accessService: ExamAccessService,
   ) {}
+
+  @Get('admin/exams/check-availability')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  async checkQuestionAvailability(
+    @Query() dto: CheckQuestionAvailabilityDto,
+  ) {
+    const data = await this.scheduleService.checkQuestionAvailability(dto);
+    return {
+      statusCode: 200,
+      data,
+    };
+  }
 
   @Post('admin/exams/schedule')
   @Roles('ADMIN', 'SUPER_ADMIN')
@@ -104,7 +117,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/schedule')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN')
   async scheduleExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -120,7 +133,7 @@ export class ExamSchedulingController {
   }
 
   @Patch('exam-schedules/:scheduleId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN')
   async rescheduleExam(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @CurrentUser('id') userId: string,

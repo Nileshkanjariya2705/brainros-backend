@@ -52,8 +52,9 @@ export class UpdateExamCycleDto {
 }
 
 export class CreateExamCalendarEventDto {
+  @IsOptional()
   @IsUUID()
-  cycleId: string;
+  cycleId?: string;
 
   @IsUUID()
   examId: string;
@@ -64,12 +65,52 @@ export class CreateExamCalendarEventDto {
   @IsDateString()
   plannedStartTime: string; // ISO datetime
 
+  // Either provide plannedEndTime OR durationMinutes; backend calculates from durationMinutes if endTime omitted
+  @IsOptional()
   @IsDateString()
-  plannedEndTime: string; // ISO datetime
+  plannedEndTime?: string; // ISO datetime
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  durationMinutes?: number;
 
   @IsOptional()
   @IsString()
   timezone?: string; // default "Asia/Kolkata"
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class UpdateCalendarEventDto {
+  @IsOptional()
+  @IsUUID()
+  examId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  plannedDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  plannedStartTime?: string;
+
+  @IsOptional()
+  @IsDateString()
+  plannedEndTime?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  durationMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 
   @IsOptional()
   @IsString()
@@ -119,6 +160,16 @@ export class CalendarFilterDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(1900)
+  year?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   @Min(1)
   page?: number;
 
@@ -126,7 +177,7 @@ export class CalendarFilterDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(500)
   limit?: number;
 }
 

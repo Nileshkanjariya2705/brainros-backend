@@ -925,11 +925,13 @@ export class StudentBulkRegistrationService {
   }
 
   /**
-   * Confirms registration and executes transactional batch creation for valid rows
+   * Confirms registration and executes transactional batch creation for valid rows.
+   * - SUPER_ADMIN / ADMIN: activates directly.
+   * - OPERATOR: routes to PENDING_APPROVAL and creates an ApprovalRequest.
    */
   async confirmAndRegisterStudents(
     uploadId: string,
-    actor: { userId: string; email?: string },
+    actor: { userId: string; email?: string; roles?: string[] },
   ) {
     const upload = await this.prisma.bulkUpload.findUnique({
       where: { id: uploadId },
@@ -949,6 +951,50 @@ export class StudentBulkRegistrationService {
       throw new BadRequestException('This batch has 0 valid rows to register.');
     }
 
+    // ─── OPERATOR: route to approval queue instead of direct activation ───
+    const actorRoles: string[] = actor.roles || [];
+    const isOperator =
+      actorRoles.includes('OPERATOR') &&
+      !actorRoles.includes('SUPER_ADMIN') &&
+      !actorRoles.includes('ADMIN');
+
+    if (isOperator) {
+      await this.prisma.bulkUpload.update({
+        where: { id: uploadId },
+        data: { status: 'PENDING_APPROVAL' as any },
+      });
+
+      await this.prisma.approvalRequest.create({
+        data: {
+          resourceType: 'BULK_UPLOAD',
+          resourceId: uploadId,
+          requestedById: actor.userId,
+          status: 'PENDING',
+          metadata: {
+            uploadType: 'STUDENT_BULK_REGISTRATION',
+            creatorRole: 'OPERATOR',
+            fileName: upload.fileName,
+            validRows: upload.validRowCount,
+          },
+        },
+      });
+
+      this.logger.log(
+        `Operator ${actor.userId} submitted student batch ${uploadId} for approval (${upload.validRowCount} valid rows).`,
+      );
+
+      return {
+        uploadId,
+        status: 'PENDING_APPROVAL',
+        totalValid: upload.validRowCount,
+        activated: 0,
+        failed: 0,
+        message:
+          'Your student registration has been submitted for Super Admin approval. Students will be registered once approved.',
+      };
+    }
+
+    // ─── SUPER_ADMIN / ADMIN: activate directly (existing flow) ──────────
     // Set status to ACTIVATING
     await this.prisma.bulkUpload.update({
       where: { id: uploadId },

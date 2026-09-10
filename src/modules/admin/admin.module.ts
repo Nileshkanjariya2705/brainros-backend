@@ -20,6 +20,7 @@ import { CompletedExamReportsController } from './controllers/completed-exam-rep
 import { AdminStudentsController } from './controllers/admin-students.controller';
 import { SuperAdminRegistrationsController } from './controllers/super-admin-registrations.controller';
 import { AdminSchoolsController } from './controllers/admin-schools.controller';
+import { AdminStaffController } from './controllers/admin-staff.controller';
 
 // Services & Processors
 import { AdminDashboardService } from './dashboard/services/admin-dashboard.service';
@@ -36,6 +37,7 @@ import { ExamReportEmailProcessor } from './processors/exam-report-email.process
 import { AdminStudentsService } from './services/admin-students.service';
 import { AdminSchoolsService } from './services/admin-schools.service';
 import { SchoolBulkUploadService } from './services/school-bulk-upload.service';
+import { AdminStaffService } from './services/admin-staff.service';
 
 // Handlers & Registry
 import { ApprovalHandlerRegistry } from './approval/handlers/approval-handler.registry';
@@ -43,6 +45,7 @@ import { QuestionApprovalHandler } from './approval/handlers/question-approval.h
 import { ExamApprovalHandler } from './approval/handlers/exam-approval.handler';
 import { InstitutionApprovalHandler } from './approval/handlers/institution-approval.handler';
 import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-approval.handler';
+import { StaffUpdateApprovalHandler } from './approval/handlers/staff-update-approval.handler';
 
 @Module({
   imports: [
@@ -74,6 +77,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     AdminStudentsController,
     SuperAdminRegistrationsController,
     AdminSchoolsController,
+    AdminStaffController,
   ],
   providers: [
     // Core Services
@@ -91,6 +95,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     AdminStudentsService,
     AdminSchoolsService,
     SchoolBulkUploadService,
+    AdminStaffService,
 
     // Approval Handlers & Registry
     ApprovalHandlerRegistry,
@@ -98,6 +103,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     ExamApprovalHandler,
     InstitutionApprovalHandler,
     BulkUploadApprovalHandler,
+    StaffUpdateApprovalHandler,
   ],
   exports: [
     AdminDashboardService,
@@ -111,6 +117,7 @@ import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-appro
     ResendEmailService,
     ExamReportPdfService,
     AdminStudentsService,
+    AdminStaffService,
   ],
 })
 export class AdminModule {}

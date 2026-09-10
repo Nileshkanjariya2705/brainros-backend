@@ -434,11 +434,13 @@ export class SchoolBulkUploadService {
   }
 
   /**
-   * Confirm and register valid schools in the batch
+   * Confirm and register valid schools in the batch.
+   * - SUPER_ADMIN / ADMIN: activates directly.
+   * - OPERATOR: routes to PENDING_APPROVAL and creates an ApprovalRequest.
    */
   async confirmAndCreateSchools(
     uploadId: string,
-    actor: { userId: string; email?: string },
+    actor: { userId: string; email?: string; roles?: string[] },
   ) {
     const upload = await this.prisma.bulkUpload.findUnique({
       where: { id: uploadId },
@@ -467,6 +469,50 @@ export class SchoolBulkUploadService {
       );
     }
 
+    // ─── OPERATOR: route to approval queue instead of direct activation ───
+    const actorRoles: string[] = actor.roles || [];
+    const isOperator =
+      actorRoles.includes('OPERATOR') &&
+      !actorRoles.includes('SUPER_ADMIN') &&
+      !actorRoles.includes('ADMIN');
+
+    if (isOperator) {
+      // Stage the upload as PENDING_APPROVAL
+      await this.prisma.bulkUpload.update({
+        where: { id: uploadId },
+        data: { status: 'PENDING_APPROVAL' as any },
+      });
+
+      // Create an ApprovalRequest for Super Admin
+      await this.prisma.approvalRequest.create({
+        data: {
+          resourceType: 'BULK_UPLOAD',
+          resourceId: uploadId,
+          requestedById: actor.userId,
+          status: 'PENDING',
+          metadata: {
+            uploadType: 'SCHOOL_BULK_UPLOAD',
+            creatorRole: 'OPERATOR',
+            fileName: upload.fileName,
+            validRows: validRows.length,
+          },
+        },
+      });
+
+      this.logger.log(
+        `Operator ${actor.userId} submitted school batch ${uploadId} for approval (${validRows.length} valid rows).`,
+      );
+
+      return {
+        uploadId,
+        status: 'PENDING_APPROVAL',
+        validRows: validRows.length,
+        message:
+          'Your school upload has been submitted for Super Admin approval. Schools will be created once approved.',
+      };
+    }
+
+    // ─── SUPER_ADMIN / ADMIN: activate directly (existing flow) ──────────
     const queue = 'schools-bulk-upload';
     const jobId = uploadId;
 

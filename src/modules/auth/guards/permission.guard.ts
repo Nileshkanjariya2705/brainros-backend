@@ -31,6 +31,18 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException('Authentication required.');
     }
 
+    const userRoles: string[] = Array.isArray(user.roles)
+      ? user.roles
+      : user.role
+      ? [user.role]
+      : [];
+
+    // ── SUPER_ADMIN GLOBAL ACCESS ──────────────────────────────────────────
+    // Super Admin has global unrestricted access to all endpoints
+    if (userRoles.includes('SUPER_ADMIN') || user.isSuperAdmin) {
+      return true;
+    }
+
     // Load user's permissions from DB via role-permission mappings
     const userPermissions = await this.loadUserPermissions(user.userId);
 

@@ -6,13 +6,19 @@ import { ExamService } from './exam.service';
 import { ExamPaperParserService } from './services/exam-paper-parser.service';
 import { ExamPaperValidatorService } from './services/exam-paper-validator.service';
 import { ExamPaperImportService } from './services/exam-paper-import.service';
+import { ExamImportProcessor } from './processors/exam-import.processor';
 import { BullModule } from '@nestjs/bullmq';
+import { JobProgressModule } from '../job-progress/job-progress.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({
       name: 'exam-generation',
     }),
+    BullModule.registerQueue({
+      name: 'exam-import-queue',
+    }),
+    JobProgressModule,
   ],
   controllers: [
     ExamController,
@@ -24,12 +30,14 @@ import { BullModule } from '@nestjs/bullmq';
     ExamPaperParserService,
     ExamPaperValidatorService,
     ExamPaperImportService,
+    ExamImportProcessor,
   ],
   exports: [
     ExamService,
     ExamPaperParserService,
     ExamPaperValidatorService,
     ExamPaperImportService,
+    ExamImportProcessor,
     BullModule,
   ],
 })

@@ -40,7 +40,7 @@ export class AdminSchoolsController {
    * Paginated, searchable, filterable list of schools
    */
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async getSchools(@Query() query: SchoolQueryDto) {
     return this.schoolsService.getSchools(query);
   }
@@ -50,7 +50,7 @@ export class AdminSchoolsController {
    * Dynamic dropdown options (states, districts)
    */
   @Get('filter-options')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async getFilterOptions() {
     return this.schoolsService.getFilterOptions();
   }
@@ -60,7 +60,7 @@ export class AdminSchoolsController {
    * Download sample template (CSV or XLSX)
    */
   @Get('bulk-template')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async downloadTemplate(
     @Query('format') format: 'csv' | 'xlsx' = 'xlsx',
     @Res() res: Response,
@@ -79,7 +79,7 @@ export class AdminSchoolsController {
    * Upload and validate schools spreadsheet
    */
   @Post('bulk-upload')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async uploadSchools(
     @UploadedFile() file: Express.Multer.File,
@@ -102,7 +102,7 @@ export class AdminSchoolsController {
    * Get preview and validation errors for uploaded batch
    */
   @Get('bulk-upload/:id/preview')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async getUploadPreview(
     @Param('id') uploadId: string,
     @Query('page') page = 1,
@@ -122,7 +122,7 @@ export class AdminSchoolsController {
    * Confirm batch and register valid schools
    */
   @Post('bulk-upload/:id/confirm')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'OPERATOR')
   async confirmBatch(
     @Param('id') uploadId: string,
     @Req() req: any,
@@ -130,6 +130,7 @@ export class AdminSchoolsController {
     const actor = {
       userId: req.user?.userId || req.user?.id,
       email: req.user?.email,
+      roles: req.user?.roles || [],
     };
 
     return this.bulkUploadService.confirmAndCreateSchools(uploadId, actor);

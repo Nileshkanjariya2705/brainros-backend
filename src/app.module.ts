@@ -33,6 +33,7 @@ import { HealthModule } from './modules/health/health.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { JobProgressModule } from './modules/job-progress/job-progress.module';
 import { RecommendationModule } from './modules/recommendation/recommendation.module';
+import { BillingModule } from './modules/billing/billing.module';
 
 
 @Module({
@@ -139,6 +140,7 @@ import { RecommendationModule } from './modules/recommendation/recommendation.mo
     FeatureFlagModule,
     JobProgressModule,
     RecommendationModule,
+    BillingModule,
   ],
   providers: [],
 })

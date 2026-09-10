@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -37,11 +38,18 @@ export class AnswerKeyService {
       where: { id: scheduleId },
       include: {
         exam: {
-          select: {
-            id: true,
-            title: true,
-            totalQuestions: true,
+          include: {
             status: { select: { name: true } },
+            examQuestions: {
+              include: {
+                question: {
+                  include: {
+                    options: true,
+                    answer: true,
+                  },
+                },
+              },
+            },
           },
         },
         examVersion: {
@@ -64,15 +72,35 @@ export class AnswerKeyService {
       throw new NotFoundException(`Schedule with ID '${scheduleId}' not found`);
     }
 
-    const questions = schedule.examVersion?.questions || [];
-    const totalQuestions = questions.length || schedule.exam.totalQuestions || 0;
-
+    const versionQuestions = schedule.examVersion?.questions || [];
     let configuredKeysCount = 0;
-    for (const q of questions) {
-      const hasCorrect = q.options?.some((o) => o.isCorrect) || Boolean(q.correctAnswer);
-      if (hasCorrect) {
-        configuredKeysCount++;
+    let totalQuestions = 0;
+
+    if (versionQuestions.length > 0) {
+      totalQuestions = versionQuestions.length;
+      for (const q of versionQuestions) {
+        const hasCorrect = q.options?.some((o) => o.isCorrect) || Boolean(q.correctAnswer);
+        if (hasCorrect) {
+          configuredKeysCount++;
+        }
       }
+    } else if (schedule.exam?.examQuestions && schedule.exam.examQuestions.length > 0) {
+      totalQuestions = schedule.exam.examQuestions.length;
+      for (const eq of schedule.exam.examQuestions) {
+        const q = eq.question;
+        const correctIds = Array.isArray(q.answer?.correctOptionIds)
+          ? (q.answer.correctOptionIds as string[])
+          : [];
+        const hasCorrect =
+          q.options?.some((o) => o.isCorrect) ||
+          correctIds.length > 0 ||
+          (q.answer?.numericalAnswer !== null && q.answer?.numericalAnswer !== undefined);
+        if (hasCorrect) {
+          configuredKeysCount++;
+        }
+      }
+    } else {
+      totalQuestions = schedule.exam?.totalQuestions || 0;
     }
 
     return {
@@ -106,7 +134,25 @@ export class AnswerKeyService {
     const schedule = await this.prisma.examSchedule.findUnique({
       where: { id: scheduleId },
       include: {
-        exam: { select: { id: true, title: true } },
+        exam: {
+          include: {
+            examQuestions: {
+              orderBy: { displayOrder: 'asc' },
+              include: {
+                question: {
+                  include: {
+                    subject: { select: { id: true, name: true } },
+                    chapter: { select: { id: true, name: true } },
+                    options: { orderBy: { displayOrder: 'asc' } },
+                    answer: true,
+                    explanation: true,
+                    translations: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         examVersion: {
           include: {
             questions: {
@@ -124,28 +170,97 @@ export class AnswerKeyService {
       throw new NotFoundException(`Schedule with ID '${scheduleId}' not found`);
     }
 
-    const questions = schedule.examVersion?.questions || [];
-    if (questions.length === 0) {
-      throw new BadRequestException(
-        'This exam version has no registered questions yet. Please upload the question paper first.',
-      );
+    const versionQuestions = schedule.examVersion?.questions || [];
+    let rows: any[] = [];
+
+    if (versionQuestions.length > 0) {
+      rows = versionQuestions.map((q) => {
+        const correctOpt = q.options.find((o) => o.isCorrect);
+        const optKeys = q.options.map((o) => o.optionKey).join('/');
+        let correctVal = correctOpt?.optionKey || '';
+        if (!correctVal && q.correctAnswer) {
+          if (typeof q.correctAnswer === 'object' && (q.correctAnswer as any).key) {
+            correctVal = (q.correctAnswer as any).key;
+          } else if (typeof q.correctAnswer === 'string') {
+            correctVal = q.correctAnswer;
+          }
+        }
+
+        return {
+          questionId: q.id,
+          questionNumber: q.sequenceNumber,
+          subject: q.subjectName || 'General',
+          section: q.sectionName || 'Main',
+          questionType: q.type,
+          questionText: q.questionText,
+          passageText: q.passage,
+          assertionText: q.assertion,
+          reasonText: q.reason,
+          marks: q.marks,
+          negativeMarks: q.negativeMarks,
+          availableOptions: optKeys || 'A/B/C/D',
+          correctOption: correctVal,
+          explanation: q.explanation || '',
+          options: q.options.map((o) => ({
+            id: o.id,
+            optionKey: o.optionKey,
+            optionLabel: o.optionLabel || o.optionKey,
+            optionText: o.optionText || '',
+            isCorrect: o.isCorrect,
+            displayOrder: o.displayOrder,
+          })),
+        };
+      });
+    } else if (schedule.exam?.examQuestions && schedule.exam.examQuestions.length > 0) {
+      rows = schedule.exam.examQuestions.map((eq, idx) => {
+        const q = eq.question;
+        const correctOpt = q.options.find((o) => o.isCorrect);
+        const optKeys = q.options.map((o) => o.optionKey).join('/');
+        let correctVal = correctOpt?.optionKey || '';
+        const correctIds = Array.isArray(q.answer?.correctOptionIds)
+          ? (q.answer.correctOptionIds as string[])
+          : [];
+        if (!correctVal && correctIds.length > 0) {
+          const matchOpt = q.options.find((o) => correctIds.includes(o.id));
+          if (matchOpt) correctVal = matchOpt.optionKey;
+        }
+        if (!correctVal && q.answer?.numericalAnswer !== undefined && q.answer?.numericalAnswer !== null) {
+          correctVal = String(q.answer.numericalAnswer);
+        }
+
+        return {
+          questionId: q.id,
+          questionNumber: idx + 1,
+          subject: q.subject?.name || 'General',
+          chapter: q.chapter?.name || null,
+          section: 'Main',
+          questionType: q.type,
+          questionText: q.translations?.[0]?.questionText || (q as any).questionText || '',
+          passageText: q.passage,
+          assertionText: q.assertion,
+          reasonText: q.reason,
+          marks: eq.marks ?? q.marks,
+          negativeMarks: eq.negativeMarks ?? q.negativeMarks,
+          availableOptions: optKeys || 'A/B/C/D',
+          correctOption: correctVal,
+          explanation: q.explanation?.explanation || (q as any).explanation || '',
+          options: (q.options || []).map((o) => ({
+            id: o.id,
+            optionKey: o.optionKey,
+            optionLabel: o.optionKey,
+            optionText: o.optionText || '',
+            isCorrect: o.isCorrect || (correctOpt?.id === o.id),
+            displayOrder: o.displayOrder,
+          })),
+        };
+      });
     }
 
-    const rows = questions.map((q) => {
-      const correctOpt = q.options.find((o) => o.isCorrect);
-      const optKeys = q.options.map((o) => o.optionKey).join('/');
-      return {
-        questionNumber: q.sequenceNumber,
-        subject: q.subjectName || 'General',
-        section: q.sectionName || 'Main',
-        questionType: q.type,
-        marks: q.marks,
-        negativeMarks: q.negativeMarks,
-        availableOptions: optKeys || 'A/B/C/D',
-        correctOption: correctOpt?.optionKey || (q.correctAnswer as any)?.key || '',
-        explanation: q.explanation || '',
-      };
-    });
+    if (rows.length === 0) {
+      throw new BadRequestException(
+        'This exam has no registered questions yet. Please upload the question paper first.',
+      );
+    }
 
     // Generate CSV string
     const csvHeaders = [
@@ -164,13 +279,13 @@ export class AnswerKeyService {
       ...rows.map((r) =>
         [
           r.questionNumber,
-          `"${r.subject.replace(/"/g, '""')}"`,
-          `"${r.section.replace(/"/g, '""')}"`,
+          `"${(r.subject || 'General').replace(/"/g, '""')}"`,
+          `"${(r.section || 'Main').replace(/"/g, '""')}"`,
           r.questionType,
           r.marks,
           r.availableOptions,
           `"${r.correctOption}"`,
-          `"${r.explanation.replace(/"/g, '""')}"`,
+          `"${(r.explanation || '').replace(/"/g, '""')}"`,
         ].join(','),
       ),
     ];
@@ -179,7 +294,14 @@ export class AnswerKeyService {
       scheduleId: schedule.id,
       examId: schedule.examId,
       examTitle: schedule.exam.title,
-      totalQuestions: questions.length,
+      examTarget: (schedule.exam as any).examTarget?.name || (schedule.exam as any).examTarget || null,
+      startTime: schedule.startTime,
+      endTime: schedule.endTime,
+      durationMinutes: (schedule.exam as any).durationMinutes || 0,
+      totalMarks: (schedule.exam as any).totalMarks || 0,
+      hasAnswerKey: schedule.hasAnswerKey,
+      answerKeyUploadedAt: schedule.answerKeyUploadedAt,
+      totalQuestions: rows.length,
       csvContent: csvLines.join('\n'),
       questions: rows,
     };
@@ -187,11 +309,13 @@ export class AnswerKeyService {
 
   /**
    * 3. Upload & Validate Answer Key (from CSV buffer or JSON array)
+   * Operators may only upload keys for COMPLETED / ENDED exams.
    */
   async uploadAnswerKey(
     scheduleId: string,
     rows: AnswerKeyRowInput[],
     userId: string,
+    userRoles: string[] = [],
   ) {
     if (!rows || rows.length === 0) {
       throw new BadRequestException('Answer key data cannot be empty.');
@@ -216,6 +340,27 @@ export class AnswerKeyService {
 
     if (!schedule) {
       throw new NotFoundException(`Schedule with ID '${scheduleId}' not found`);
+    }
+
+    // ─── Operator restriction: only COMPLETED / ENDED exams ───
+    const isOperator =
+      userRoles.includes('OPERATOR') &&
+      !userRoles.includes('SUPER_ADMIN') &&
+      !userRoles.includes('ADMIN');
+
+    if (isOperator) {
+      const scheduleStatus = (schedule as any).status;
+      const endTime: Date | null = schedule.endTime ? new Date(schedule.endTime) : null;
+      const isCompleted =
+        scheduleStatus === 'COMPLETED' ||
+        scheduleStatus === 'ENDED' ||
+        (endTime !== null && endTime <= new Date());
+
+      if (!isCompleted) {
+        throw new ForbiddenException(
+          'Operators are only permitted to upload answer keys for COMPLETED examinations.',
+        );
+      }
     }
 
     const versionQuestions = schedule.examVersion?.questions || [];

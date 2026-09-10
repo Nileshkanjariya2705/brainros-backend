@@ -1730,7 +1730,13 @@ export class AuthService {
         where: { isActive: true },
         select: { id: true, name: true, code: true },
       }),
-      this.prisma.examTarget.findMany({ select: { id: true, name: true } }),
+      this.prisma.examTarget.findMany({
+        where: {
+          name: { in: ['JEE', 'NEET', 'CET'], mode: 'insensitive' },
+        },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
       this.prisma.state.findMany({
         where: { isActive: true },
         select: {

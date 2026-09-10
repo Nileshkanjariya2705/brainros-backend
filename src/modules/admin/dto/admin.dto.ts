@@ -74,6 +74,10 @@ export class ApprovalFilterDto {
 
   @IsOptional()
   @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
   from?: string;
 
   @IsOptional()
@@ -92,6 +96,14 @@ export class ApprovalFilterDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: 'asc' | 'desc';
 }
 
 // ═══════════════════════════════════════════════════════════════════

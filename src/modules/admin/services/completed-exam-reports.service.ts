@@ -4,13 +4,16 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  Optional,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit/services/audit-log.service';
 import { ResultService } from '../../result/result.service';
 import { NotificationChannel, NotificationStatus, NotificationType } from '@prisma/client';
+import { ExamReportEmailProcessor } from '../processors/exam-report-email.processor';
 
 export interface CompletedExamQueryDto {
   search?: string;
@@ -31,6 +34,8 @@ export class CompletedExamReportsService {
     private readonly resultService: ResultService,
     @InjectQueue('exam-report-email')
     private readonly emailReportQueue: Queue,
+    @Optional()
+    private readonly moduleRef?: ModuleRef,
   ) {}
 
   /**
@@ -122,6 +127,8 @@ export class CompletedExamReportsService {
         status: exam.status?.name,
         publicationStatus: pub?.status || (exam._count?.attempts > 0 ? 'READY_TO_PUBLISH' : 'NOT_READY'),
         totalAttempts: exam._count?.attempts || 0,
+        scheduleId: exam.schedules?.[0]?.id || null,
+        hasAnswerKey: Boolean(exam.schedules?.[0]?.hasAnswerKey),
       };
     });
   }
@@ -604,28 +611,64 @@ export class CompletedExamReportsService {
       },
     });
 
-    // Add BullMQ Job
-    const job = await this.emailReportQueue.add(
-      'send-student-report-email',
-      {
-        notificationId: notification.id,
-        examId,
-        attemptId,
-        studentId: attempt.studentId,
-        recipientEmail,
-        requestedByAdminId: adminId,
-        reportType: 'EXAM_ANALYSIS',
-      },
-      {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 3000,
+    // Add BullMQ Job with resilient fallback if queue/Redis is unavailable
+    let jobId = `report_email_${attemptId}_${Date.now()}`;
+    try {
+      const job = await this.emailReportQueue.add(
+        'send-student-report-email',
+        {
+          notificationId: notification.id,
+          examId,
+          attemptId,
+          studentId: attempt.studentId,
+          recipientEmail,
+          requestedByAdminId: adminId,
+          reportType: 'EXAM_ANALYSIS',
         },
-        removeOnComplete: 100,
-        removeOnFail: 200,
-      },
-    );
+        {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 3000,
+          },
+          removeOnComplete: 100,
+          removeOnFail: 200,
+        },
+      );
+      if (job?.id) {
+        jobId = job.id;
+      }
+    } catch (queueErr: any) {
+      this.logger.warn(
+        `[CompletedExamReportsService] Queue service unavailable (${queueErr.message || queueErr}). Falling back to asynchronous direct email dispatch.`,
+      );
+
+      // Asynchronous direct dispatch without blocking HTTP response
+      setImmediate(async () => {
+        try {
+          const processor = this.moduleRef?.get(ExamReportEmailProcessor, { strict: false });
+          if (processor) {
+            await processor.process({
+              id: jobId,
+              name: 'send-student-report-email',
+              data: {
+                notificationId: notification.id,
+                examId,
+                attemptId,
+                studentId: attempt.studentId,
+                recipientEmail,
+                requestedByAdminId: adminId,
+                reportType: 'EXAM_ANALYSIS',
+              },
+            } as any);
+          }
+        } catch (dispatchErr: any) {
+          this.logger.error(
+            `[CompletedExamReportsService] Direct report email dispatch failed: ${dispatchErr.message || dispatchErr}`,
+          );
+        }
+      });
+    }
 
     // Audit Log
     await this.auditLogService.logAction({
@@ -637,19 +680,19 @@ export class CompletedExamReportsService {
         examId,
         studentId: attempt.studentId,
         recipientEmail,
-        jobId: job.id,
+        jobId,
       },
     });
 
     this.logger.log(
-      `[CompletedExamReportsService] Queued report email job '${job.id}' for student '${recipientEmail}' on attempt '${attemptId}'`,
+      `[CompletedExamReportsService] Dispatched report email job '${jobId}' for student '${recipientEmail}' on attempt '${attemptId}'`,
     );
 
     return {
       success: true,
       message: 'Report queued for email delivery.',
       status: 'QUEUED',
-      jobId: job.id,
+      jobId,
       recipientEmail,
     };
   }

@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateExamCalendarEventDto,
+  UpdateCalendarEventDto,
   RescheduleCalendarEventDto,
   CalendarFilterDto,
 } from '../dto/calendar.dto';
@@ -21,17 +22,100 @@ export class ExamCalendarService {
     private readonly reminderService: ScheduleReminderService,
   ) {}
 
-  /**
-   * Create a planned exam calendar event with UTC persistence and conflict checks.
-   */
-  async createCalendarEvent(dto: CreateExamCalendarEventDto) {
-    const cycle = await this.prisma.examCycle.findUnique({
-      where: { id: dto.cycleId },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Private helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private computeEndTime(start: Date, durationMinutes: number): Date {
+    return new Date(start.getTime() + durationMinutes * 60_000);
+  }
+
+  private async getOrCreateDefaultCycle(year: number, userId?: string) {
+    const academicYear = `${year}-${year + 1}`;
+    let cycle = await this.prisma.examCycle.findFirst({
+      where: { academicYear },
     });
     if (!cycle) {
-      throw new NotFoundException(`Exam cycle '${dto.cycleId}' not found.`);
+      cycle = await this.prisma.examCycle.create({
+        data: {
+          name: `Academic Year ${academicYear}`,
+          academicYear,
+          startDate: new Date(`${year}-01-01`),
+          endDate: new Date(`${year}-12-31`),
+          status: 'ACTIVE',
+          createdById: userId || '00000000-0000-0000-0000-000000000000',
+        },
+      });
+      this.logger.log(`Auto-created exam cycle for ${academicYear}`);
     }
+    return cycle;
+  }
 
+  private async writeAuditLog(params: {
+    actorUserId?: string;
+    action: string;
+    entityId: string;
+    beforeState?: object;
+    afterState?: object;
+    reason?: string;
+  }) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: params.actorUserId || undefined,
+          action: params.action,
+          entityType: 'ExamCalendar',
+          entityId: params.entityId,
+          beforeState: params.beforeState || undefined,
+          afterState: params.afterState || undefined,
+          reason: params.reason || undefined,
+        },
+      });
+    } catch (err) {
+      this.logger.warn('AuditLog write failed (non-fatal): ' + err?.message);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Available years (for the year-filter dropdown)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getAvailableYears(): Promise<number[]> {
+    const events = await this.prisma.examCalendar.findMany({
+      select: { plannedDate: true },
+      distinct: ['plannedDate'],
+    });
+
+    const yearSet = new Set<number>();
+    const currentYear = new Date().getFullYear();
+    yearSet.add(currentYear);
+    yearSet.add(currentYear - 1);
+    yearSet.add(currentYear + 1);
+
+    events.forEach((e) => {
+      yearSet.add(new Date(e.plannedDate).getFullYear());
+    });
+
+    // Also ensure years from existing cycles are included
+    const cycles = await this.prisma.examCycle.findMany({
+      select: { academicYear: true },
+    });
+    cycles.forEach((c) => {
+      const parts = c.academicYear.split('-');
+      if (parts[0]) yearSet.add(Number(parts[0]));
+    });
+
+    return Array.from(yearSet).sort((a, b) => b - a); // newest first
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Create
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async createCalendarEvent(
+    dto: CreateExamCalendarEventDto,
+    actorUserId?: string,
+  ) {
     const exam = await this.prisma.exam.findUnique({
       where: { id: dto.examId },
     });
@@ -40,49 +124,86 @@ export class ExamCalendarService {
     }
 
     const start = new Date(dto.plannedStartTime);
-    const end = new Date(dto.plannedEndTime);
-    const plannedDate = new Date(dto.plannedDate);
+
+    // Calculate end time from durationMinutes or fall back to explicit endTime
+    let end: Date;
+    if (dto.durationMinutes && dto.durationMinutes > 0) {
+      end = this.computeEndTime(start, dto.durationMinutes);
+    } else if (dto.plannedEndTime) {
+      end = new Date(dto.plannedEndTime);
+    } else {
+      // Use exam duration as fallback
+      end = this.computeEndTime(start, exam.durationMinutes || 180);
+    }
 
     if (start >= end) {
       throw new BadRequestException(
-        'Event plannedStartTime must be strictly before plannedEndTime.',
+        'plannedStartTime must be strictly before plannedEndTime.',
       );
     }
 
-    if (plannedDate < cycle.startDate || plannedDate > cycle.endDate) {
+    const plannedDate = new Date(dto.plannedDate);
+
+    // Validate year consistency
+    const startYear = new Date(dto.plannedStartTime).getFullYear();
+    const dateYear = plannedDate.getFullYear();
+    if (startYear !== dateYear) {
       throw new BadRequestException(
-        `Planned event date (${plannedDate.toISOString()}) must fall within cycle window [${cycle.startDate.toISOString()} - ${cycle.endDate.toISOString()}].`,
+        `Year mismatch: plannedDate year (${dateYear}) does not match plannedStartTime year (${startYear}).`,
       );
     }
 
-    // Overlap / conflict detection
+    // Resolve or create cycle for this year
+    let cycle: { id: string; startDate: Date; endDate: Date };
+    if (dto.cycleId) {
+      const found = await this.prisma.examCycle.findUnique({
+        where: { id: dto.cycleId },
+      });
+      if (!found) throw new NotFoundException(`Exam cycle '${dto.cycleId}' not found.`);
+      cycle = found;
+    } else {
+      cycle = await this.getOrCreateDefaultCycle(startYear, actorUserId);
+    }
+
+    // Date within cycle window check
+    if (plannedDate < cycle.startDate || plannedDate > cycle.endDate) {
+      // Widen the cycle window if the date is out of bounds (auto-fix)
+      this.logger.warn(
+        `plannedDate ${plannedDate.toISOString()} is outside cycle window. Auto-adjusting cycle window.`,
+      );
+      await this.prisma.examCycle.update({
+        where: { id: cycle.id },
+        data: {
+          startDate: plannedDate < cycle.startDate ? plannedDate : cycle.startDate,
+          endDate: plannedDate > cycle.endDate ? plannedDate : cycle.endDate,
+        },
+      });
+    }
+
+    // Overlap / conflict detection (warn only, don't block)
     const overlapping = await this.prisma.examCalendar.findFirst({
       where: {
-        cycleId: dto.cycleId,
-        status: { in: ['PLANNED', 'CONFIRMED'] },
+        examId: dto.examId,
+        status: { notIn: ['CANCELLED'] },
         OR: [
-          {
-            plannedStartTime: { lte: start },
-            plannedEndTime: { gt: start },
-          },
-          {
-            plannedStartTime: { lt: end },
-            plannedEndTime: { gte: end },
-          },
+          { plannedStartTime: { lte: start }, plannedEndTime: { gt: start } },
+          { plannedStartTime: { lt: end }, plannedEndTime: { gte: end } },
+          { plannedStartTime: { gte: start }, plannedEndTime: { lte: end } },
         ],
       },
       include: { exam: { select: { title: true } } },
     });
 
     if (overlapping) {
-      this.logger.warn(
-        `Calendar conflict detected with exam '${overlapping.exam.title}' during window ${start.toISOString()} - ${end.toISOString()}`,
+      throw new BadRequestException(
+        `This exam already has a conflicting calendar entry during the selected time window. ` +
+          `Please choose a different date/time or resolve the conflict first.`,
       );
     }
 
     const event = await this.prisma.examCalendar.create({
       data: {
-        cycleId: dto.cycleId,
+        cycleId: cycle.id,
         examId: dto.examId,
         plannedDate,
         plannedStartTime: start,
@@ -98,15 +219,181 @@ export class ExamCalendarService {
       },
     });
 
-    // Schedule automated reminders (24h, 1h, 15m)
-    await this.reminderService.scheduleExamReminders(event);
+    await this.writeAuditLog({
+      actorUserId,
+      action: 'ACADEMIC_CALENDAR_CREATE',
+      entityId: event.id,
+      afterState: {
+        examId: event.examId,
+        plannedDate: event.plannedDate,
+        plannedStartTime: event.plannedStartTime,
+        plannedEndTime: event.plannedEndTime,
+        status: event.status,
+      },
+    });
+
+    // Schedule automated reminders
+    try {
+      await this.reminderService.scheduleExamReminders(event as any);
+    } catch {
+      this.logger.warn('Reminder scheduling failed (non-fatal)');
+    }
 
     return event;
   }
 
-  /**
-   * Reschedule a planned calendar event, increment schedule version, and invalidate old reminders.
-   */
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Update
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async updateCalendarEvent(
+    eventId: string,
+    dto: UpdateCalendarEventDto,
+    actorUserId?: string,
+  ) {
+    const existing = await this.prisma.examCalendar.findUnique({
+      where: { id: eventId },
+      include: { exam: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Calendar event '${eventId}' not found.`);
+    }
+
+    // Block edits on completed/cancelled
+    if (['COMPLETED', 'CANCELLED'].includes(existing.status)) {
+      throw new BadRequestException(
+        `Cannot edit a calendar event in status '${existing.status}'.`,
+      );
+    }
+
+    const newExamId = dto.examId || existing.examId;
+    const rawStart = dto.plannedStartTime
+      ? new Date(dto.plannedStartTime)
+      : existing.plannedStartTime;
+    const rawDate = dto.plannedDate
+      ? new Date(dto.plannedDate)
+      : existing.plannedDate;
+
+    let newEnd: Date;
+    if (dto.durationMinutes && dto.durationMinutes > 0) {
+      newEnd = this.computeEndTime(rawStart, dto.durationMinutes);
+    } else if (dto.plannedEndTime) {
+      newEnd = new Date(dto.plannedEndTime);
+    } else {
+      newEnd = existing.plannedEndTime;
+    }
+
+    if (rawStart >= newEnd) {
+      throw new BadRequestException(
+        'plannedStartTime must be strictly before plannedEndTime.',
+      );
+    }
+
+    // Check overlap (excluding self)
+    const overlapping = await this.prisma.examCalendar.findFirst({
+      where: {
+        id: { not: eventId },
+        examId: newExamId,
+        status: { notIn: ['CANCELLED'] },
+        OR: [
+          { plannedStartTime: { lte: rawStart }, plannedEndTime: { gt: rawStart } },
+          { plannedStartTime: { lt: newEnd }, plannedEndTime: { gte: newEnd } },
+          { plannedStartTime: { gte: rawStart }, plannedEndTime: { lte: newEnd } },
+        ],
+      },
+    });
+
+    if (overlapping) {
+      throw new BadRequestException(
+        'The updated schedule conflicts with an existing calendar entry for this exam.',
+      );
+    }
+
+    const beforeState = {
+      examId: existing.examId,
+      plannedDate: existing.plannedDate,
+      plannedStartTime: existing.plannedStartTime,
+      plannedEndTime: existing.plannedEndTime,
+      status: existing.status,
+    };
+
+    const updated = await this.prisma.examCalendar.update({
+      where: { id: eventId },
+      data: {
+        examId: newExamId,
+        plannedDate: rawDate,
+        plannedStartTime: rawStart,
+        plannedEndTime: newEnd,
+        timezone: dto.timezone || existing.timezone,
+        notes: dto.notes !== undefined ? dto.notes : existing.notes,
+        scheduleVersion: existing.scheduleVersion + 1,
+        status: 'RESCHEDULED',
+      },
+      include: {
+        exam: { select: { id: true, title: true, durationMinutes: true } },
+        cycle: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.writeAuditLog({
+      actorUserId,
+      action: 'ACADEMIC_CALENDAR_UPDATE',
+      entityId: eventId,
+      beforeState,
+      afterState: {
+        examId: updated.examId,
+        plannedDate: updated.plannedDate,
+        plannedStartTime: updated.plannedStartTime,
+        plannedEndTime: updated.plannedEndTime,
+        status: updated.status,
+      },
+    });
+
+    return updated;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Delete (calendar entry only — does NOT delete Exam)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async deleteCalendarEvent(eventId: string, actorUserId?: string) {
+    const existing = await this.prisma.examCalendar.findUnique({
+      where: { id: eventId },
+      include: { exam: { select: { id: true, title: true } } },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Calendar event '${eventId}' not found.`);
+    }
+
+    if (['COMPLETED', 'CONFIRMED'].includes(existing.status)) {
+      // Allow delete but log a warning
+      this.logger.warn(
+        `Deleting calendar event ${eventId} that is in status '${existing.status}'.`,
+      );
+    }
+
+    await this.prisma.examCalendar.delete({ where: { id: eventId } });
+
+    await this.writeAuditLog({
+      actorUserId,
+      action: 'ACADEMIC_CALENDAR_DELETE',
+      entityId: eventId,
+      beforeState: {
+        examId: existing.examId,
+        examTitle: existing.exam?.title,
+        plannedDate: existing.plannedDate,
+        plannedStartTime: existing.plannedStartTime,
+        status: existing.status,
+      },
+    });
+
+    return { deleted: true, id: eventId };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Reschedule (legacy)
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async rescheduleEvent(
     eventId: string,
     dto: RescheduleCalendarEventDto,
@@ -147,21 +434,25 @@ export class ExamCalendarService {
       include: { exam: true, cycle: true },
     });
 
-    // Invalidate old reminder jobs and re-arm reminders for new schedule version
-    await this.reminderService.handleExamRescheduled(
-      updated,
-      existing.scheduleVersion,
-    );
+    try {
+      await this.reminderService.handleExamRescheduled(
+        updated as any,
+        existing.scheduleVersion,
+      );
+    } catch {
+      this.logger.warn('Reminder reschedule failed (non-fatal)');
+    }
 
     return updated;
   }
 
-  /**
-   * Get calendar events with filters
-   */
+  // ─────────────────────────────────────────────────────────────────────────────
+  // List (with year-based filter)
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async getCalendarEvents(filter: CalendarFilterDto) {
     const page = filter.page || 1;
-    const limit = filter.limit || 50;
+    const limit = filter.limit || 200;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -169,10 +460,23 @@ export class ExamCalendarService {
     if (filter.examId) where.examId = filter.examId;
     if (filter.status) where.status = filter.status;
 
-    if (filter.from || filter.to) {
+    // Year filter: derive date range from year
+    if (filter.year) {
+      where.plannedDate = {
+        gte: new Date(`${filter.year}-01-01T00:00:00.000Z`),
+        lte: new Date(`${filter.year}-12-31T23:59:59.999Z`),
+      };
+    } else if (filter.from || filter.to) {
       where.plannedDate = {};
       if (filter.from) where.plannedDate.gte = new Date(filter.from);
       if (filter.to) where.plannedDate.lte = new Date(filter.to);
+    }
+
+    // Search by exam title
+    if (filter.search) {
+      where.exam = {
+        title: { contains: filter.search, mode: 'insensitive' },
+      };
     }
 
     const [events, total] = await Promise.all([
@@ -180,7 +484,7 @@ export class ExamCalendarService {
         where,
         skip,
         take: limit,
-        orderBy: { plannedStartTime: 'asc' },
+        orderBy: [{ plannedDate: 'asc' }, { plannedStartTime: 'asc' }],
         include: {
           exam: {
             select: {

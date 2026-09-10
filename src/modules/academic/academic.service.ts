@@ -665,6 +665,9 @@ export class AcademicService {
 
   async getExamTargets() {
     return this.prisma.examTarget.findMany({
+      where: {
+        name: { in: ['JEE', 'NEET', 'CET'], mode: 'insensitive' },
+      },
       orderBy: { name: 'asc' },
     });
   }
