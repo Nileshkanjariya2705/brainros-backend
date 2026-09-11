@@ -391,13 +391,19 @@ export class AdminStudentsService {
     if (query.institutionId && query.institutionId.toUpperCase() !== 'ALL') {
       const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(query.institutionId);
       if (isUuid) {
-        where.batchMemberships = {
-          some: {
-            batch: {
-              institutionId: query.institutionId,
+        where.OR = [
+          ...(where.OR || []),
+          { institutionId: query.institutionId },
+          {
+            batchMemberships: {
+              some: {
+                batch: {
+                  institutionId: query.institutionId,
+                },
+              },
             },
           },
-        };
+        ];
       } else {
         where.OR = [
           ...(where.OR || []),

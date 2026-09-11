@@ -47,6 +47,16 @@ export class NotificationController {
   }
 
   /**
+   * GET /notifications/recent-unread
+   * Fetch only the single latest unread notification for current user
+   */
+  @Get('recent-unread')
+  async getRecentUnread(@CurrentUser() user: any) {
+    const userId = user.userId || user.id || user.sub;
+    return this.notificationService.getRecentUnread(userId);
+  }
+
+  /**
    * PATCH /notifications/read-all
    * Mark all unread notifications as read for current user
    */

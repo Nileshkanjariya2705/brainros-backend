@@ -732,7 +732,7 @@ export class ExamPaperImportService {
       id: exam.id,
       title: exam.title,
       description: exam.description,
-      examTarget: exam.examTarget,
+      examTarget: exam.examTarget?.name || 'General',
       status: exam.status?.name || 'DRAFT',
       durationMinutes: exam.durationMinutes,
       totalMarks: exam.totalMarks,
@@ -2437,6 +2437,13 @@ export class ExamPaperImportService {
       }
     }
 
+    if (
+      query.missingQuestionPaperOnly === true ||
+      query.missingQuestionPaperOnly === 'true'
+    ) {
+      where.examQuestions = { none: {} };
+    }
+
     const [exams, total] = await Promise.all([
       this.prisma.exam.findMany({
         where,
@@ -2552,7 +2559,7 @@ export class ExamPaperImportService {
           description: exam.description,
           type,
           typeLabel,
-          examTarget: exam.examTarget,
+          examTarget: exam.examTarget?.name || 'General',
           subjectsSummary,
           totalQuestions: totalQ,
           totalMarks: exam.totalMarks,

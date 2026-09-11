@@ -142,44 +142,54 @@ export class StudentDashboardService {
       take: 10,
     });
 
-    const upcomingExams: NextExamWidget[] = upcomingExamRecords.map((rec) => {
-      const schedule = rec.schedules?.[0];
-      const startTime = schedule?.startTime || rec.startTime || rec.examDate;
-      const endTime = schedule?.endTime || rec.endTime;
+    const upcomingExams: NextExamWidget[] = upcomingExamRecords
+      .map((rec) => {
+        const schedule = rec.schedules?.[0];
+        const startTime = schedule?.startTime || rec.startTime || rec.examDate;
+        const endTime = schedule?.endTime || rec.endTime;
 
-      let canStart = false;
-      let waitSeconds = 0;
-      let accessStatus = 'AVAILABLE';
-      let message = 'Exam is ready to attempt.';
+        let canStart = false;
+        let waitSeconds = 0;
+        let accessStatus = 'AVAILABLE';
+        let message = 'Exam is ready to attempt.';
+        let calculatedStatus: 'UPCOMING' | 'LIVE' | 'COMPLETED' = 'UPCOMING';
 
-      if (startTime && now.getTime() < new Date(startTime).getTime()) {
-        accessStatus = 'NOT_YET_STARTED';
-        waitSeconds = Math.ceil((new Date(startTime).getTime() - now.getTime()) / 1000);
-        message = `Starts in ${Math.floor(waitSeconds / 3600)}h ${Math.floor((waitSeconds % 3600) / 60)}m`;
-      } else if (endTime && now.getTime() > new Date(endTime).getTime()) {
-        accessStatus = 'ENDED';
-        message = 'Exam window closed.';
-      } else {
-        canStart = true;
-        message = 'Exam is live now!';
-      }
+        if (startTime && now.getTime() < new Date(startTime).getTime()) {
+          accessStatus = 'NOT_YET_STARTED';
+          calculatedStatus = 'UPCOMING';
+          waitSeconds = Math.ceil((new Date(startTime).getTime() - now.getTime()) / 1000);
+          message = `Starts in ${Math.floor(waitSeconds / 3600)}h ${Math.floor((waitSeconds % 3600) / 60)}m`;
+        } else if (endTime && now.getTime() >= new Date(endTime).getTime()) {
+          accessStatus = 'ENDED';
+          calculatedStatus = 'COMPLETED';
+          canStart = false;
+          message = 'Exam window closed.';
+        } else {
+          // startAt <= currentTime < endAt
+          accessStatus = 'AVAILABLE';
+          calculatedStatus = 'LIVE';
+          canStart = true;
+          message = 'Exam is live now!';
+        }
 
-      return {
-        examId: rec.id,
-        title: rec.title,
-        examTarget: rec.examTarget?.name || student.examTarget?.name || 'General',
-        durationMinutes: rec.durationMinutes,
-        totalQuestions: rec.totalQuestions,
-        totalMarks: rec.totalMarks,
-        startTime: startTime ? new Date(startTime).toISOString() : null,
-        endTime: endTime ? new Date(endTime).toISOString() : null,
-        status: rec.status?.name || 'SCHEDULED',
-        canStart,
-        waitSeconds,
-        accessStatus,
-        message,
-      };
-    });
+        return {
+          examId: rec.id,
+          title: rec.title,
+          examTarget: rec.examTarget?.name || student.examTarget?.name || 'General',
+          durationMinutes: rec.durationMinutes,
+          totalQuestions: rec.totalQuestions,
+          totalMarks: rec.totalMarks,
+          startTime: startTime ? new Date(startTime).toISOString() : null,
+          endTime: endTime ? new Date(endTime).toISOString() : null,
+          status: calculatedStatus,
+          canStart,
+          waitSeconds,
+          accessStatus,
+          message,
+        };
+      })
+      // Only keep UPCOMING or LIVE exams in upcoming & live widget (do not show expired exams as live/upcoming)
+      .filter((e) => e.accessStatus !== 'ENDED' && e.status !== 'COMPLETED');
 
     const nextExam = upcomingExams[0] || null;
 
@@ -532,9 +542,9 @@ export class StudentDashboardService {
       unreadNotificationCount: unreadCount,
     };
 
-    // Cache in Redis for 60 seconds
+    // Cache in Redis for 30 seconds
     try {
-      await this.redis.set(cacheKey, JSON.stringify(response), 60);
+      await this.redis.set(cacheKey, JSON.stringify(response), 30);
     } catch {
       // Ignore cache write error
     }

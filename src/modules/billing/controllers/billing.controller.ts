@@ -65,6 +65,39 @@ export class BillingController {
   }
 
   /**
+   * GET /billing/tax-configuration
+   * Retrieve dynamic Indian GST & supplier tax compliance configuration
+   */
+  @Get('tax-configuration')
+  @Roles('SUPER_ADMIN', 'ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER')
+  async getTaxConfiguration() {
+    const data = await this.billingService.getTaxConfiguration();
+    return {
+      statusCode: 200,
+      message: 'Tax configuration retrieved successfully.',
+      data,
+    };
+  }
+
+  /**
+   * PUT /billing/tax-configuration
+   * Update Indian GST & tax compliance configuration
+   */
+  @Put('tax-configuration')
+  @Roles('SUPER_ADMIN')
+  async updateTaxConfiguration(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: any,
+  ) {
+    const data = await this.billingService.updateTaxConfiguration(dto, userId);
+    return {
+      statusCode: 200,
+      message: data.message,
+      data: data.taxConfiguration,
+    };
+  }
+
+  /**
    * GET /billing/filter-options
    * Supplies dynamic years, months, schools, and current price
    */
@@ -89,11 +122,14 @@ export class BillingController {
     @Query('institutionId') institutionId: string,
     @Query('month') month: string,
     @Query('year') year: string,
+    @Query('pricePerStudent') pricePerStudent?: string,
   ) {
+    const customPrice = pricePerStudent !== undefined && pricePerStudent !== '' ? Number(pricePerStudent) : undefined;
     const data = await this.billingService.getInvoicePreview(
       institutionId,
       Number(month),
       Number(year),
+      customPrice,
     );
     return {
       statusCode: 200,
@@ -124,7 +160,7 @@ export class BillingController {
     const data = await this.billingService.generateInvoice(dto, userId);
     return {
       statusCode: 201,
-      message: `Invoice ${data.billNumber} generated successfully for ${data.institution.name}.`,
+      message: `Invoice ${data.billNumber} generated successfully.`,
       data,
     };
   }

@@ -76,13 +76,27 @@ export class NotificationService {
         }
       }
 
+      const resolvedTitle =
+        renderedSubject ||
+        (options.variables as any)?.title ||
+        (options.variables as any)?.subject ||
+        null;
+      const resolvedMessage =
+        renderedBody || (options.variables as any)?.message || null;
+      const resolvedData =
+        (options.variables as any)?.data || (options.variables as any) || null;
+
       // 4. Create Notification record
       const notification = await this.prisma.notification.create({
         data: {
+          userId: options.recipientUserId || null,
           recipientUserId: options.recipientUserId || null,
           recipientAddress: options.recipientAddress,
           channel: options.channel,
           type: options.type,
+          title: resolvedTitle,
+          message: resolvedMessage,
+          data: resolvedData,
           templateId: template?.id || null,
           templateVersion: template?.version || 1,
           payload: options.variables as any,
@@ -437,6 +451,34 @@ export class NotificationService {
     });
 
     return { count };
+  }
+
+  /**
+   * Get single most recent unread notification for the authenticated user
+   */
+  async getRecentUnread(userId: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: {
+        OR: [{ userId }, { recipientUserId: userId }],
+        isRead: false,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        title: true,
+        message: true,
+        data: true,
+        isRead: true,
+        readAt: true,
+        priority: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return notification || null;
   }
 
   /**

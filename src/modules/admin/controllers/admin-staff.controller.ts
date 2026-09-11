@@ -21,14 +21,14 @@ import {
   StaffFilterDto,
 } from '../dto/staff.dto';
 
-@Controller('admin/staff')
+@Controller(['admin/staff', 'super-admin/staff'])
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN')
+@Roles('SUPER_ADMIN', 'ADMIN')
 export class AdminStaffController {
   constructor(private readonly staffService: AdminStaffService) {}
 
   /**
-   * POST /admin/staff
+   * POST /admin/staff or /super-admin/staff
    * Create a new staff account (OPERATOR, MANAGER, GENERAL_MANAGER, ACCOUNTANT)
    */
   @Post()
@@ -45,16 +45,22 @@ export class AdminStaffController {
   }
 
   /**
-   * GET /admin/staff
+   * GET /admin/staff or /super-admin/staff
    * List staff members with pagination, search, and filtering
    */
   @Get()
   async listStaff(@Query() filter: StaffFilterDto) {
-    const data = await this.staffService.listStaff(filter);
+    const res = await this.staffService.listStaff(filter);
     return {
       statusCode: 200,
       message: 'Staff members retrieved successfully.',
-      ...data,
+      items: res.data,
+      pagination: res.meta,
+      data: {
+        items: res.data,
+        pagination: res.meta,
+      },
+      meta: res.meta,
     };
   }
 

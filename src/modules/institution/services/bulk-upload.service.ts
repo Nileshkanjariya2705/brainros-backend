@@ -243,7 +243,6 @@ export class BulkUploadService {
   ) {
     const upload = await this.prisma.bulkUpload.findUnique({
       where: { id: uploadId },
-      include: { approvalRequests: { where: { status: 'PENDING' } } },
     });
 
     if (!upload) {
@@ -256,7 +255,9 @@ export class BulkUploadService {
       );
     }
 
-    const pendingRequest = upload.approvalRequests[0];
+    const pendingRequest = await this.prisma.approvalRequest.findFirst({
+      where: { resourceId: uploadId, status: 'PENDING' },
+    });
 
     if (action === 'REJECT') {
       return this.prisma.$transaction(async (tx) => {

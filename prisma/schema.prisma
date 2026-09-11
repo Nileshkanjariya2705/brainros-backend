@@ -1530,6 +1530,7 @@ model ExamVersionQuestion {
   translations          ExamVersionTranslation[]
 
   @@unique([examVersionId, sourceQuestionId])
+  @@unique([examVersionId, sequenceNumber])
   @@index([examVersionId])
   @@index([sequenceNumber])
   @@map("exam_version_questions")
@@ -2216,7 +2217,6 @@ model BulkUpload {
   batch             InstitutionBatch? @relation(fields: [batchId], references: [id])
   rows              BulkUploadRow[]
   errors            BulkUploadError[]
-  approvalRequests  ApprovalRequest[]
 
   @@index([institutionId])
   @@index([status])
@@ -2280,8 +2280,6 @@ model ApprovalRequest {
   metadata          Json?
   createdAt         DateTime              @default(now()) @map("created_at")
   updatedAt         DateTime              @updatedAt @map("updated_at")
-
-  bulkUpload        BulkUpload?           @relation(fields: [resourceId], references: [id], onDelete: Cascade)
 
   @@index([resourceType, resourceId])
   @@index([status])

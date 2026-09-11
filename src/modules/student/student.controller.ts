@@ -72,7 +72,8 @@ export class StudentController {
     const result = await this.studentService.getStudentMockHistory(userId, query);
     return {
       message: 'Student mock test history retrieved successfully',
-      data: result,
+      data: result.items,
+      meta: result.pagination,
     };
   }
 

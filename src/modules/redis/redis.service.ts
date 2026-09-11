@@ -302,4 +302,90 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return this.getKeysFromMemory(pattern);
     }
   }
+
+  async expire(key: string, ttlSeconds: number): Promise<void> {
+    if (!this._isReady || !this.redisClient) {
+      const item = this.memoryDb.get(key);
+      if (item) {
+        item.expiresAt = Date.now() + ttlSeconds * 1000;
+      }
+      return;
+    }
+    try {
+      await this.redisClient.expire(key, ttlSeconds);
+    } catch (err: any) {
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] expire failed for '${key}': ${err.message}. Updating in-memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
+      const item = this.memoryDb.get(key);
+      if (item) {
+        item.expiresAt = Date.now() + ttlSeconds * 1000;
+      }
+    }
+  }
+
+  async ttl(key: string): Promise<number> {
+    if (!this._isReady || !this.redisClient) {
+      const item = this.memoryDb.get(key);
+      if (!item || Date.now() > item.expiresAt) {
+        if (item) this.memoryDb.delete(key);
+        return -2; // Redis standard for non-existent key
+      }
+      if (item.expiresAt === Infinity) return -1; // Redis standard for key with no expiration
+      return Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000));
+    }
+    try {
+      return await this.redisClient.ttl(key);
+    } catch (err: any) {
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] ttl failed for '${key}': ${err.message}. Calculating from memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
+      const item = this.memoryDb.get(key);
+      if (!item || Date.now() > item.expiresAt) {
+        if (item) this.memoryDb.delete(key);
+        return -2;
+      }
+      if (item.expiresAt === Infinity) return -1;
+      return Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000));
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    if (!this._isReady || !this.redisClient) {
+      const item = this.memoryDb.get(key);
+      if (!item) return false;
+      if (Date.now() > item.expiresAt) {
+        this.memoryDb.delete(key);
+        return false;
+      }
+      return true;
+    }
+    try {
+      const count = await this.redisClient.exists(key);
+      return count > 0;
+    } catch (err: any) {
+      const now = Date.now();
+      if (now - this.lastErrorLogTime > 10000) {
+        this.logger.warn(
+          `[Redis] exists failed for '${key}': ${err.message}. Checking memory instead.`,
+        );
+        this.lastErrorLogTime = now;
+      }
+      const item = this.memoryDb.get(key);
+      if (!item) return false;
+      if (Date.now() > item.expiresAt) {
+        this.memoryDb.delete(key);
+        return false;
+      }
+      return true;
+    }
+  }
 }

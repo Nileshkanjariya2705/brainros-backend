@@ -462,18 +462,17 @@ export class AuthService {
         );
       }
 
-      // Create User
+      // Create User in PENDING status (requires GM/Super Admin approval before login)
       const newUser = await tx.user.create({
         data: {
           phone: registration.mobile,
           mobileNumber: registration.mobile,
           email: registration.email,
-          status: 'ACTIVE',
+          status: 'PENDING',
           isVerified: true,
           isActive: true,
           mobileVerifiedAt: new Date(),
           emailVerifiedAt: registration.email ? new Date() : null,
-          lastLoginAt: new Date(),
         },
       });
 
@@ -508,7 +507,7 @@ export class AuthService {
         });
       }
 
-      // Create Student profile
+      // Create Student profile in PENDING status
       const student = await tx.student.create({
         data: {
           userId: newUser.id,
@@ -523,47 +522,62 @@ export class AuthService {
           classId: registration.classId,
           preferredLanguageId: registration.preferredLanguageId,
           examTargetId: registration.examTargetId,
-          status: 'ACTIVE',
+          status: 'PENDING',
         },
       });
 
-      return { user: newUser, student };
+      // Submit to Approval Queue (General Manager or Super Admin approval required)
+      const approvalRequest = await tx.approvalRequest.create({
+        data: {
+          resourceType: 'STUDENT',
+          resourceId: student.id,
+          requestedById: newUser.id,
+          status: 'PENDING',
+          submittedAt: new Date(),
+          metadata: {
+            studentId: student.studentId,
+            studentCode: student.studentCode,
+            name: student.name,
+            mobile: registration.mobile,
+            email: registration.email,
+            schoolCollege: registration.schoolCollege,
+            state: registration.state,
+            district: registration.district,
+            registrationType: 'PUBLIC_STUDENT_REGISTRATION',
+          },
+        },
+      });
+
+      return { user: newUser, student, approvalRequest };
     });
 
-    // 5. Load full user profile
-    const fullUser = await this.loadUserWithRoles(result.user.id);
-
-    // 6. Create session and tokens
-    const { session, tokens } = await this.createSessionAndTokens(
-      result.user.id,
-      req,
-    );
-
-    // 7. Log security events
+    // 5. Log security events
     await this.securityEventService.log('REGISTER_SUCCESS', {
       userId: result.user.id,
       ...ctx,
       metadata: {
-        method: 'OTP_REGISTRATION',
+        method: 'PUBLIC_OTP_REGISTRATION',
         studentId: result.student.studentId,
         studentCode: result.student.studentCode,
+        approvalRequestId: result.approvalRequest.id,
+        status: 'PENDING_APPROVAL',
       },
     });
 
     return {
-      message: 'Registration successful',
+      message:
+        'Registration submitted successfully! Your account is pending review by Academic Administration. You will be notified once approved.',
       data: {
-        user: this.buildUserResponse(fullUser),
+        requiresApproval: true,
+        status: 'PENDING_APPROVAL',
+        registrationId,
         student: {
           id: result.student.id,
           studentId: result.student.studentId,
           studentCode: result.student.studentCode,
           name: result.student.name,
+          status: 'PENDING',
         },
-        session: { sessionId: session.id },
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: tokens.expiresIn,
       },
     };
   }
@@ -626,9 +640,17 @@ export class AuthService {
     if (!user) {
       const normalizedMobile =
         this.otpService.normalizeMobileNumber(rawIdentifier);
+      const tenDigit = normalizedMobile.replace(/^\+91/, '');
       user = await this.prisma.user.findFirst({
         where: {
-          OR: [{ mobileNumber: normalizedMobile }, { phone: normalizedMobile }],
+          OR: [
+            { mobileNumber: normalizedMobile },
+            { phone: normalizedMobile },
+            { mobileNumber: tenDigit },
+            { phone: tenDigit },
+            { mobileNumber: rawIdentifier },
+            { phone: rawIdentifier },
+          ],
         },
         include: { userRoles: { include: { role: true } }, student: true },
       });

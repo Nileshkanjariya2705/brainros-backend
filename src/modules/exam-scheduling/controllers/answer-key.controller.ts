@@ -29,7 +29,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/status
    */
   @Get('status')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async getAnswerKeyStatus(@Param('scheduleId', ParseUUIDPipe) scheduleId: string) {
     const data = await this.answerKeyService.getAnswerKeyStatus(scheduleId);
     return {
@@ -44,7 +44,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/template
    */
   @Get('template')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async getAnswerKeyTemplate(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @Res() res: Response,
@@ -65,7 +65,7 @@ export class AnswerKeyController {
    * GET /admin/schedules/:scheduleId/answer-key/questions
    */
   @Get('questions')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async getAnswerKeyQuestions(@Param('scheduleId', ParseUUIDPipe) scheduleId: string) {
     const data = await this.answerKeyService.getAnswerKeyTemplate(scheduleId);
     return {
@@ -76,11 +76,40 @@ export class AnswerKeyController {
   }
 
   /**
-   * 4. Upload Answer Key (JSON payload or CSV/Excel file)
+   * 4. Download Generic Sample CSV Template
+   * GET /admin/schedules/:scheduleId/answer-key/sample-csv
+   */
+  @Get('sample-csv')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  async downloadSampleCsv(@Res() res: Response) {
+    const csvContent = this.answerKeyService.generateSampleCsv();
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="sample-answer-key.csv"');
+    return res.send(csvContent);
+  }
+
+  /**
+   * 5. Download Generic Sample Excel Template
+   * GET /admin/schedules/:scheduleId/answer-key/sample-excel
+   */
+  @Get('sample-excel')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  async downloadSampleExcel(@Res() res: Response) {
+    const buffer = await this.answerKeyService.generateSampleExcel();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="sample-answer-key.xlsx"');
+    return res.send(buffer);
+  }
+
+  /**
+   * 6. Upload Answer Key (JSON payload or CSV/Excel file)
    * POST /admin/schedules/:scheduleId/answer-key
    */
   @Post()
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   @UseInterceptors(FileInterceptor('file'))
   async uploadAnswerKey(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
@@ -92,7 +121,16 @@ export class AnswerKeyController {
     let rowsToProcess: AnswerKeyRowInput[] = [];
 
     if (file) {
-      rowsToProcess = await this.answerKeyService.parseCsvAnswerKey(file.buffer);
+      const isExcel =
+        file.originalname.toLowerCase().endsWith('.xlsx') ||
+        file.originalname.toLowerCase().endsWith('.xls') ||
+        (file.mimetype &&
+          (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel')));
+      if (isExcel) {
+        rowsToProcess = await this.answerKeyService.parseExcelAnswerKey(file.buffer);
+      } else {
+        rowsToProcess = await this.answerKeyService.parseCsvAnswerKey(file.buffer);
+      }
     } else if (body.rows) {
       if (typeof body.rows === 'string') {
         try {
@@ -105,7 +143,7 @@ export class AnswerKeyController {
       }
     } else {
       throw new BadRequestException(
-        'Please provide an Answer Key CSV file or rows JSON array.',
+        'Please provide an Answer Key CSV or Excel file or rows JSON array.',
       );
     }
 

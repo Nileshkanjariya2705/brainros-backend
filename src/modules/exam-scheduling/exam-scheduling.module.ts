@@ -26,12 +26,14 @@ import { ExamCycleController } from './controllers/exam-cycle.controller';
 import { ExamCalendarController } from './controllers/exam-calendar.controller';
 import { FeatureActivationController } from './controllers/feature-activation.controller';
 import { AnswerKeyController } from './controllers/answer-key.controller';
+import { ExamCacheModule } from '../exam-cache/exam-cache.module';
 
 @Module({
   imports: [
     PrismaModule,
     NotificationModule,
     forwardRef(() => AdminModule),
+    ExamCacheModule,
     BullModule.registerQueue(
       {
         name: EXAM_WINDOW_END_QUEUE_NAME,

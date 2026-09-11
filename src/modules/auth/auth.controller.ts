@@ -95,35 +95,24 @@ export class AuthController {
    * sends OTP to mobile number, and returns requiresOtp.
    * POST /auth/register
    */
-  /**
-   * @deprecated B2B mode — public registration disabled
-   */
   @Post('register')
   @HttpCode(HttpStatus.OK)
   async register(@Body() dto: RegisterStudentDto, @Request() req: any) {
-    throw new ForbiddenException(
-      'Public registration is no longer available. Students are registered through their school administration.',
-    );
+    return this.authService.registerStudent(dto, req);
   }
 
   /**
-   * Verify full student registration OTP: activates User, creates Student profile,
-   * generates Student ID, creates session, and sets HttpOnly refresh cookie.
+   * Verify full student registration OTP: verifies OTP and submits student registration
+   * to the Approval Queue (requires General Manager or Super Admin approval).
    * POST /auth/verify-registration-otp
-   */
-  /**
-   * @deprecated B2B mode — public registration disabled
    */
   @Post('verify-registration-otp')
   @HttpCode(HttpStatus.CREATED)
   async verifyRegistrationOtp(
     @Body() dto: VerifyRegistrationOtpDto,
     @Request() req: any,
-    @Response({ passthrough: true }) res: ExpressResponse,
   ) {
-    throw new ForbiddenException(
-      'Public registration is no longer available. Students are registered through their school administration.',
-    );
+    return this.authService.verifyRegistrationOtp(dto, req);
   }
 
   // ═══════════════════════════════════════════════════════════════

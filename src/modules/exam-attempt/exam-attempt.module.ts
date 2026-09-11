@@ -7,6 +7,7 @@ import { ExamModule } from '../exam/exam.module';
 import { ExamSchedulingModule } from '../exam-scheduling/exam-scheduling.module';
 import { TimeAnalysisModule } from '../time-analysis/time-analysis.module';
 import { ResultModule } from '../result/result.module';
+import { ExamCacheModule } from '../exam-cache/exam-cache.module';
 import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
 
 import { ActiveAttemptGuard } from './guards/active-attempt.guard';
@@ -17,6 +18,7 @@ import { ActiveAttemptGuard } from './guards/active-attempt.guard';
     ExamSchedulingModule,
     TimeAnalysisModule,
     ResultModule,
+    ExamCacheModule,
     BullModule.registerQueue({
       name: EVALUATION_QUEUE_NAME,
     }),

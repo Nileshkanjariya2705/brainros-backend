@@ -26,6 +26,7 @@ import {
   EVALUATION_QUEUE_NAME,
   ResultStatusEnum,
 } from '../result/interfaces/result-lifecycle.interface';
+import { ExamCacheService } from '../exam-cache/services/exam-cache.service';
 
 @Injectable()
 export class ExamAttemptService {
@@ -38,6 +39,7 @@ export class ExamAttemptService {
     private readonly resultReadinessService: ResultReadinessService,
     private readonly questionShuffleService: QuestionShuffleService,
     private readonly redisService: RedisService,
+    private readonly examCacheService: ExamCacheService,
     @InjectQueue(EVALUATION_QUEUE_NAME)
     private readonly evaluationQueue: Queue,
   ) {}
@@ -299,6 +301,17 @@ export class ExamAttemptService {
       }
     }
 
+    let versionToAssign = access.examVersionId ?? null;
+    if (!versionToAssign) {
+      const latestVersion = await this.prisma.examVersion.findFirst({
+        where: { examId: dto.examId },
+        orderBy: { versionNumber: 'desc' },
+      });
+      if (latestVersion) {
+        versionToAssign = latestVersion.id;
+      }
+    }
+
     const attempt = await this.prisma.$transaction(
       async (tx) => {
         const newAttempt = await tx.attempt.create({
@@ -320,7 +333,7 @@ export class ExamAttemptService {
             serverEndTime,
             ipAddress,
             scheduleId: access.scheduleId ?? null,
-            examVersionId: access.examVersionId ?? null,
+            examVersionId: versionToAssign,
           },
         });
 
@@ -941,33 +954,164 @@ export class ExamAttemptService {
       skip = offsetNum;
     }
 
-    // 4. Fetch personalized AttemptQuestion mappings ordered by displayOrder asc
-    const attemptQuestions = await this.prisma.attemptQuestion.findMany({
-      where: { attemptId: attempt.id },
-      orderBy: { displayOrder: 'asc' },
-      skip,
-      take,
-      include: {
-        options: {
-          orderBy: { displayOrder: 'asc' },
-        },
-        examQuestion: {
-          include: {
-            section: { select: { id: true, name: true, subjectId: true } },
-            question: {
-              include: {
-                questionType: { select: { id: true, name: true, code: true } },
-                translations: {
-                  include: {
-                    language: { select: { id: true, code: true, name: true } },
-                  },
+    // 4. Check if Redis Exam Question Cache is available for this attempt's version
+    let items: any[] = [];
+    let usedCache = false;
+
+    let examVersionId = attempt.examVersionId;
+    if (!examVersionId) {
+      const latestVersion = await this.prisma.examVersion.findFirst({
+        where: { examId: attempt.examId },
+        orderBy: { versionNumber: 'desc' },
+      });
+      if (latestVersion) {
+        examVersionId = latestVersion.id;
+      }
+    }
+
+    if (examVersionId) {
+      try {
+        const snapshot = await this.examCacheService.getExamSnapshot(
+          attempt.examId,
+          examVersionId,
+        );
+
+        if (snapshot && snapshot.questions && snapshot.questions.length > 0) {
+          // Read ONLY the personalized student attempt mapping (lightweight indexed query)
+          const attemptQuestions = await this.prisma.attemptQuestion.findMany({
+            where: { attemptId: attempt.id },
+            orderBy: { displayOrder: 'asc' },
+            skip,
+            take,
+            select: {
+              id: true,
+              examQuestionId: true,
+              displayOrder: true,
+              sectionId: true,
+              options: {
+                select: {
+                  id: true,
+                  examQuestionOptionId: true,
+                  displayOrder: true,
                 },
-                options: {
-                  include: {
-                    translations: {
-                      include: {
-                        language: {
-                          select: { id: true, code: true, name: true },
+                orderBy: { displayOrder: 'asc' },
+              },
+            },
+          });
+
+          const currentLanguageId = attempt.languageId;
+          const defaultLangId = snapshot.languages?.find((l) => l.isDefault)?.id;
+
+          items = attemptQuestions
+            .map((aq) => {
+              const qItem =
+                snapshot.questionsById[aq.examQuestionId] ||
+                snapshot.questions.find(
+                  (q) =>
+                    q.examQuestionId === aq.examQuestionId ||
+                    q.sourceQuestionId === aq.examQuestionId,
+                );
+
+              if (!qItem) return null;
+
+              // Translation resolution with fallback
+              const matchedTranslation =
+                qItem.translations[currentLanguageId] ||
+                qItem.translations[currentLanguageId.toLowerCase()] ||
+                (defaultLangId ? qItem.translations[defaultLangId] : null) ||
+                Object.values(qItem.translations)[0];
+
+              // Map options strictly according to student's personalized AttemptQuestionOption.displayOrder
+              const orderedOptions = aq.options
+                .map((aqo) => {
+                  const optItem = qItem.optionsById[aqo.examQuestionOptionId];
+                  if (!optItem) return null;
+
+                  const matchedOptTranslation =
+                    optItem.translations?.[currentLanguageId]?.optionText ||
+                    optItem.translations?.[currentLanguageId.toLowerCase()]?.optionText ||
+                    (defaultLangId ? optItem.translations?.[defaultLangId]?.optionText : null) ||
+                    optItem.optionText ||
+                    optItem.optionLabel;
+
+                  return {
+                    id: optItem.id,
+                    attemptQuestionOptionId: aqo.id,
+                    displayOrder: aqo.displayOrder,
+                    optionKey: optItem.optionKey,
+                    optionLabel: optItem.optionLabel || optItem.optionKey || '',
+                    optionText:
+                      matchedOptTranslation ||
+                      optItem.optionText ||
+                      optItem.optionLabel ||
+                      '',
+                    translations: optItem.translations || {},
+                  };
+                })
+                .filter(Boolean);
+
+              return {
+                attemptQuestionId: aq.id,
+                examQuestionId: qItem.examQuestionId,
+                questionId: qItem.sourceQuestionId,
+                displayOrder: aq.displayOrder,
+                marks: qItem.marks,
+                negativeMarks: qItem.negativeMarks,
+                section: qItem.section,
+                type: qItem.questionType,
+                questionType: {
+                  id: qItem.questionType,
+                  name: qItem.questionType,
+                  code: qItem.questionType,
+                },
+                passage: matchedTranslation?.passageText || qItem.passage || null,
+                assertion: matchedTranslation?.assertionText || qItem.assertion || null,
+                reason: matchedTranslation?.reasonText || qItem.reason || null,
+                questionText:
+                  matchedTranslation?.questionText || qItem.questionText || '',
+                translations: qItem.translations,
+                options: orderedOptions,
+              };
+            })
+            .filter(Boolean);
+
+          usedCache = true;
+        }
+      } catch (cacheErr: any) {
+        // Safe fallback to PostgreSQL path if cache unavailable
+        usedCache = false;
+      }
+    }
+
+    if (!usedCache) {
+      // Fallback: Fetch personalized AttemptQuestion mappings from PostgreSQL
+      const attemptQuestions = await this.prisma.attemptQuestion.findMany({
+        where: { attemptId: attempt.id },
+        orderBy: { displayOrder: 'asc' },
+        skip,
+        take,
+        include: {
+          options: {
+            orderBy: { displayOrder: 'asc' },
+          },
+          examQuestion: {
+            include: {
+              section: { select: { id: true, name: true, subjectId: true } },
+              question: {
+                include: {
+                  questionType: { select: { id: true, name: true, code: true } },
+                  translations: {
+                    include: {
+                      language: { select: { id: true, code: true, name: true } },
+                    },
+                  },
+                  options: {
+                    include: {
+                      translations: {
+                        include: {
+                          language: {
+                            select: { id: true, code: true, name: true },
+                          },
                         },
                       },
                     },
@@ -977,134 +1121,134 @@ export class ExamAttemptService {
             },
           },
         },
-      },
-    });
-
-    const examLanguages = await this.prisma.examLanguage.findMany({
-      where: { examId: attempt.examId },
-      orderBy: { isDefault: 'desc' },
-    });
-    const examDefaultLanguageId = examLanguages.find(
-      (el) => el.isDefault,
-    )?.languageId;
-    const currentLanguageId = attempt.languageId;
-
-    const items = attemptQuestions.map((aq) => {
-      const eq = aq.examQuestion;
-      const q = eq.question;
-
-      // 4-Tier Translation Fallback:
-      // 1. Attempt Language
-      // 2. Exam Default Language
-      // 3. Question Default Language
-      // 4. First Available Translation
-      const matchedTranslation =
-        q.translations.find(
-          (t) =>
-            t.languageId === currentLanguageId ||
-            t.language?.code === currentLanguageId,
-        ) ||
-        (examDefaultLanguageId
-          ? q.translations.find((t) => t.languageId === examDefaultLanguageId)
-          : null) ||
-        q.translations.find((t) => t.languageId === q.defaultLanguageId) ||
-        q.translations[0];
-
-      // Build question translations map for instant client-side switching (indexed by ID & code)
-      const qTranslationsMap: Record<
-        string,
-        {
-          questionText: string;
-          passageText?: string | null;
-          assertionText?: string | null;
-          reasonText?: string | null;
-        }
-      > = {};
-      q.translations.forEach((t) => {
-        const transObj = {
-          questionText: t.questionText,
-          passageText: t.passageText || null,
-          assertionText: t.assertionText || null,
-          reasonText: t.reasonText || null,
-        };
-        qTranslationsMap[t.languageId] = transObj;
-        if (t.language?.code) {
-          qTranslationsMap[t.language.code.toLowerCase()] = transObj;
-        }
       });
 
-      // Map options strictly according to AttemptQuestionOption.displayOrder
-      const rawOptionsMap = new Map<string, any>(
-        q.options.map((o) => [o.id, o]),
-      );
-      const orderedOptions = aq.options
-        .map((aqo) => {
-          const rawOpt = rawOptionsMap.get(aqo.examQuestionOptionId);
-          if (!rawOpt) return null;
+      const examLanguages = await this.prisma.examLanguage.findMany({
+        where: { examId: attempt.examId },
+        orderBy: { isDefault: 'desc' },
+      });
+      const examDefaultLanguageId = examLanguages.find(
+        (el) => el.isDefault,
+      )?.languageId;
+      const currentLanguageId = attempt.languageId;
 
-          const matchedOptTranslation =
-            rawOpt.translations?.find(
-              (ot: any) =>
-                ot.languageId === currentLanguageId ||
-                ot.language?.code === currentLanguageId,
-            ) ||
-            (examDefaultLanguageId
-              ? rawOpt.translations?.find(
-                  (ot: any) => ot.languageId === examDefaultLanguageId,
-                )
-              : null) ||
-            rawOpt.translations?.find(
-              (ot: any) => ot.languageId === q.defaultLanguageId,
-            ) ||
-            rawOpt.translations?.[0];
+      items = attemptQuestions.map((aq) => {
+        const eq = aq.examQuestion;
+        const q = eq.question;
 
-          const optTranslationsMap: Record<string, { optionText: string }> = {};
-          (rawOpt.translations || []).forEach((ot: any) => {
-            const optTransObj = {
-              optionText:
-                ot.optionText || rawOpt.optionText || rawOpt.optionLabel || '',
-            };
-            optTranslationsMap[ot.languageId] = optTransObj;
-            if (ot.language?.code) {
-              optTranslationsMap[ot.language.code.toLowerCase()] = optTransObj;
-            }
-          });
+        // 4-Tier Translation Fallback:
+        // 1. Attempt Language
+        // 2. Exam Default Language
+        // 3. Question Default Language
+        // 4. First Available Translation
+        const matchedTranslation =
+          q.translations.find(
+            (t) =>
+              t.languageId === currentLanguageId ||
+              t.language?.code === currentLanguageId,
+          ) ||
+          (examDefaultLanguageId
+            ? q.translations.find((t) => t.languageId === examDefaultLanguageId)
+            : null) ||
+          q.translations.find((t) => t.languageId === q.defaultLanguageId) ||
+          q.translations[0];
 
-          return {
-            id: rawOpt.id,
-            attemptQuestionOptionId: aqo.id,
-            displayOrder: aqo.displayOrder,
-            optionKey: rawOpt.optionKey,
-            optionLabel: rawOpt.optionLabel || rawOpt.optionKey || '',
-            optionText:
-              matchedOptTranslation?.optionText ||
-              rawOpt.optionText ||
-              rawOpt.optionLabel ||
-              '',
-            translations: optTranslationsMap,
+        // Build question translations map for instant client-side switching (indexed by ID & code)
+        const qTranslationsMap: Record<
+          string,
+          {
+            questionText: string;
+            passageText?: string | null;
+            assertionText?: string | null;
+            reasonText?: string | null;
+          }
+        > = {};
+        q.translations.forEach((t) => {
+          const transObj = {
+            questionText: t.questionText,
+            passageText: t.passageText || null,
+            assertionText: t.assertionText || null,
+            reasonText: t.reasonText || null,
           };
-        })
-        .filter(Boolean);
+          qTranslationsMap[t.languageId] = transObj;
+          if (t.language?.code) {
+            qTranslationsMap[t.language.code.toLowerCase()] = transObj;
+          }
+        });
 
-      return {
-        attemptQuestionId: aq.id,
-        examQuestionId: eq.id,
-        questionId: q.id,
-        displayOrder: aq.displayOrder,
-        marks: eq.marks,
-        negativeMarks: eq.negativeMarks,
-        section: eq.section,
-        type: q.type,
-        questionType: q.questionType,
-        passage: matchedTranslation?.passageText || q.passage || null,
-        assertion: matchedTranslation?.assertionText || q.assertion || null,
-        reason: matchedTranslation?.reasonText || q.reason || null,
-        questionText:
-          matchedTranslation?.questionText || (q as any).questionText || '',
-        translations: qTranslationsMap,
-        options: orderedOptions,
-      };
-    });
+        // Map options strictly according to AttemptQuestionOption.displayOrder
+        const rawOptionsMap = new Map<string, any>(
+          q.options.map((o) => [o.id, o]),
+        );
+        const orderedOptions = aq.options
+          .map((aqo) => {
+            const rawOpt = rawOptionsMap.get(aqo.examQuestionOptionId);
+            if (!rawOpt) return null;
+
+            const matchedOptTranslation =
+              rawOpt.translations?.find(
+                (ot: any) =>
+                  ot.languageId === currentLanguageId ||
+                  ot.language?.code === currentLanguageId,
+              ) ||
+              (examDefaultLanguageId
+                ? rawOpt.translations?.find(
+                    (ot: any) => ot.languageId === examDefaultLanguageId,
+                  )
+                : null) ||
+              rawOpt.translations?.find(
+                (ot: any) => ot.languageId === q.defaultLanguageId,
+              ) ||
+              rawOpt.translations?.[0];
+
+            const optTranslationsMap: Record<string, { optionText: string }> = {};
+            (rawOpt.translations || []).forEach((ot: any) => {
+              const optTransObj = {
+                optionText:
+                  ot.optionText || rawOpt.optionText || rawOpt.optionLabel || '',
+              };
+              optTranslationsMap[ot.languageId] = optTransObj;
+              if (ot.language?.code) {
+                optTranslationsMap[ot.language.code.toLowerCase()] = optTransObj;
+              }
+            });
+
+            return {
+              id: rawOpt.id,
+              attemptQuestionOptionId: aqo.id,
+              displayOrder: aqo.displayOrder,
+              optionKey: rawOpt.optionKey,
+              optionLabel: rawOpt.optionLabel || rawOpt.optionKey || '',
+              optionText:
+                matchedOptTranslation?.optionText ||
+                rawOpt.optionText ||
+                rawOpt.optionLabel ||
+                '',
+              translations: optTranslationsMap,
+            };
+          })
+          .filter(Boolean);
+
+        return {
+          attemptQuestionId: aq.id,
+          examQuestionId: eq.id,
+          questionId: q.id,
+          displayOrder: aq.displayOrder,
+          marks: eq.marks,
+          negativeMarks: eq.negativeMarks,
+          section: eq.section,
+          type: q.type,
+          questionType: q.questionType,
+          passage: matchedTranslation?.passageText || q.passage || null,
+          assertion: matchedTranslation?.assertionText || q.assertion || null,
+          reason: matchedTranslation?.reasonText || q.reason || null,
+          questionText:
+            matchedTranslation?.questionText || (q as any).questionText || '',
+          translations: qTranslationsMap,
+          options: orderedOptions,
+        };
+      });
+    }
 
     if (hasPagination) {
       return {
@@ -1123,9 +1267,13 @@ export class ExamAttemptService {
   }
 
   /**
-   * Get student's full exam attempt history.
+   * Get student's exam attempt history with server-side database pagination.
    */
-  async getStudentAttempts(studentId?: string | null, userId?: string | null) {
+  async getStudentAttempts(
+    studentId?: string | null,
+    userId?: string | null,
+    query: any = {},
+  ) {
     let resolvedStudentId = studentId;
 
     if (!resolvedStudentId && userId) {
@@ -1136,88 +1284,157 @@ export class ExamAttemptService {
       resolvedStudentId = student?.id ?? null;
     }
 
+    const page = Math.max(1, Number(query?.page) || 1);
+    const limit = Math.max(1, Math.min(50, Number(query?.limit) || 12));
+    const skip = (page - 1) * limit;
+
     // If user has no associated student profile, return empty array cleanly
     if (!resolvedStudentId) {
-      return [];
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 1,
+        },
+      };
     }
 
-    return this.prisma.attempt.findMany({
-      where: { studentId: resolvedStudentId },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        exam: {
-          select: {
-            id: true,
-            title: true,
-            totalQuestions: true,
-            totalMarks: true,
-            durationMinutes: true,
-            examTarget: { select: { id: true, name: true } },
-            sections: {
-              include: {
-                subject: { select: { id: true, name: true } },
+    const where: any = {
+      studentId: resolvedStudentId,
+    };
+
+    if (query?.status && query.status !== 'ALL') {
+      if (query.status === 'COMPLETED') {
+        where.status = {
+          name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED', 'COMPLETED'] },
+        };
+      } else {
+        where.status = { name: query.status };
+      }
+    }
+
+    if (query?.targetId && query.targetId !== 'ALL') {
+      where.exam = {
+        ...(where.exam || {}),
+        examTargetId: query.targetId,
+      };
+    }
+
+    if (query?.search && query.search.trim()) {
+      where.exam = {
+        ...(where.exam || {}),
+        title: { contains: query.search.trim(), mode: 'insensitive' },
+      };
+    }
+
+    let orderBy: any = { createdAt: 'desc' };
+    const sortBy = query?.sortBy || 'NEWEST';
+    if (sortBy === 'NEWEST') {
+      orderBy = { createdAt: 'desc' };
+    } else if (sortBy === 'OLDEST') {
+      orderBy = { createdAt: 'asc' };
+    } else if (sortBy === 'SCORE_HIGH') {
+      orderBy = { result: { totalScore: 'desc' } };
+    } else if (sortBy === 'ACCURACY_HIGH') {
+      orderBy = { result: { accuracy: 'desc' } };
+    }
+
+    const [attempts, total] = await Promise.all([
+      this.prisma.attempt.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+        include: {
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              totalQuestions: true,
+              totalMarks: true,
+              durationMinutes: true,
+              examTarget: { select: { id: true, name: true } },
+              sections: {
+                include: {
+                  subject: { select: { id: true, name: true } },
+                },
               },
             },
           },
-        },
-        status: { select: { id: true, name: true } },
-        result: {
-          select: {
-            id: true,
-            totalScore: true,
-            maxScore: true,
-            percentage: true,
-            accuracy: true,
-            correctAnswers: true,
-            wrongAnswers: true,
-            unattempted: true,
-            timeUsedSeconds: true,
-            averageTimePerQuestion: true,
-            resultStatus: true,
-            subjectResults: {
-              select: {
-                id: true,
-                subjectId: true,
-                subject: { select: { id: true, name: true } },
-                score: true,
-                maxScore: true,
-                accuracy: true,
-                correctAnswers: true,
-                wrongAnswers: true,
-                unattempted: true,
+          status: { select: { id: true, name: true } },
+          result: {
+            select: {
+              id: true,
+              totalScore: true,
+              maxScore: true,
+              percentage: true,
+              accuracy: true,
+              correctAnswers: true,
+              wrongAnswers: true,
+              unattempted: true,
+              timeUsedSeconds: true,
+              averageTimePerQuestion: true,
+              resultStatus: true,
+              subjectResults: {
+                select: {
+                  id: true,
+                  subjectId: true,
+                  subject: { select: { id: true, name: true } },
+                  score: true,
+                  maxScore: true,
+                  accuracy: true,
+                  correctAnswers: true,
+                  wrongAnswers: true,
+                  unattempted: true,
+                },
               },
             },
           },
-        },
-        candidateRanks: {
-          select: {
-            rank: true,
-            totalCandidates: true,
-            percentile: true,
-            rankType: true,
+          candidateRanks: {
+            select: {
+              rank: true,
+              totalCandidates: true,
+              percentile: true,
+              rankType: true,
+            },
+            orderBy: { createdAt: 'desc' },
           },
-          orderBy: { createdAt: 'desc' },
-        },
-        timeAnalyses: {
-          select: {
-            averageTimePerQuestionSeconds: true,
-            timeUtilizationPercentage: true,
-            totalTimeUsedSeconds: true,
+          timeAnalyses: {
+            select: {
+              averageTimePerQuestionSeconds: true,
+              timeUtilizationPercentage: true,
+              totalTimeUsedSeconds: true,
+            },
+            take: 1,
+            orderBy: { createdAt: 'desc' },
           },
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-        },
-        strategyAnalyses: {
-          select: {
-            primaryClassification: true,
-            avoidableNegativeMarks: true,
-            projectedScore: true,
+          strategyAnalyses: {
+            select: {
+              primaryClassification: true,
+              avoidableNegativeMarks: true,
+              projectedScore: true,
+            },
+            take: 1,
+            orderBy: { createdAt: 'desc' },
           },
-          take: 1,
-          orderBy: { createdAt: 'desc' },
         },
+      }),
+      this.prisma.attempt.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return {
+      data: attempts,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
       },
-    });
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════

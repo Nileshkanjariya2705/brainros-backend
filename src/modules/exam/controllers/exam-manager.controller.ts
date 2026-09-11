@@ -260,7 +260,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams
    */
   @Get('exams')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async getAllExams(@Query() filter: ExamManagerFilterDto) {
     return this.examPaperImportService.getAllExamsList(filter);
   }
@@ -270,7 +270,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams/:id
    */
   @Get('exams/:id')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   getExamById(@Param('id') id: string) {
     return this.examService.findExamById(id);
   }
@@ -280,7 +280,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/preview-upload
    */
   @Post('exams/:examId/preview-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   @UseInterceptors(FileInterceptor('file'))
   async previewQuestionPaperUpload(
     @Param('examId') examId: string,
@@ -307,7 +307,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/submit-upload
    */
   @Post('exams/:examId/submit-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   @UseInterceptors(FileInterceptor('file'))
   async submitQuestionPaperUpload(
     @Param('examId') examId: string,
@@ -334,7 +334,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams/:examId/question-paper
    */
   @Get('exams/:examId/question-paper')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async getExamQuestionPaper(@Param('examId') examId: string) {
     const data = await this.examPaperImportService.getExamQuestionPaper(examId);
     return {
@@ -349,7 +349,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/retry-upload
    */
   @Post('exams/:examId/retry-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
   async retryQuestionPaperUpload(
     @Param('examId') examId: string,
     @CurrentUser() user: { userId: string },

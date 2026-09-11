@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamLifecycleAction } from '@prisma/client';
 import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
+import { ExamCacheService } from '../../exam-cache/services/exam-cache.service';
 
 export const VALID_LIFECYCLE_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['SUBMITTED', 'CANCELLED'],
@@ -29,6 +30,7 @@ export class ExamLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationQueue: NotificationQueueService,
+    private readonly examCacheService: ExamCacheService,
   ) {}
 
   /**
@@ -141,6 +143,27 @@ export class ExamLifecycleService {
         },
         tx,
       );
+
+      const isMock =
+        exam.title.toUpperCase().includes('MOCK') ||
+        exam.title.toUpperCase().includes('PRACTICE');
+
+      await tx.approvalRequest.create({
+        data: {
+          resourceType: isMock ? 'MOCK_TEST' : 'EXAM',
+          resourceId: examId,
+          requestedById: performedById,
+          status: 'PENDING',
+          metadata: {
+            examId,
+            title: exam.title,
+            totalQuestions: exam.totalQuestions,
+            durationMinutes: exam.durationMinutes,
+            isMock,
+          },
+          submittedAt: new Date(),
+        },
+      });
 
       this.logger.log(`Exam '${examId}' submitted by user '${performedById}'`);
       return updated;
@@ -314,6 +337,11 @@ export class ExamLifecycleService {
       return updatedExam;
     });
 
+    // Invalidate Redis question cache for cancelled exam
+    await this.examCacheService.invalidateExamCache(examId).catch((cErr: any) => {
+      this.logger.warn(`ExamCache invalidation on cancel error: ${cErr.message}`);
+    });
+
     // 1. Direct in-app notification creation for all active students
     try {
       const students = await this.prisma.student.findMany({
@@ -402,6 +430,34 @@ export class ExamLifecycleService {
       );
     }
 
+    // ── Cache verification gate before activation ──
+    const isCacheReady = await this.examCacheService.isExamCacheReady(
+      examId,
+      activeSchedule.examVersionId,
+    );
+
+    if (!isCacheReady) {
+      this.logger.log(
+        `[ExamLifecycle] Cache not ready for exam '${examId}', preparing and verifying before activation...`,
+      );
+      try {
+        await this.examCacheService.prepareExamCache({
+          examId,
+          examVersionId: activeSchedule.examVersionId,
+          scheduleId: activeSchedule.id,
+          officialEndTime: activeSchedule.endTime,
+          userId: performedById,
+        });
+      } catch (cacheErr: any) {
+        this.logger.error(
+          `[ExamLifecycle] Cannot activate exam '${examId}': Cache preparation/verification failed: ${cacheErr.message}`,
+        );
+        throw new BadRequestException(
+          `Cannot activate exam: Exam question cache preparation or verification failed (${cacheErr.message}).`,
+        );
+      }
+    }
+
     const activeStatus = await this.getOrCreateExamStatus('ACTIVE', db);
 
     const updated = await db.exam.update({
@@ -420,6 +476,20 @@ export class ExamLifecycleService {
       });
     }
 
+    // Mark any pending approval request as APPROVED
+    await db.approvalRequest.updateMany({
+      where: {
+        resourceType: { in: ['EXAM', 'MOCK_TEST', 'MOCK'] },
+        resourceId: examId,
+        status: 'PENDING',
+      },
+      data: {
+        status: 'APPROVED',
+        reviewedById: performedById,
+        reviewedAt: now,
+      },
+    });
+
     await this.recordHistory(
       {
         examId,
@@ -431,6 +501,8 @@ export class ExamLifecycleService {
       },
       db,
     );
+
+    this.logger.log(`Exam '${examId}' activated after cache verification.`);
 
     return updated;
   }

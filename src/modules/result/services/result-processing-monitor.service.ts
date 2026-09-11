@@ -19,6 +19,11 @@ export interface ExamProcessingSummaryResponse {
   examId: string;
   examTitle: string;
   examType: 'LIVE' | 'MOCK';
+  examTarget?: string;
+  examDate?: string | null;
+  answerKeyStatus?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
   examStatus?: string;
   publicationStatus: string;
   status: 'EMPTY' | 'QUEUED' | 'PROCESSING' | 'READY_TO_PUBLISH' | 'PUBLISHED' | 'FAILED';
@@ -123,7 +128,9 @@ export class ResultProcessingMonitorService {
       where: { id: examId },
       include: {
         status: true,
+        examTarget: true,
         schedules: { take: 1, orderBy: { createdAt: 'desc' } },
+        resultPublications: { take: 1, orderBy: { publicationVersion: 'desc' } },
       },
     });
 
@@ -264,6 +271,16 @@ export class ResultProcessingMonitorService {
       examId,
       examTitle: exam.title,
       examType: isLive ? 'LIVE' : 'MOCK',
+      examTarget: (exam as any).examTarget?.name || 'General',
+      examDate: exam.schedules?.[0]?.startTime ? exam.schedules[0].startTime.toISOString() : exam.createdAt.toISOString(),
+      answerKeyStatus: exam.schedules?.[0]?.hasAnswerKey ? 'UPLOADED' : 'PENDING',
+      startedAt: exam.schedules?.[0]?.startTime ? exam.schedules[0].startTime.toISOString() : null,
+      completedAt:
+        readiness.publicationStatus === ExamPublicationStatusEnum.PUBLISHED
+          ? exam.resultPublications?.[0]?.publishedAt?.toISOString() || null
+          : (overallStatus === 'READY_TO_PUBLISH'
+              ? exam.schedules?.[0]?.endTime?.toISOString() || null
+              : null),
       examStatus: exam.status?.name,
       publicationStatus: readiness.publicationStatus,
       status: overallStatus,

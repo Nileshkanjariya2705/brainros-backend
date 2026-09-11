@@ -39,24 +39,39 @@ export class AdminStaffService {
    * 1. Create a new Staff account with assigned staff role.
    */
   async createStaff(dto: CreateStaffDto, creatorId: string) {
-    const normalizedMobile = this.normalizeMobile(dto.mobileNumber);
+    const rawMobile = (dto.mobileNumber || dto.phoneNumber || '').trim();
+    if (!rawMobile) {
+      throw new BadRequestException('Phone number / Mobile number is required.');
+    }
+    const normalizedMobile = this.normalizeMobile(rawMobile);
     const normalizedEmail = dto.email ? dto.email.trim().toLowerCase() : null;
+    const tenDigit = rawMobile.replace(/[^0-9]/g, '').slice(-10);
 
-    // Check for duplicate mobile
+    // Check for duplicate phone number across multiple representations (raw, normalized, 10-digit)
     const existingMobile = await this.prisma.user.findFirst({
       where: {
         OR: [
           { mobileNumber: normalizedMobile },
           { phone: normalizedMobile },
-          { mobileNumber: dto.mobileNumber.trim() },
-          { phone: dto.mobileNumber.trim() },
+          { mobileNumber: rawMobile },
+          { phone: rawMobile },
+          ...(tenDigit.length === 10
+            ? [
+                { mobileNumber: tenDigit },
+                { phone: tenDigit },
+                { mobileNumber: `+91${tenDigit}` },
+                { phone: `+91${tenDigit}` },
+                { mobileNumber: `91${tenDigit}` },
+                { phone: `91${tenDigit}` },
+              ]
+            : []),
         ],
       },
     });
 
     if (existingMobile) {
       throw new ConflictException(
-        `A user account with mobile number '${dto.mobileNumber}' already exists.`,
+        `A user account with phone number '${rawMobile}' already exists. Phone number must be unique.`,
       );
     }
 
@@ -83,37 +98,25 @@ export class AdminStaffService {
       );
     }
 
-    // Validate institution if provided
-    let institution: any = null;
-    if (dto.institutionId) {
-      institution = await this.prisma.institution.findUnique({
-        where: { id: dto.institutionId },
-      });
-      if (!institution) {
-        throw new NotFoundException(
-          `School/Institution with ID '${dto.institutionId}' not found.`,
-        );
-      }
-    }
-
     const defaultPasswordHash = await bcrypt.hash('Staff@Brainros2026', 10);
 
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Create User
-      const user = await tx.user.create({
-        data: {
-          name: dto.name.trim(),
-          mobileNumber: normalizedMobile,
-          phone: normalizedMobile,
-          email: normalizedEmail,
-          passwordHash: defaultPasswordHash,
-          status: 'ACTIVE',
-          isActive: true,
-          isVerified: true,
-          mobileVerifiedAt: new Date(),
-          emailVerifiedAt: normalizedEmail ? new Date() : null,
-        },
-      });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // 1. Create User
+        const user = await tx.user.create({
+          data: {
+            name: dto.name.trim(),
+            mobileNumber: normalizedMobile,
+            phone: normalizedMobile,
+            email: normalizedEmail,
+            passwordHash: defaultPasswordHash,
+            status: 'ACTIVE',
+            isActive: true,
+            isVerified: true,
+            mobileVerifiedAt: new Date(),
+            emailVerifiedAt: normalizedEmail ? new Date() : null,
+          },
+        });
 
       // 2. Assign Role in UserRole
       await tx.userRole.create({
@@ -123,19 +126,7 @@ export class AdminStaffService {
         },
       });
 
-      // 3. Assign Institution scope if specified
-      if (dto.institutionId) {
-        await tx.institutionAdmin.create({
-          data: {
-            institutionId: dto.institutionId,
-            userId: user.id,
-            role: dto.role,
-            isActive: true,
-          },
-        });
-      }
-
-      // 4. Audit Log
+      // 3. Audit Log
       await tx.auditLog.create({
         data: {
           actorUserId: creatorId,
@@ -148,12 +139,10 @@ export class AdminStaffService {
             mobileNumber: user.mobileNumber,
             email: user.email,
             role: dto.role,
-            institutionId: dto.institutionId,
             status: user.status,
           },
           metadata: {
             role: dto.role,
-            institutionName: institution?.name,
             createdBy: creatorId,
             createdAt: new Date().toISOString(),
           },
@@ -170,32 +159,56 @@ export class AdminStaffService {
         mobileNumber: user.mobileNumber,
         email: user.email,
         role: dto.role,
+        roles: [dto.role],
         status: user.status,
-        institution: institution ? { id: institution.id, name: institution.name } : null,
+        institution: null,
         createdAt: user.createdAt,
       };
     });
+  } catch (err: any) {
+    if (err.code === 'P2002' || err.message?.includes('Unique constraint failed')) {
+      const target = Array.isArray(err.meta?.target) ? err.meta.target.join(', ') : String(err.meta?.target || '');
+      if (target.includes('mobile') || target.includes('phone')) {
+        throw new ConflictException(`Phone number '${rawMobile}' already exists. Phone number must be unique.`);
+      }
+      if (target.includes('email')) {
+        throw new ConflictException(`Email address '${normalizedEmail}' already exists. Email must be unique.`);
+      }
+      throw new ConflictException('A user with this unique credential already exists.');
+    }
+    throw err;
   }
+}
 
   /**
    * 2. List all staff members with pagination, search, and filters.
    */
   async listStaff(filter: StaffFilterDto) {
     const page = filter.page || 1;
-    const limit = filter.limit || 20;
+    const limit = filter.limit || 50;
     const skip = (page - 1) * limit;
 
-    const targetRoles = filter.role ? [filter.role] : Array.from(VALID_STAFF_ROLES);
-
-    const where: any = {
-      userRoles: {
-        some: {
-          role: {
-            name: { in: targetRoles },
+    const where: any = filter.role
+      ? {
+          userRoles: {
+            some: {
+              role: {
+                name: filter.role,
+              },
+            },
           },
-        },
-      },
-    };
+        }
+      : {
+          userRoles: {
+            some: {
+              role: {
+                name: {
+                  notIn: ['STUDENT', 'PARENT'],
+                },
+              },
+            },
+          },
+        };
 
     if (filter.status) {
       where.status = filter.status.toUpperCase();
@@ -231,10 +244,17 @@ export class AdminStaffService {
     ]);
 
     const items = users.map((u) => {
-      const staffRoleObj = u.userRoles.find((ur) =>
-        VALID_STAFF_ROLES.includes(ur.role.name as any),
-      );
-      const roleName = staffRoleObj?.role.name || u.userRoles[0]?.role.name || 'STAFF';
+      const allRoles = u.userRoles.map((ur) => ur.role.name);
+      const priorityOrder = [
+        'SUPER_ADMIN',
+        'ADMIN',
+        'GENERAL_MANAGER',
+        'MANAGER',
+        'OPERATOR',
+        'ACCOUNTANT',
+      ];
+      const primaryRole =
+        priorityOrder.find((r) => allRoles.includes(r)) || allRoles[0] || 'STAFF';
       const institution = u.institutionAdmins[0]?.institution || null;
 
       return {
@@ -242,10 +262,12 @@ export class AdminStaffService {
         name: u.name || 'Unnamed Staff',
         mobileNumber: u.mobileNumber || u.phone,
         email: u.email,
-        role: roleName,
+        role: primaryRole,
+        roles: allRoles,
         status: u.status,
         isActive: u.isActive,
         institution,
+        institutionName: institution?.name || null,
         createdAt: u.createdAt,
         updatedAt: u.updatedAt,
       };
@@ -320,15 +342,55 @@ export class AdminStaffService {
       roles: user.userRoles.map((ur) => ur.role.name),
     };
 
-    return this.prisma.$transaction(async (tx) => {
-      const updateData: any = {};
-      if (dto.name !== undefined) updateData.name = dto.name.trim();
-      if (dto.email !== undefined) updateData.email = dto.email ? dto.email.trim().toLowerCase() : null;
+    const rawMobile = (dto.mobileNumber || dto.phoneNumber)?.trim();
+    let normalizedMobile: string | undefined;
+    if (rawMobile) {
+      normalizedMobile = this.normalizeMobile(rawMobile);
+      const tenDigit = rawMobile.replace(/[^0-9]/g, '').slice(-10);
 
-      const updatedUser = await tx.user.update({
-        where: { id },
-        data: updateData,
+      const duplicate = await this.prisma.user.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            { mobileNumber: normalizedMobile },
+            { phone: normalizedMobile },
+            { mobileNumber: rawMobile },
+            { phone: rawMobile },
+            ...(tenDigit.length === 10
+              ? [
+                  { mobileNumber: tenDigit },
+                  { phone: tenDigit },
+                  { mobileNumber: `+91${tenDigit}` },
+                  { phone: `+91${tenDigit}` },
+                  { mobileNumber: `91${tenDigit}` },
+                  { phone: `91${tenDigit}` },
+                ]
+              : []),
+          ],
+        },
       });
+
+      if (duplicate) {
+        throw new ConflictException(
+          `A user account with phone number '${rawMobile}' already exists. Phone number must be unique.`,
+        );
+      }
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updateData: any = {};
+        if (dto.name !== undefined) updateData.name = dto.name.trim();
+        if (dto.email !== undefined) updateData.email = dto.email ? dto.email.trim().toLowerCase() : null;
+        if (normalizedMobile) {
+          updateData.mobileNumber = normalizedMobile;
+          updateData.phone = normalizedMobile;
+        }
+
+        const updatedUser = await tx.user.update({
+          where: { id },
+          data: updateData,
+        });
 
       if (dto.role) {
         const newRole = await tx.role.findUnique({ where: { name: dto.role } });
@@ -378,8 +440,21 @@ export class AdminStaffService {
         },
       });
 
-      return this.getStaffById(id);
-    });
+        return this.getStaffById(id);
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002' || err.message?.includes('Unique constraint failed')) {
+        const target = Array.isArray(err.meta?.target) ? err.meta.target.join(', ') : String(err.meta?.target || '');
+        if (target.includes('mobile') || target.includes('phone')) {
+          throw new ConflictException(`Phone number '${rawMobile}' already exists. Phone number must be unique.`);
+        }
+        if (target.includes('email')) {
+          throw new ConflictException(`Email address '${dto.email}' already exists. Email must be unique.`);
+        }
+        throw new ConflictException('A user with this unique credential already exists.');
+      }
+      throw err;
+    }
   }
 
   /**

@@ -285,11 +285,14 @@ export class OtpService {
       this.twoFactorService.normalizeMobileNumber(raw);
     const normalizedEmail = raw.includes('@') ? raw.toLowerCase() : raw;
 
+    const tenDigit = normalizedMobile.replace(/^\+91/, '');
     return this.prisma.user.findFirst({
       where: {
         OR: [
           { mobileNumber: normalizedMobile },
           { phone: normalizedMobile },
+          { mobileNumber: tenDigit },
+          { phone: tenDigit },
           { mobileNumber: raw },
           { phone: raw },
           { email: normalizedEmail },

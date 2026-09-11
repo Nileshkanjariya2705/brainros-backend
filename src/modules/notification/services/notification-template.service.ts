@@ -147,6 +147,34 @@ export class NotificationTemplateService {
           subject: 'Your Downloadable Report is Ready',
           body: 'Hello {{name}},\n\nYour requested report {{fileName}} is ready for download in your institution portal.',
         },
+        {
+          notificationType: NotificationType.EXAM_ENDED,
+          channel: NotificationChannel.IN_APP,
+          languageCode: 'en',
+          subject: 'Exam Completed — Please Upload Answer Key',
+          body: 'Official exam "{{examTitle}}" ({{examTarget}}) ended at {{endTime}}. Attempts: {{totalAttempts}}. Please upload the answer key to begin evaluation.',
+        },
+        {
+          notificationType: NotificationType.EXAM_ENDED,
+          channel: NotificationChannel.EMAIL,
+          languageCode: 'en',
+          subject: 'Exam Completed — Please Upload Answer Key: {{examTitle}}',
+          body: 'Official exam "{{examTitle}}" ({{examTarget}}) reached its scheduled end time at {{endTime}}.\n\nTotal Attempts: {{totalAttempts}}\nAnswer Key Status: {{answerKeyStatus}}\n\nPlease upload the answer key to begin batch result evaluation.',
+        },
+        {
+          notificationType: NotificationType.EXAM_RESULT_PUBLISHED,
+          channel: NotificationChannel.IN_APP,
+          languageCode: 'en',
+          subject: 'Exam Result Published: {{examTitle}}',
+          body: 'Official results for {{examTitle}} have been published. Check your score, rank, and percentile now.',
+        },
+        {
+          notificationType: NotificationType.EXAM_RESULT_PUBLISHED,
+          channel: NotificationChannel.EMAIL,
+          languageCode: 'en',
+          subject: 'Official Results Published: {{examTitle}}',
+          body: 'Hello {{studentName}},\n\nOfficial results for {{examTitle}} are now available. Log in to view your score, rank, and percentile.',
+        },
       ];
 
       for (const t of defaults) {

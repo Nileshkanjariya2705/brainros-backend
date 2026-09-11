@@ -5,6 +5,7 @@ import { ExamApprovalHandler } from './exam-approval.handler';
 import { InstitutionApprovalHandler } from './institution-approval.handler';
 import { BulkUploadApprovalHandler } from './bulk-upload-approval.handler';
 import { StaffUpdateApprovalHandler } from './staff-update-approval.handler';
+import { StudentApprovalHandler } from './student-approval.handler';
 
 @Injectable()
 export class ApprovalHandlerRegistry implements OnModuleInit {
@@ -16,6 +17,7 @@ export class ApprovalHandlerRegistry implements OnModuleInit {
     private readonly institutionHandler: InstitutionApprovalHandler,
     private readonly bulkUploadHandler: BulkUploadApprovalHandler,
     private readonly staffUpdateHandler: StaffUpdateApprovalHandler,
+    private readonly studentHandler: StudentApprovalHandler,
   ) {}
 
   onModuleInit() {
@@ -26,6 +28,7 @@ export class ApprovalHandlerRegistry implements OnModuleInit {
     this.registerHandler(this.institutionHandler);
     this.registerHandler(this.bulkUploadHandler);
     this.registerHandler(this.staffUpdateHandler);
+    this.registerHandler(this.studentHandler);
   }
 
   registerHandler(handler: IApprovalHandler) {

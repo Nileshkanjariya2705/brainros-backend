@@ -13,9 +13,11 @@ import {
 import { Type } from 'class-transformer';
 
 export const VALID_STAFF_ROLES = [
-  'OPERATOR',
-  'MANAGER',
+  'SUPER_ADMIN',
+  'ADMIN',
   'GENERAL_MANAGER',
+  'MANAGER',
+  'OPERATOR',
   'ACCOUNTANT',
 ] as const;
 
@@ -26,12 +28,19 @@ export class CreateStaffDto {
   @IsNotEmpty({ message: 'Staff name is required.' })
   name: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'Mobile number is required.' })
   @Matches(/^[+]?[0-9]{10,13}$/, {
     message: 'Mobile number must be a valid 10-digit number or international format.',
   })
-  mobileNumber: string;
+  mobileNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[+]?[0-9]{10,13}$/, {
+    message: 'Phone number must be a valid 10-digit number or international format.',
+  })
+  phoneNumber?: string;
 
   @IsOptional()
   @IsEmail({}, { message: 'Invalid email address.' })
@@ -43,10 +52,6 @@ export class CreateStaffDto {
     message: `Role must be one of: ${VALID_STAFF_ROLES.join(', ')}`,
   })
   role: ValidStaffRole;
-
-  @IsOptional()
-  @IsUUID('4', { message: 'institutionId must be a valid UUID.' })
-  institutionId?: string;
 }
 
 export class UpdateStaffDto {
@@ -54,6 +59,20 @@ export class UpdateStaffDto {
   @IsString()
   @IsNotEmpty()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[+]?[0-9]{10,13}$/, {
+    message: 'Mobile number must be a valid 10-digit number or international format.',
+  })
+  mobileNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[+]?[0-9]{10,13}$/, {
+    message: 'Phone number must be a valid 10-digit number or international format.',
+  })
+  phoneNumber?: string;
 
   @IsOptional()
   @IsEmail({}, { message: 'Invalid email address.' })

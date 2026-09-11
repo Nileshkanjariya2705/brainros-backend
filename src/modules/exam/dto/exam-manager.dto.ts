@@ -249,4 +249,7 @@ export class ExamManagerFilterDto {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc' = 'desc';
+
+  @IsOptional()
+  missingQuestionPaperOnly?: boolean | string;
 }

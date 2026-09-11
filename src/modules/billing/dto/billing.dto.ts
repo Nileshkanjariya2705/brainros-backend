@@ -104,6 +104,12 @@ export class GenerateInvoiceDto {
   @IsOptional()
   @IsBoolean()
   generateAll?: boolean = false;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'Price per student must be a valid number.' })
+  @Min(0, { message: 'Price per student cannot be negative.' })
+  pricePerStudent?: number;
 }
 
 export class UpdatePricingDto {
@@ -168,4 +174,111 @@ export class BillFilterDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+}
+
+export class AdditionalChargeDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsIn(['PERCENTAGE', 'FIXED'])
+  type: 'PERCENTAGE' | 'FIXED';
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount: number;
+
+  @IsBoolean()
+  isTaxable: boolean;
+
+  @IsBoolean()
+  active: boolean;
+}
+
+export class UpdateTaxConfigurationDto {
+  @IsOptional()
+  @IsString()
+  taxName?: string;
+
+  @IsOptional()
+  @IsString()
+  hsnSacCode?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  gstRate?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  cessRate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isGstEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reverseCharge?: boolean;
+
+  @IsOptional()
+  @IsString()
+  supplierLegalName?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierTradeName?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierGstin?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierPan?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierState?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierStateCode?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  bankIfsc?: string;
+
+  @IsOptional()
+  @IsString()
+  bankBranch?: string;
+
+  @IsOptional()
+  additionalCharges?: AdditionalChargeDto[];
 }

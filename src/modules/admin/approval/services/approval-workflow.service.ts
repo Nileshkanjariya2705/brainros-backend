@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../audit/services/audit-log.service';
@@ -17,7 +18,7 @@ import {
 } from '../../dto/admin.dto';
 
 @Injectable()
-export class ApprovalWorkflowService {
+export class ApprovalWorkflowService implements OnModuleInit {
   private readonly logger = new Logger(ApprovalWorkflowService.name);
 
   constructor(
@@ -25,6 +26,89 @@ export class ApprovalWorkflowService {
     private readonly registry: ApprovalHandlerRegistry,
     private readonly auditService: AuditLogService,
   ) {}
+
+  async onModuleInit() {
+    await this.syncPendingExamsToApprovalQueue();
+  }
+
+  /**
+   * Automatically ensure any scheduled or submitted exams have a corresponding pending ApprovalRequest
+   */
+  async syncPendingExamsToApprovalQueue() {
+    try {
+      const pendingExams = await this.prisma.exam.findMany({
+        where: {
+          status: { name: { in: ['SCHEDULED', 'SUBMITTED'] } },
+        },
+        include: {
+          status: true,
+          schedules: {
+            where: { status: { in: ['SCHEDULED', 'ACTIVE'] } },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+          createdBy: { select: { id: true, name: true } },
+        },
+      });
+
+      if (!pendingExams || pendingExams.length === 0) return;
+
+      const existingReqs = await this.prisma.approvalRequest.findMany({
+        where: {
+          resourceType: { in: ['EXAM', 'MOCK_TEST', 'MOCK'] },
+          resourceId: { in: pendingExams.map((e) => e.id) },
+        },
+      });
+
+      const existingReqByExamId = new Map<string, any>();
+      for (const req of existingReqs) {
+        existingReqByExamId.set(req.resourceId, req);
+      }
+
+      for (const exam of pendingExams) {
+        if (!existingReqByExamId.has(exam.id)) {
+          const activeSchedule = exam.schedules?.[0];
+          const isMock =
+            exam.title.toUpperCase().includes('MOCK') ||
+            exam.title.toUpperCase().includes('PRACTICE');
+
+          await this.prisma.approvalRequest.create({
+            data: {
+              resourceType: isMock ? 'MOCK_TEST' : 'EXAM',
+              resourceId: exam.id,
+              requestedById:
+                exam.createdById ||
+                exam.createdBy?.id ||
+                '0f577461-6f9b-41fe-a796-6587e2571959',
+              status: 'PENDING',
+              metadata: {
+                examId: exam.id,
+                title: exam.title,
+                scheduleId: activeSchedule?.id,
+                startTime: activeSchedule?.startTime
+                  ? activeSchedule.startTime.toISOString()
+                  : null,
+                endTime: activeSchedule?.endTime
+                  ? activeSchedule.endTime.toISOString()
+                  : null,
+                totalQuestions: exam.totalQuestions,
+                durationMinutes: exam.durationMinutes,
+                isMock,
+              },
+              submittedAt: exam.createdAt,
+            },
+          });
+          this.logger.log(
+            `[ApprovalQueue] Synced pending exam '${exam.title}' (${exam.id}) into Super Admin Approval Queue`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to sync pending exams to approval queue: ${err.message}`,
+      );
+    }
+  }
 
   /**
    * Submit an entity for administrative approval review.
@@ -109,8 +193,16 @@ export class ApprovalWorkflowService {
       );
     }
 
-    // ── Self-Approval Prevention Rule ──
-    if (request.requestedById === reviewerId) {
+    // ── Self-Approval Prevention Rule (Super Admin is root authority) ──
+    const reviewer = await this.prisma.user.findUnique({
+      where: { id: reviewerId },
+      include: { userRoles: { include: { role: true } } },
+    });
+    const isSuperAdmin = reviewer?.userRoles?.some(
+      (ur) => ur.role.name === 'SUPER_ADMIN',
+    );
+
+    if (request.requestedById === reviewerId && !isSuperAdmin) {
       this.logger.warn(
         `Self-approval blocked for user '${reviewerId}' on request '${requestId}'`,
       );
@@ -317,10 +409,13 @@ export class ApprovalWorkflowService {
    * Query dynamic supported queue types and live pending counts.
    */
   async getQueueTypesAndCounts() {
+    await this.syncPendingExamsToApprovalQueue();
+
     const supportedTypes = [
       { key: 'ALL', label: 'All Requests', resourceType: 'ALL' },
-      { key: 'STUDENT_REGISTRATION', label: 'Student Registration', resourceType: 'BULK_UPLOAD' },
-      { key: 'SCHOOL_REGISTRATION', label: 'School Registration', resourceType: 'INSTITUTION' },
+      { key: 'STUDENT_REGISTRATION', label: 'Student Registrations', resourceType: 'STUDENT' },
+      { key: 'SCHOOL_REGISTRATION', label: 'School Onboarding', resourceType: 'INSTITUTION' },
+      { key: 'BULK_UPLOAD', label: 'Bulk Imports', resourceType: 'BULK_UPLOAD' },
       { key: 'EXAM', label: 'Live Exams & Mocks', resourceType: 'EXAM' },
       { key: 'QUESTION', label: 'Question Bank', resourceType: 'QUESTION' },
       { key: 'TRANSLATION', label: 'Translations', resourceType: 'QUESTION_TRANSLATION' },
@@ -345,6 +440,8 @@ export class ApprovalWorkflowService {
       let count = 0;
       if (t.key === 'ALL') {
         count = totalPending;
+      } else if (t.key === 'STUDENT_REGISTRATION') {
+        count = (countMap['STUDENT'] || 0) + (countMap['BULK_UPLOAD'] || 0);
       } else if (t.resourceType === 'EXAM') {
         count = (countMap['EXAM'] || 0) + (countMap['MOCK_TEST'] || 0) + (countMap['MOCK'] || 0);
       } else if (t.resourceType === 'QUESTION_TRANSLATION') {
@@ -371,6 +468,8 @@ export class ApprovalWorkflowService {
    * Query approval requests with pagination and filters.
    */
   async getApprovalRequests(filter: ApprovalFilterDto) {
+    await this.syncPendingExamsToApprovalQueue();
+
     const page = filter.page || 1;
     const limit = filter.limit || 20;
     const skip = (page - 1) * limit;
@@ -378,7 +477,9 @@ export class ApprovalWorkflowService {
     const where: any = {};
     if (filter.entityType && filter.entityType.toUpperCase() !== 'ALL') {
       const et = filter.entityType.toUpperCase();
-      if (et === 'STUDENT_REGISTRATION' || et === 'BULK_UPLOAD') {
+      if (et === 'STUDENT_REGISTRATION' || et === 'STUDENT') {
+        where.resourceType = { in: ['STUDENT', 'BULK_UPLOAD'] };
+      } else if (et === 'BULK_UPLOAD') {
         where.resourceType = 'BULK_UPLOAD';
       } else if (et === 'SCHOOL_REGISTRATION' || et === 'INSTITUTION' || et === 'SCHOOL') {
         where.resourceType = 'INSTITUTION';
@@ -474,10 +575,16 @@ export class ApprovalWorkflowService {
                 examTarget: { select: { name: true } },
                 status: { select: { name: true } },
                 sections: { include: { subject: { select: { name: true } } } },
+                schedules: {
+                  where: { status: { in: ['SCHEDULED', 'ACTIVE'] } },
+                  orderBy: { createdAt: 'desc' },
+                  take: 1,
+                },
                 _count: { select: { examQuestions: true } },
               },
             });
             if (exam) {
+              const activeSchedule = exam.schedules?.[0];
               const isMock =
                 item.resourceType === 'MOCK_TEST' ||
                 exam.title.toUpperCase().includes('MOCK') ||
@@ -494,6 +601,13 @@ export class ApprovalWorkflowService {
                 subjects: exam.sections.map((s) => s.subject.name),
                 status: exam.status?.name,
                 isMock,
+                scheduleId: activeSchedule?.id,
+                startTime: activeSchedule?.startTime
+                  ? activeSchedule.startTime.toISOString()
+                  : null,
+                endTime: activeSchedule?.endTime
+                  ? activeSchedule.endTime.toISOString()
+                  : null,
               };
             }
           } else if (item.resourceType === 'QUESTION') {
@@ -513,6 +627,30 @@ export class ApprovalWorkflowService {
                 subject: question.subject?.name,
               };
             }
+          } else if (item.resourceType === 'STUDENT') {
+            const meta = (item.metadata as any) || {};
+            const student = await this.prisma.student.findUnique({
+              where: { id: item.resourceId },
+              include: {
+                studentClass: { select: { name: true } },
+                examTarget: { select: { name: true } },
+                institution: { select: { name: true, code: true } },
+              },
+            }).catch(() => null);
+
+            entitySummary = {
+              id: item.resourceId,
+              title: student?.name || meta.name || 'Student Registration',
+              studentId: student?.studentId || meta.studentId || 'N/A',
+              studentCode: student?.studentCode || meta.studentCode || 'N/A',
+              schoolName: student?.schoolCollege || student?.institution?.name || meta.schoolCollege || 'School / College',
+              city: student?.district || meta.district || 'N/A',
+              state: student?.state || meta.state || 'N/A',
+              grade: student?.studentClass?.name || meta.grade || 'N/A',
+              targetExam: student?.examTarget?.name || meta.targetExam || meta.examTarget || 'General',
+              mobile: meta.mobile || meta.phone || 'N/A',
+              email: meta.email || 'N/A',
+            };
           } else if (item.resourceType === 'BULK_UPLOAD') {
             const meta = (item.metadata as any) || {};
             const upload = await this.prisma.bulkUpload.findUnique({

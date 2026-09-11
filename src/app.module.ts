@@ -34,7 +34,8 @@ import { LoggerModule } from './common/logger/logger.module';
 import { JobProgressModule } from './modules/job-progress/job-progress.module';
 import { RecommendationModule } from './modules/recommendation/recommendation.module';
 import { BillingModule } from './modules/billing/billing.module';
-
+import { ExamCacheModule } from './modules/exam-cache/exam-cache.module';
+import { ExportModule } from './modules/export/export.module';
 
 @Module({
   imports: [
@@ -141,6 +142,8 @@ import { BillingModule } from './modules/billing/billing.module';
     JobProgressModule,
     RecommendationModule,
     BillingModule,
+    ExamCacheModule,
+    ExportModule,
   ],
   providers: [],
 })

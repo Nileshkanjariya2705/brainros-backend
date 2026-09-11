@@ -40,6 +40,94 @@ const MONTH_NAMES = [
 
 const DEFAULT_PRICE_PER_STUDENT = 300;
 const PRICING_SETTING_KEY = 'PRICE_PER_STUDENT_PER_MONTH';
+const TAX_CONFIG_SETTING_KEY = 'BILLING_TAX_CONFIGURATION';
+
+export const GST_STATE_CODES: Record<string, string> = {
+  'JAMMU AND KASHMIR': '01',
+  'HIMACHAL PRADESH': '02',
+  'PUNJAB': '03',
+  'CHANDIGARH': '04',
+  'UTTARAKHAND': '05',
+  'HARYANA': '06',
+  'DELHI': '07',
+  'RAJASTHAN': '08',
+  'UTTAR PRADESH': '09',
+  'BIHAR': '10',
+  'SIKKIM': '11',
+  'ARUNACHAL PRADESH': '12',
+  'NAGALAND': '13',
+  'MANIPUR': '14',
+  'MIZORAM': '15',
+  'TRIPURA': '16',
+  'MEGHALAYA': '17',
+  'ASSAM': '18',
+  'WEST BENGAL': '19',
+  'JHARKHAND': '20',
+  'ODISHA': '21',
+  'CHHATTISGARH': '22',
+  'MADHYA PRADESH': '23',
+  'GUJARAT': '24',
+  'DAMAN AND DIU': '25',
+  'DADRA AND NAGAR HAVELI': '26',
+  'MAHARASHTRA': '27',
+  'ANDHRA PRADESH': '37',
+  'KARNATAKA': '29',
+  'GOA': '30',
+  'LAKSHADWEEP': '31',
+  'KERALA': '32',
+  'TAMIL NADU': '33',
+  'PUDUCHERRY': '34',
+  'ANDAMAN AND NICOBAR ISLANDS': '35',
+  'TELANGANA': '36',
+  'LADAKH': '38',
+  'OTHER TERRITORY': '97',
+};
+
+export interface TaxConfigurationData {
+  taxName: string;
+  hsnSacCode: string;
+  gstRate: number;
+  cessRate: number;
+  isGstEnabled: boolean;
+  reverseCharge: boolean;
+  supplierLegalName: string;
+  supplierTradeName: string;
+  supplierGstin: string;
+  supplierPan: string;
+  supplierState: string;
+  supplierStateCode: string;
+  supplierAddress: string;
+  supplierEmail: string;
+  supplierPhone: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankBranch: string;
+  additionalCharges?: any[];
+}
+
+export const DEFAULT_TAX_CONFIG: TaxConfigurationData = {
+  taxName: 'Goods and Services Tax (GST)',
+  hsnSacCode: '999293',
+  gstRate: 18,
+  cessRate: 0,
+  isGstEnabled: true,
+  reverseCharge: false,
+  supplierLegalName: 'Brainros Educational Technologies Pvt. Ltd.',
+  supplierTradeName: 'Brainros',
+  supplierGstin: '29AABCB1234F1Z5',
+  supplierPan: 'AABCB1234F',
+  supplierState: 'Karnataka',
+  supplierStateCode: '29',
+  supplierAddress: 'Tech Park, Outer Ring Road, Bangalore - 560103, Karnataka',
+  supplierEmail: 'billing@brainros.com',
+  supplierPhone: '+91 90000 00000',
+  bankName: 'HDFC Bank',
+  bankAccountNumber: '50200012345678',
+  bankIfsc: 'HDFC0001234',
+  bankBranch: 'Koramangala, Bangalore',
+  additionalCharges: [],
+};
 
 @Injectable()
 export class BillingService {
@@ -119,6 +207,162 @@ export class BillingService {
     return {
       pricePerStudent: newPrice,
       message: `Price per student per month updated to ₹${newPrice}. Future invoices will use this rate; historical invoices remain strictly unaffected.`,
+    };
+  }
+
+  /**
+   * ── DYNAMIC INDIAN GST & TAX CONFIGURATION ─────────────────────
+   */
+  async getTaxConfiguration(): Promise<TaxConfigurationData> {
+    const setting = await this.prisma.systemSetting.findUnique({
+      where: { key: TAX_CONFIG_SETTING_KEY },
+    });
+
+    if (!setting || !setting.value) {
+      return DEFAULT_TAX_CONFIG;
+    }
+
+    try {
+      const parsed = JSON.parse(setting.value);
+      return {
+        ...DEFAULT_TAX_CONFIG,
+        ...parsed,
+      };
+    } catch {
+      return DEFAULT_TAX_CONFIG;
+    }
+  }
+
+  async updateTaxConfiguration(
+    dto: Partial<TaxConfigurationData>,
+    userId: string,
+  ): Promise<{ taxConfiguration: TaxConfigurationData; message: string }> {
+    const current = await this.getTaxConfiguration();
+    const updated: TaxConfigurationData = {
+      ...current,
+      ...dto,
+    };
+
+    if (updated.gstRate < 0 || updated.gstRate > 100) {
+      throw new BadRequestException('GST rate must be between 0% and 100%.');
+    }
+
+    await this.prisma.systemSetting.upsert({
+      where: { key: TAX_CONFIG_SETTING_KEY },
+      create: {
+        key: TAX_CONFIG_SETTING_KEY,
+        value: JSON.stringify(updated),
+        description: 'Dynamic Indian GST & tax compliance configuration for institutional invoices',
+        updatedById: userId,
+      },
+      update: {
+        value: JSON.stringify(updated),
+        updatedById: userId,
+      },
+    });
+
+    // Audit Log for Tax Config change
+    await this.prisma.auditLog.create({
+      data: {
+        actorUserId: userId,
+        action: 'TAX_CONFIGURATION_CHANGED',
+        entityType: 'SYSTEM_SETTING',
+        entityId: TAX_CONFIG_SETTING_KEY,
+        beforeState: current as any,
+        afterState: updated as any,
+        metadata: {
+          changedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    this.logger.log(`GST Tax Configuration updated by user '${userId}'`);
+
+    return {
+      taxConfiguration: updated,
+      message: 'Indian GST & Tax Configuration updated successfully. Future invoices will adhere to this tax structure.',
+    };
+  }
+
+  /**
+   * Calculates compliant GST taxes based on intra-state vs inter-state supply rules
+   */
+  public calculateTaxForInstitution(
+    taxableAmount: number,
+    institution: any,
+    config: TaxConfigurationData,
+  ) {
+    if (!config.isGstEnabled || config.gstRate <= 0) {
+      return {
+        taxableAmount,
+        isInterState: false,
+        cgstRate: 0,
+        cgstAmount: 0,
+        sgstRate: 0,
+        sgstAmount: 0,
+        igstRate: 0,
+        igstAmount: 0,
+        cessRate: 0,
+        cessAmount: 0,
+        totalTax: 0,
+        grandTotal: taxableAmount,
+        placeOfSupply: institution?.state || config.supplierState,
+        placeOfSupplyCode: config.supplierStateCode,
+        hsnSacCode: config.hsnSacCode,
+        reverseCharge: config.reverseCharge,
+      };
+    }
+
+    const rawState = (institution?.stateRef?.name || institution?.state || config.supplierState || 'Karnataka').trim();
+    const normalizedState = rawState.toUpperCase();
+    const stateCode =
+      institution?.stateRef?.code ||
+      GST_STATE_CODES[normalizedState] ||
+      (normalizedState === config.supplierState.toUpperCase() ? config.supplierStateCode : '97');
+
+    const supplierStateCode = (config.supplierStateCode || '29').trim();
+    const isInterState = stateCode !== supplierStateCode;
+
+    let cgstRate = 0;
+    let cgstAmount = 0;
+    let sgstRate = 0;
+    let sgstAmount = 0;
+    let igstRate = 0;
+    let igstAmount = 0;
+
+    if (!isInterState) {
+      cgstRate = Math.round((config.gstRate / 2) * 100) / 100;
+      sgstRate = Math.round((config.gstRate / 2) * 100) / 100;
+      cgstAmount = Math.round(((taxableAmount * cgstRate) / 100) * 100) / 100;
+      sgstAmount = Math.round(((taxableAmount * sgstRate) / 100) * 100) / 100;
+    } else {
+      igstRate = config.gstRate;
+      igstAmount = Math.round(((taxableAmount * igstRate) / 100) * 100) / 100;
+    }
+
+    const cessRate = config.cessRate || 0;
+    const cessAmount = cessRate > 0 ? Math.round(((taxableAmount * cessRate) / 100) * 100) / 100 : 0;
+
+    const totalTax = Math.round((cgstAmount + sgstAmount + igstAmount + cessAmount) * 100) / 100;
+    const grandTotal = Math.round((taxableAmount + totalTax) * 100) / 100;
+
+    return {
+      taxableAmount,
+      isInterState,
+      cgstRate,
+      cgstAmount,
+      sgstRate,
+      sgstAmount,
+      igstRate,
+      igstAmount,
+      cessRate,
+      cessAmount,
+      totalTax,
+      grandTotal,
+      placeOfSupply: rawState,
+      placeOfSupplyCode: stateCode,
+      hsnSacCode: config.hsnSacCode,
+      reverseCharge: config.reverseCharge,
     };
   }
 
@@ -212,12 +456,26 @@ export class BillingService {
 
   /**
    * ── INVOICE PREVIEW ─────────────────────────────────────────────
-   * Calculates live student count and total based on current price.
+   * Calculates live student count, taxable subtotal, GST breakdown, and grand total.
    */
-  async getInvoicePreview(institutionId: string, billingMonth: number, billingYear: number) {
+  async getInvoicePreview(
+    institutionId: string,
+    billingMonth: number,
+    billingYear: number,
+    customPrice?: number,
+  ) {
     const institution = await this.prisma.institution.findUnique({
       where: { id: institutionId },
-      select: { id: true, name: true, code: true, email: true, phone: true, city: true },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        email: true,
+        phone: true,
+        city: true,
+        state: true,
+        stateRef: { select: { id: true, name: true, code: true } },
+      },
     });
 
     if (!institution) {
@@ -225,8 +483,11 @@ export class BillingService {
     }
 
     const studentCount = await this.countEligibleStudents(institutionId);
-    const pricePerStudent = await this.getPricingSetting();
-    const totalAmount = studentCount * pricePerStudent;
+    const defaultPrice = await this.getPricingSetting();
+    const pricePerStudent = typeof customPrice === 'number' && customPrice >= 0 ? customPrice : defaultPrice;
+    const taxableAmount = studentCount * pricePerStudent;
+    const taxConfig = await this.getTaxConfiguration();
+    const taxDetails = this.calculateTaxForInstitution(taxableAmount, institution, taxConfig);
 
     const existingInvoice = await this.prisma.bill.findUnique({
       where: {
@@ -246,7 +507,12 @@ export class BillingService {
       periodLabel: `${MONTH_NAMES[billingMonth]} ${billingYear}`,
       studentCount,
       pricePerStudent,
-      totalAmount,
+      taxableAmount,
+      amount: taxableAmount,
+      tax: taxDetails.totalTax,
+      totalAmount: taxDetails.grandTotal,
+      taxDetails,
+      taxConfig,
       alreadyGenerated: Boolean(existingInvoice),
       existingInvoice,
     };
@@ -255,7 +521,7 @@ export class BillingService {
   /**
    * ── GENERATE SCHOOL INVOICE ─────────────────────────────────────
    * Generates invoice for a specific school and billing period.
-   * Stores price snapshot (pricePerStudent) and studentCount.
+   * Stores price snapshot (pricePerStudent), studentCount, and immutable GST tax snapshot.
    */
   async generateInvoice(dto: GenerateInvoiceDto, userId: string) {
     const { institutionId, billingMonth, billingYear } = dto;
@@ -266,6 +532,9 @@ export class BillingService {
 
     const institution = await this.prisma.institution.findUnique({
       where: { id: institutionId },
+      include: {
+        stateRef: { select: { id: true, name: true, code: true } },
+      },
     });
 
     if (!institution) {
@@ -297,14 +566,24 @@ export class BillingService {
       );
     }
 
-    // Current price snapshot
-    const pricePerStudent = await this.getPricingSetting();
-    const amount = studentCount * pricePerStudent;
-    const tax = 0;
-    const totalAmount = amount;
+    // Current price snapshot and dynamic GST calculation
+    const defaultPrice = await this.getPricingSetting();
+    const pricePerStudent =
+      typeof dto.pricePerStudent === 'number' && dto.pricePerStudent >= 0
+        ? dto.pricePerStudent
+        : defaultPrice;
+    const taxableAmount = studentCount * pricePerStudent;
+    const taxConfig = await this.getTaxConfiguration();
+    const taxDetails = this.calculateTaxForInstitution(taxableAmount, institution, taxConfig);
 
     const billNumber = await this.generateInvoiceNumber(billingYear, billingMonth);
     const periodLabel = `${MONTH_NAMES[billingMonth]} ${billingYear}`;
+
+    const taxSnapshot = {
+      ...taxDetails,
+      taxConfig,
+      calculatedAt: new Date().toISOString(),
+    };
 
     return this.prisma.$transaction(async (tx) => {
       const bill = await tx.bill.create({
@@ -317,12 +596,13 @@ export class BillingService {
           billingYear,
           studentCount,
           pricePerStudent,
-          amount,
-          tax,
-          totalAmount,
+          amount: taxableAmount,
+          tax: taxDetails.totalTax,
+          totalAmount: taxDetails.grandTotal,
           status: 'GENERATED',
           emailStatus: 'IDLE',
           description: `Student Platform Subscription (${periodLabel})`,
+          metadata: JSON.parse(JSON.stringify({ taxSnapshot })),
         },
         include: {
           institution: { select: { id: true, name: true, code: true, email: true, phone: true } },
@@ -344,21 +624,26 @@ export class BillingService {
             billingYear,
             studentCount,
             pricePerStudent,
-            totalAmount,
+            amount: taxableAmount,
+            tax: taxDetails.totalTax,
+            totalAmount: taxDetails.grandTotal,
             status: 'GENERATED',
           },
           metadata: {
             schoolName: institution.name,
             studentCount,
             pricePerStudent,
-            totalAmount,
+            taxableAmount,
+            totalTax: taxDetails.totalTax,
+            totalAmount: taxDetails.grandTotal,
+            isInterState: taxDetails.isInterState,
             billingPeriod: periodLabel,
           },
         },
       });
 
       this.logger.log(
-        `Generated invoice ${billNumber} for ${institution.name}: ${studentCount} students × ₹${pricePerStudent} = ₹${totalAmount}`,
+        `Generated GST invoice ${billNumber} for ${institution.name}: ${studentCount} students × ₹${pricePerStudent} = ₹${taxableAmount} + GST ₹${taxDetails.totalTax} = ₹${taxDetails.grandTotal}`,
       );
 
       return bill;
@@ -373,10 +658,16 @@ export class BillingService {
   async generateBulkInvoices(dto: GenerateInvoiceDto, userId: string) {
     const { billingMonth, billingYear } = dto;
     const periodLabel = `${MONTH_NAMES[billingMonth]} ${billingYear}`;
-    const pricePerStudent = await this.getPricingSetting();
+    const defaultPrice = await this.getPricingSetting();
+    const pricePerStudent =
+      typeof dto.pricePerStudent === 'number' && dto.pricePerStudent >= 0
+        ? dto.pricePerStudent
+        : defaultPrice;
+    const taxConfig = await this.getTaxConfiguration();
 
     const institutions = await this.prisma.institution.findMany({
       where: { status: { in: ['ACTIVE', 'APPROVED'] } },
+      include: { stateRef: { select: { id: true, name: true, code: true } } },
       orderBy: { name: 'asc' },
     });
 
@@ -416,9 +707,15 @@ export class BillingService {
           if (studentCount === 0) {
             skippedCount++;
           } else {
-            const amount = studentCount * pricePerStudent;
-            const totalAmount = amount;
+            const taxableAmount = studentCount * pricePerStudent;
+            const taxDetails = this.calculateTaxForInstitution(taxableAmount, inst, taxConfig);
             const billNumber = await this.generateInvoiceNumber(billingYear, billingMonth);
+
+            const taxSnapshot = {
+              ...taxDetails,
+              taxConfig,
+              calculatedAt: new Date().toISOString(),
+            };
 
             await this.prisma.bill.create({
               data: {
@@ -430,12 +727,13 @@ export class BillingService {
                 billingYear,
                 studentCount,
                 pricePerStudent,
-                amount,
-                tax: 0,
-                totalAmount,
+                amount: taxableAmount,
+                tax: taxDetails.totalTax,
+                totalAmount: taxDetails.grandTotal,
                 status: 'GENERATED',
                 emailStatus: 'IDLE',
                 description: `Student Platform Subscription (${periodLabel})`,
+                metadata: JSON.parse(JSON.stringify({ taxSnapshot })),
               },
             });
 
@@ -649,8 +947,12 @@ export class BillingService {
 
     const where: any = {};
 
-    // Scope enforcement for non-Super Admin
-    if (!userRoles.includes('SUPER_ADMIN')) {
+    // Scope enforcement: Platform staff & super admins see all invoices (or filter by institutionId)
+    const isPlatformStaff = userRoles.some((r) =>
+      ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER'].includes(r),
+    );
+
+    if (!isPlatformStaff) {
       const adminRecord = await this.prisma.institutionAdmin.findFirst({
         where: { userId, isActive: true },
       });
@@ -659,7 +961,7 @@ export class BillingService {
       } else {
         where.createdById = userId;
       }
-    } else if (filter.institutionId) {
+    } else if (filter.institutionId && filter.institutionId !== 'ALL') {
       where.institutionId = filter.institutionId;
     }
 
@@ -839,6 +1141,7 @@ export class BillingService {
       },
       approvedBy: b.approvedBy ? { id: b.approvedBy.id, name: b.approvedBy.name || b.approvedBy.email } : null,
       approvedAt: b.approvedAt,
+      metadata: b.metadata,
       createdAt: b.createdAt,
     };
   }
@@ -1125,6 +1428,8 @@ export class BillingService {
     userRoles: string[],
   ): Promise<{ filename: string; buffer: Buffer }> {
     const bill = await this.getBillById(billId, userId, userRoles);
+    const taxConfig = await this.getTaxConfiguration();
+    const snapshot = (bill.metadata as any)?.taxSnapshot;
 
     const buffer = await this.pdfService.generateBillPdf({
       billNumber: bill.billNumber,
@@ -1136,12 +1441,42 @@ export class BillingService {
       schoolEmail: bill.institution.email,
       schoolPhone: bill.institution.phone,
       schoolAddress: bill.institution.address,
+      schoolCity: (bill.institution as any).city,
+      schoolState: snapshot?.placeOfSupply || bill.institution.state,
+      schoolStateCode: snapshot?.placeOfSupplyCode,
+      schoolGstin: (bill.institution as any).settings?.gstin,
       studentCount: bill.studentCount,
       pricePerStudent: bill.pricePerStudent,
       description: bill.description,
+      hsnSacCode: snapshot?.hsnSacCode || taxConfig.hsnSacCode,
       amount: bill.amount,
+      taxableValue: snapshot?.taxableAmount || bill.amount,
+      isInterState: snapshot?.isInterState,
+      cgstRate: snapshot?.cgstRate,
+      cgstAmount: snapshot?.cgstAmount,
+      sgstRate: snapshot?.sgstRate,
+      sgstAmount: snapshot?.sgstAmount,
+      igstRate: snapshot?.igstRate,
+      igstAmount: snapshot?.igstAmount,
+      cessRate: snapshot?.cessRate,
+      cessAmount: snapshot?.cessAmount,
       tax: bill.tax,
       totalAmount: bill.totalAmount,
+      amountInWords: snapshot?.amountInWords,
+      reverseCharge: snapshot?.reverseCharge ?? taxConfig.reverseCharge,
+      supplierLegalName: taxConfig.supplierLegalName,
+      supplierTradeName: taxConfig.supplierTradeName,
+      supplierGstin: taxConfig.supplierGstin,
+      supplierPan: taxConfig.supplierPan,
+      supplierState: taxConfig.supplierState,
+      supplierStateCode: taxConfig.supplierStateCode,
+      supplierAddress: taxConfig.supplierAddress,
+      supplierEmail: taxConfig.supplierEmail,
+      supplierPhone: taxConfig.supplierPhone,
+      bankName: taxConfig.bankName,
+      bankAccountNumber: taxConfig.bankAccountNumber,
+      bankIfsc: taxConfig.bankIfsc,
+      bankBranch: taxConfig.bankBranch,
       status: bill.status,
       createdByName: bill.createdBy.name,
       approvedByName: bill.approvedBy?.name,

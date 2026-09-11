@@ -212,8 +212,8 @@ export class ExamAttemptController {
 
   @Get('my-history')
   @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN', 'PARENT', 'INSTITUTION_ADMIN')
-  async getMyAttempts(@CurrentUser() user: any) {
+  async getMyAttempts(@CurrentUser() user: any, @Query() query: any) {
     const studentId = await this.resolveStudentId(user);
-    return this.attemptService.getStudentAttempts(studentId, user?.userId);
+    return this.attemptService.getStudentAttempts(studentId, user?.userId, query);
   }
 }

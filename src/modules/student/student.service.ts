@@ -53,6 +53,15 @@ export class StudentService {
             isActive: true,
             lastLoginAt: true,
             createdAt: true,
+            userRoles: {
+              select: {
+                role: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -166,10 +175,25 @@ export class StudentService {
               isActive: true,
               lastLoginAt: true,
               createdAt: true,
+              userRoles: {
+                select: {
+                  role: {
+                    select: {
+                      name: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
       });
+    }
+
+    if (student && student.user) {
+      const roles =
+        (student.user as any)?.userRoles?.map((ur: any) => ur.role?.name).filter(Boolean) || [];
+      (student.user as any).roles = roles;
     }
 
     return student;
@@ -191,27 +215,7 @@ export class StudentService {
       currentStudent = await this.getProfile(userId);
     }
 
-    // Validate relationships if provided
-    if (dto.classId) {
-      const cls = await this.prisma.studentClass.findUnique({
-        where: { id: dto.classId },
-      });
-      if (!cls) throw new NotFoundException('Selected class not found.');
-      if (cls.name === 'FOUNDATION') {
-        throw new BadRequestException(
-          'Class FOUNDATION is no longer available.',
-        );
-      }
-    }
-
-    if (dto.examTargetId) {
-      const target = await this.prisma.examTarget.findUnique({
-        where: { id: dto.examTargetId },
-      });
-      if (!target)
-        throw new NotFoundException('Selected exam target not found.');
-    }
-
+    // Validate preferred language if provided
     if (dto.preferredLanguageId) {
       const lang = await this.prisma.preferredLanguage.findUnique({
         where: { id: dto.preferredLanguageId },
@@ -222,92 +226,22 @@ export class StudentService {
         throw new BadRequestException('Selected language is not active.');
     }
 
-    let stateName = dto.state !== undefined ? dto.state.trim() : currentStudent.state;
-    let districtName = dto.district !== undefined ? dto.district.trim() : currentStudent.district;
-    let finalStateId = dto.stateId || currentStudent.stateId;
-    let finalDistrictId = dto.districtId || currentStudent.districtId;
-
-    if (dto.stateId) {
-      const state = await this.prisma.state.findUnique({
-        where: { id: dto.stateId },
-      });
-      if (!state) throw new NotFoundException('Selected state not found.');
-      if (!state.isActive)
-        throw new BadRequestException('Selected state is not active.');
-      stateName = state.name;
-      finalStateId = state.id;
-    } else if (dto.state) {
-      const state = await this.prisma.state.findFirst({
-        where: { name: { equals: dto.state.trim(), mode: 'insensitive' } },
-      });
-      if (state) {
-        stateName = state.name;
-        finalStateId = state.id;
+    // Only name and preferredLanguageId are student-editable
+    const updateData: any = {};
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (!trimmedName) {
+        throw new BadRequestException('Name cannot be empty.');
       }
+      updateData.name = trimmedName;
+    }
+    if (dto.preferredLanguageId !== undefined) {
+      updateData.preferredLanguageId = dto.preferredLanguageId;
     }
 
-    if (dto.districtId) {
-      const district = await this.prisma.district.findUnique({
-        where: { id: dto.districtId },
-        include: { state: true },
-      });
-      if (!district)
-        throw new NotFoundException('Selected district/city not found.');
-
-      if (finalStateId && district.stateId !== finalStateId) {
-        throw new BadRequestException(
-          'Selected city/district does not belong to the selected state.',
-        );
-      }
-      districtName = district.name;
-      finalDistrictId = district.id;
-      if (!finalStateId) {
-        finalStateId = district.stateId;
-        stateName = district.state?.name || stateName;
-      }
-    } else if (dto.district) {
-      const matchingDistricts = await this.prisma.district.findMany({
-        where: { name: { equals: dto.district.trim(), mode: 'insensitive' } },
-        include: { state: true },
-      });
-      if (matchingDistricts.length > 0) {
-        const belongsToState = matchingDistricts.find(
-          (d) =>
-            (finalStateId && d.stateId === finalStateId) ||
-            (stateName && d.state?.name?.toLowerCase() === stateName.toLowerCase()),
-        );
-        if (!belongsToState && stateName) {
-          const otherStateNames = matchingDistricts.map((d) => d.state?.name).filter(Boolean);
-          if (otherStateNames.length > 0 && !otherStateNames.some((s) => s?.toLowerCase() === stateName.toLowerCase())) {
-            throw new BadRequestException(
-              `Selected city/district '${dto.district}' does not belong to state '${stateName}'.`,
-            );
-          }
-        }
-        if (belongsToState) {
-          districtName = belongsToState.name;
-          finalDistrictId = belongsToState.id;
-        }
-      }
-    }
-
-    // Update profile
     const updatedStudent = await this.prisma.student.update({
       where: { userId },
-      data: {
-        name: dto.name !== undefined ? dto.name.trim() : undefined,
-        schoolCollege:
-          dto.schoolCollege !== undefined
-            ? dto.schoolCollege.trim()
-            : undefined,
-        classId: dto.classId,
-        examTargetId: dto.examTargetId,
-        preferredLanguageId: dto.preferredLanguageId,
-        stateId: finalStateId,
-        districtId: finalDistrictId,
-        state: stateName,
-        district: districtName,
-      },
+      data: updateData,
       include: {
         studentClass: true,
         examTarget: true,
@@ -329,6 +263,13 @@ export class StudentService {
         },
       },
     });
+
+    // Invalidate dashboard Redis cache
+    try {
+      await this.redisService.del(`student:${userId}:dashboard`);
+    } catch {
+      // Non-fatal
+    }
 
     await this.securityEventService.log('ROLE_CHANGED', {
       userId,
@@ -607,6 +548,7 @@ export class StudentService {
 
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
+    const skip = (page - 1) * limit;
     const now = new Date();
 
     // Base criteria: Exclude DRAFT, CANCELLED, GENERATING, and un-scheduled APPROVED exams
@@ -642,47 +584,128 @@ export class StudentService {
       ];
     }
 
-    // Fetch matching exams with schedules, target, and student's attempts + results
-    const rawExams = await this.prisma.exam.findMany({
-      where,
-      include: {
-        examTarget: { select: { id: true, name: true } },
-        status: { select: { id: true, name: true } },
-        schedules: {
-          where: { status: { in: ['SCHEDULED', 'ACTIVE', 'ENDED'] } },
-          orderBy: { startTime: 'desc' },
-          take: 1,
+    // Database-level status filtering
+    if (query.status === 'UPCOMING') {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { startTime: { gt: now } },
+            { schedules: { some: { status: { in: ['SCHEDULED', 'ACTIVE'] }, startTime: { gt: now } } } },
+          ],
         },
-        sections: {
-          include: {
-            subject: { select: { id: true, name: true } },
-          },
-        },
-        attempts: {
-          where: { studentId: student.id },
-          include: {
-            status: true,
-            result: {
-              select: {
-                id: true,
-                totalScore: true,
-                maxScore: true,
-                percentage: true,
-                accuracy: true,
-                resultStatus: true,
-                publishedAt: true,
+        {
+          NOT: {
+            attempts: {
+              some: {
+                studentId: student.id,
+                status: { name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'] } },
               },
             },
           },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+      ];
+    } else if (query.status === 'LIVE') {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { startTime: { lte: now }, endTime: { gt: now } },
+            { schedules: { some: { status: 'ACTIVE', startTime: { lte: now }, endTime: { gt: now } } } },
+          ],
+        },
+        {
+          NOT: {
+            attempts: {
+              some: {
+                studentId: student.id,
+                status: { name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'] } },
+              },
+            },
+          },
+        },
+      ];
+    } else if (query.status === 'COMPLETED') {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            {
+              attempts: {
+                some: {
+                  studentId: student.id,
+                  status: { name: { in: ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'] } },
+                },
+              },
+            },
+            { endTime: { lte: now } },
+            { schedules: { some: { endTime: { lte: now } } } },
+          ],
+        },
+      ];
+    }
 
-    // Map each exam to student view with calculated lifecycle status
-    const allItems = rawExams.map((exam) => {
+    // Database-level sorting
+    let orderBy: any = { createdAt: 'desc' };
+    const sort = query.sort || 'UPCOMING_SOONEST';
+    if (sort === 'UPCOMING_SOONEST') {
+      orderBy = [{ startTime: 'asc' }, { createdAt: 'desc' }];
+    } else if (sort === 'NEWEST') {
+      orderBy = { createdAt: 'desc' };
+    } else if (sort === 'OLDEST') {
+      orderBy = { createdAt: 'asc' };
+    } else if (sort === 'NAME_ASC') {
+      orderBy = { title: 'asc' };
+    } else if (sort === 'NAME_DESC') {
+      orderBy = { title: 'desc' };
+    }
+
+    // Database-level pagination with LIMIT and OFFSET
+    const [rawExams, total] = await Promise.all([
+      this.prisma.exam.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+        include: {
+          examTarget: { select: { id: true, name: true } },
+          status: { select: { id: true, name: true } },
+          schedules: {
+            where: { status: { in: ['SCHEDULED', 'ACTIVE', 'ENDED'] } },
+            orderBy: { startTime: 'desc' },
+            take: 1,
+          },
+          sections: {
+            include: {
+              subject: { select: { id: true, name: true } },
+            },
+          },
+          attempts: {
+            where: { studentId: student.id },
+            include: {
+              status: true,
+              result: {
+                select: {
+                  id: true,
+                  totalScore: true,
+                  maxScore: true,
+                  percentage: true,
+                  accuracy: true,
+                  resultStatus: true,
+                  publishedAt: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.exam.count({ where }),
+    ]);
+
+    // Map each exam to student view with calculated authoritative lifecycle status
+    const items = rawExams.map((exam) => {
       const schedule = exam.schedules?.[0] || null;
       const attempt = exam.attempts?.[0] || null;
       const attemptStatus = attempt?.status?.name || 'NOT_STARTED';
@@ -690,7 +713,7 @@ export class StudentService {
       const startTime = schedule?.startTime || exam.startTime || null;
       const endTime = schedule?.endTime || exam.endTime || null;
 
-      // Determine dynamic lifecycle status
+      // Authoritative dynamic lifecycle status
       let calculatedStatus: 'UPCOMING' | 'LIVE' | 'COMPLETED' = 'UPCOMING';
       let canStart = false;
 
@@ -701,22 +724,28 @@ export class StudentService {
 
       if (isAttemptCompleted) {
         calculatedStatus = 'COMPLETED';
+        canStart = false;
+      } else if (endTime && now.getTime() >= new Date(endTime).getTime()) {
+        // Official end time has passed - exam is no longer live under ANY circumstances
+        calculatedStatus = 'COMPLETED';
+        canStart = false;
       } else if (isInProgress) {
         calculatedStatus = 'LIVE';
+        canStart = false;
       } else if (
-        (startTime && endTime && startTime <= now && endTime >= now) ||
-        exam.status?.name === 'ACTIVE'
+        startTime &&
+        endTime &&
+        new Date(startTime).getTime() <= now.getTime() &&
+        new Date(endTime).getTime() > now.getTime()
       ) {
         calculatedStatus = 'LIVE';
         canStart = true;
-      } else if (startTime && startTime > now) {
+      } else if (startTime && new Date(startTime).getTime() > now.getTime()) {
         calculatedStatus = 'UPCOMING';
-      } else if (endTime && endTime < now) {
-        // Expired without attempt
-        calculatedStatus = 'COMPLETED';
+        canStart = false;
       } else {
-        calculatedStatus = exam.status?.name === 'ACTIVE' ? 'LIVE' : 'UPCOMING';
-        canStart = calculatedStatus === 'LIVE';
+        calculatedStatus = 'UPCOMING';
+        canStart = false;
       }
 
       return {
@@ -730,11 +759,11 @@ export class StudentService {
         status: calculatedStatus,
         rawStatus: exam.status?.name,
         canStart: canStart && !isAttemptCompleted && !isInProgress,
-        canResume: isInProgress,
+        canResume: isInProgress && (!endTime || now.getTime() < new Date(endTime).getTime()),
         isInProgress,
         activeAttemptId: isInProgress ? attempt?.id : null,
-        startTime: startTime ? startTime.toISOString() : null,
-        endTime: endTime ? endTime.toISOString() : null,
+        startTime: startTime ? new Date(startTime).toISOString() : null,
+        endTime: endTime ? new Date(endTime).toISOString() : null,
         scheduleId: schedule?.id || null,
         attempt: attempt
           ? {
@@ -750,36 +779,7 @@ export class StudentService {
       };
     });
 
-    // Filter by tab if requested
-    let filtered = allItems;
-    if (query.status && query.status !== 'ALL') {
-      filtered = allItems.filter((e) => e.status === query.status);
-    }
-
-    // Sort
-    const sort = query.sort || 'UPCOMING_SOONEST';
-    filtered.sort((a, b) => {
-      if (sort === 'UPCOMING_SOONEST') {
-        const timeA = a.startTime ? new Date(a.startTime).getTime() : Infinity;
-        const timeB = b.startTime ? new Date(b.startTime).getTime() : Infinity;
-        return timeA - timeB;
-      } else if (sort === 'NEWEST') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      } else if (sort === 'OLDEST') {
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      } else if (sort === 'NAME_ASC') {
-        return a.title.localeCompare(b.title);
-      } else if (sort === 'NAME_DESC') {
-        return b.title.localeCompare(a.title);
-      }
-      return 0;
-    });
-
-    // Paginate
-    const total = filtered.length;
     const totalPages = Math.ceil(total / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const items = filtered.slice(startIndex, startIndex + limit);
 
     return {
       items,
@@ -794,8 +794,7 @@ export class StudentService {
 
   /**
    * ─── Student Mock Tests Discovery API ─────────────────────────────────────
-   * Returns practice tests and mock exams with attempt history, best score,
-   * difficulty rating, and subject filters.
+   * Returns practice tests and mock exams with server-side database pagination.
    */
   async getStudentMockTests(userId: string, query: any) {
     const student = await this.prisma.student.findFirst({
@@ -821,6 +820,7 @@ export class StudentService {
 
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
+    const skip = (page - 1) * limit;
 
     // Base criteria: Approved, non-draft mock exams
     const where: any = {
@@ -854,41 +854,94 @@ export class StudentService {
       ];
     }
 
-    // Fetch exams with sections, subjects, questions count, and student attempts
-    const rawMocks = await this.prisma.exam.findMany({
-      where,
-      include: {
-        examTarget: { select: { id: true, name: true } },
-        status: { select: { id: true, name: true } },
-        sections: {
-          include: {
-            subject: { select: { id: true, name: true } },
+    // Filter by attempt status tab at database level
+    if (query.attemptStatus === 'NOT_ATTEMPTED') {
+      where.attempts = { none: { studentId: student.id } };
+    } else if (query.attemptStatus === 'ATTEMPTED') {
+      where.attempts = { some: { studentId: student.id } };
+    }
+
+    // Filter by subject at database level
+    if (query.subjectId) {
+      where.sections = {
+        some: {
+          subject: {
+            OR: [
+              { id: query.subjectId },
+              { name: { contains: query.subjectId, mode: 'insensitive' } },
+            ],
           },
         },
-        attempts: {
-          where: { studentId: student.id },
-          include: {
-            status: true,
-            result: {
-              select: {
-                id: true,
-                totalScore: true,
-                maxScore: true,
-                percentage: true,
-                accuracy: true,
-                resultStatus: true,
-                publishedAt: true,
-              },
+      };
+    }
+
+    // Filter by difficulty at database level
+    if (query.difficulty && query.difficulty !== 'ALL') {
+      const diff = query.difficulty.toUpperCase();
+      if (diff === 'EASY') {
+        where.defaultNegativeMarks = { lte: 0 };
+      } else if (diff === 'HARD') {
+        where.defaultNegativeMarks = { gte: 1 };
+      } else if (diff === 'MEDIUM') {
+        where.defaultNegativeMarks = { gt: 0, lt: 1 };
+      }
+    }
+
+    // Server-side database sorting
+    let orderBy: any = { createdAt: 'desc' };
+    const sort = query.sort || 'NEWEST';
+    if (sort === 'NEWEST') {
+      orderBy = { createdAt: 'desc' };
+    } else if (sort === 'OLDEST') {
+      orderBy = { createdAt: 'asc' };
+    } else if (sort === 'NAME_ASC') {
+      orderBy = { title: 'asc' };
+    } else if (sort === 'NAME_DESC') {
+      orderBy = { title: 'desc' };
+    } else if (sort === 'MOST_ATTEMPTED') {
+      orderBy = { attempts: { _count: 'desc' } };
+    }
+
+    // Database-level pagination with LIMIT and OFFSET
+    const [rawMocks, total] = await Promise.all([
+      this.prisma.exam.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+        include: {
+          examTarget: { select: { id: true, name: true } },
+          status: { select: { id: true, name: true } },
+          sections: {
+            include: {
+              subject: { select: { id: true, name: true } },
             },
           },
-          orderBy: { createdAt: 'desc' },
+          attempts: {
+            where: { studentId: student.id },
+            include: {
+              status: true,
+              result: {
+                select: {
+                  id: true,
+                  totalScore: true,
+                  maxScore: true,
+                  percentage: true,
+                  accuracy: true,
+                  resultStatus: true,
+                  publishedAt: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+      }),
+      this.prisma.exam.count({ where }),
+    ]);
 
     // Map to mock test view
-    const allItems = rawMocks.map((exam) => {
+    const items = rawMocks.map((exam) => {
       const attempts = exam.attempts || [];
       const completedAttempts = attempts.filter((a) =>
         ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED'].includes(a.status?.name),
@@ -912,7 +965,7 @@ export class StudentService {
         }
       }
 
-      // Infer difficulty from negative marks or title
+      // Infer difficulty
       const negMarks = exam.defaultNegativeMarks || 0;
       let difficulty = 'MEDIUM';
       if (negMarks <= 0) difficulty = 'EASY';
@@ -953,52 +1006,7 @@ export class StudentService {
       };
     });
 
-    // Filter by attempt status tab
-    let filtered = allItems;
-    if (query.attemptStatus === 'NOT_ATTEMPTED') {
-      filtered = filtered.filter((m) => m.attemptStatus === 'NOT_ATTEMPTED');
-    } else if (query.attemptStatus === 'ATTEMPTED') {
-      filtered = filtered.filter(
-        (m) => m.attemptStatus === 'ATTEMPTED' || m.attemptStatus === 'IN_PROGRESS',
-      );
-    }
-
-    // Filter by subject
-    if (query.subjectId) {
-      filtered = filtered.filter((m) =>
-        m.subjects.some((s) => s.toLowerCase().includes(query.subjectId.toLowerCase())),
-      );
-    }
-
-    // Filter by difficulty
-    if (query.difficulty && query.difficulty !== 'ALL') {
-      filtered = filtered.filter(
-        (m) => m.difficulty.toUpperCase() === query.difficulty.toUpperCase(),
-      );
-    }
-
-    // Sort
-    const sort = query.sort || 'NEWEST';
-    filtered.sort((a, b) => {
-      if (sort === 'NEWEST') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      } else if (sort === 'OLDEST') {
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      } else if (sort === 'NAME_ASC') {
-        return a.title.localeCompare(b.title);
-      } else if (sort === 'NAME_DESC') {
-        return b.title.localeCompare(a.title);
-      } else if (sort === 'MOST_ATTEMPTED') {
-        return b.attemptsCount - a.attemptsCount;
-      }
-      return 0;
-    });
-
-    // Paginate
-    const total = filtered.length;
     const totalPages = Math.ceil(total / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const items = filtered.slice(startIndex, startIndex + limit);
 
     return {
       items,
@@ -1012,7 +1020,7 @@ export class StudentService {
   }
 
   /**
-   * Get student's mock test attempt history with full analytics details
+   * Get student's mock test attempt history with server-side pagination & analytics
    */
   async getStudentMockHistory(userId: string, query: any = {}) {
     const student = await this.prisma.student.findFirst({
@@ -1023,6 +1031,10 @@ export class StudentService {
     if (!student) {
       throw new NotFoundException(`Student profile not found for user '${userId}'`);
     }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(50, Number(query.limit) || 12));
+    const skip = (page - 1) * limit;
 
     const where: any = {
       studentId: student.id,
@@ -1042,92 +1054,119 @@ export class StudentService {
       };
     }
 
-    if (query.examTargetId) {
+    if (query.examTargetId && query.examTargetId !== 'ALL') {
       where.exam = {
         ...(where.exam || {}),
         examTargetId: query.examTargetId,
       };
     }
 
-    const attempts = await this.prisma.attempt.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        exam: {
-          select: {
-            id: true,
-            title: true,
-            totalQuestions: true,
-            totalMarks: true,
-            durationMinutes: true,
-            examTarget: { select: { id: true, name: true } },
-            sections: {
-              include: {
-                subject: { select: { id: true, name: true } },
-              },
-            },
-          },
-        },
-        status: { select: { id: true, name: true } },
-        result: {
-          select: {
-            id: true,
-            totalScore: true,
-            maxScore: true,
-            percentage: true,
-            accuracy: true,
-            correctAnswers: true,
-            wrongAnswers: true,
-            unattempted: true,
-            timeUsedSeconds: true,
-            averageTimePerQuestion: true,
-            resultStatus: true,
-            subjectResults: {
-              select: {
-                id: true,
-                subjectId: true,
-                subject: { select: { id: true, name: true } },
-                score: true,
-                maxScore: true,
-                accuracy: true,
-                correctAnswers: true,
-                wrongAnswers: true,
-                unattempted: true,
-              },
-            },
-          },
-        },
-        candidateRanks: {
-          select: {
-            rank: true,
-            totalCandidates: true,
-            percentile: true,
-            rankType: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        },
-        timeAnalyses: {
-          select: {
-            averageTimePerQuestionSeconds: true,
-            timeUtilizationPercentage: true,
-            totalTimeUsedSeconds: true,
-          },
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-        },
-        strategyAnalyses: {
-          select: {
-            primaryClassification: true,
-            avoidableNegativeMarks: true,
-            projectedScore: true,
-          },
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-    });
+    let orderBy: any = { createdAt: 'desc' };
+    const sortBy = query.sortBy || query.sort || 'NEWEST';
+    if (sortBy === 'NEWEST') {
+      orderBy = { createdAt: 'desc' };
+    } else if (sortBy === 'OLDEST') {
+      orderBy = { createdAt: 'asc' };
+    } else if (sortBy === 'SCORE_HIGH') {
+      orderBy = { result: { totalScore: 'desc' } };
+    } else if (sortBy === 'ACCURACY_HIGH') {
+      orderBy = { result: { accuracy: 'desc' } };
+    }
 
-    return attempts;
+    const [attempts, total] = await Promise.all([
+      this.prisma.attempt.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+        include: {
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              totalQuestions: true,
+              totalMarks: true,
+              durationMinutes: true,
+              examTarget: { select: { id: true, name: true } },
+              sections: {
+                include: {
+                  subject: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+          status: { select: { id: true, name: true } },
+          result: {
+            select: {
+              id: true,
+              totalScore: true,
+              maxScore: true,
+              percentage: true,
+              accuracy: true,
+              correctAnswers: true,
+              wrongAnswers: true,
+              unattempted: true,
+              timeUsedSeconds: true,
+              averageTimePerQuestion: true,
+              resultStatus: true,
+              subjectResults: {
+                select: {
+                  id: true,
+                  subjectId: true,
+                  subject: { select: { id: true, name: true } },
+                  score: true,
+                  maxScore: true,
+                  accuracy: true,
+                  correctAnswers: true,
+                  wrongAnswers: true,
+                  unattempted: true,
+                },
+              },
+            },
+          },
+          candidateRanks: {
+            select: {
+              rank: true,
+              totalCandidates: true,
+              percentile: true,
+              rankType: true,
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+          timeAnalyses: {
+            select: {
+              averageTimePerQuestionSeconds: true,
+              timeUtilizationPercentage: true,
+              totalTimeUsedSeconds: true,
+            },
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+          },
+          strategyAnalyses: {
+            select: {
+              primaryClassification: true,
+              avoidableNegativeMarks: true,
+              projectedScore: true,
+            },
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      }),
+      this.prisma.attempt.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return {
+      items: attempts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    };
   }
 
   /**

@@ -123,7 +123,7 @@ export class CompletedExamReportsService {
         durationMinutes: exam.durationMinutes,
         totalMarks: exam.totalMarks,
         totalQuestions: exam.totalQuestions,
-        examTarget: exam.examTarget,
+        examTarget: exam.examTarget?.name || 'General',
         status: exam.status?.name,
         publicationStatus: pub?.status || (exam._count?.attempts > 0 ? 'READY_TO_PUBLISH' : 'NOT_READY'),
         totalAttempts: exam._count?.attempts || 0,

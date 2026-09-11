@@ -164,7 +164,7 @@ export class ResultController {
     'admin/exams/:examId/results/processing-status',
     'super-admin/exams/:examId/results/processing-status',
   ])
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'GENERAL_MANAGER')
   async getExamProcessingStatus(@Param('examId') examId: string) {
     const data = await this.readinessService.getExamProcessingDetails(examId);
     return {
@@ -182,7 +182,7 @@ export class ResultController {
     'super-admin/exams/:examId/results/processing-summary',
     'admin/exams/:examId/results/processing-summary',
   ])
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async getExamProcessingSummary(@Param('examId') examId: string) {
     const data = await this.monitorService.getExamProcessingSummary(examId);
     return {
@@ -200,7 +200,7 @@ export class ResultController {
     'super-admin/exams/:examId/results/processing-jobs',
     'admin/exams/:examId/results/processing-jobs',
   ])
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async getExamProcessingJobs(
     @Param('examId') examId: string,
     @Query() query: ExamProcessingJobsQueryDto,
@@ -221,7 +221,7 @@ export class ResultController {
     'super-admin/exams/:examId/results/processing-jobs/:jobId',
     'admin/exams/:examId/results/processing-jobs/:jobId',
   ])
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async getJobDetail(
     @Param('examId') examId: string,
     @Param('jobId') jobId: string,

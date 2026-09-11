@@ -46,6 +46,7 @@ import { ExamApprovalHandler } from './approval/handlers/exam-approval.handler';
 import { InstitutionApprovalHandler } from './approval/handlers/institution-approval.handler';
 import { BulkUploadApprovalHandler } from './approval/handlers/bulk-upload-approval.handler';
 import { StaffUpdateApprovalHandler } from './approval/handlers/staff-update-approval.handler';
+import { StudentApprovalHandler } from './approval/handlers/student-approval.handler';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { StaffUpdateApprovalHandler } from './approval/handlers/staff-update-app
     InstitutionApprovalHandler,
     BulkUploadApprovalHandler,
     StaffUpdateApprovalHandler,
+    StudentApprovalHandler,
   ],
   exports: [
     AdminDashboardService,

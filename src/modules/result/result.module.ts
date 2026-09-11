@@ -11,6 +11,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
 import { RankEngineModule } from '../rank-engine/rank-engine.module';
 import { ExamSchedulingModule } from '../exam-scheduling/exam-scheduling.module';
+import { NotificationModule } from '../notification/notification.module';
 import {
   EVALUATION_QUEUE_NAME,
   ANALYTICS_QUEUE_NAME,
@@ -33,6 +34,7 @@ import { ResultProcessingMonitorService } from './services/result-processing-mon
     RedisModule,
     RankEngineModule,
     forwardRef(() => ExamSchedulingModule),
+    forwardRef(() => NotificationModule),
     BullModule.registerQueue(
       { name: EVALUATION_QUEUE_NAME },
       { name: ANALYTICS_QUEUE_NAME },

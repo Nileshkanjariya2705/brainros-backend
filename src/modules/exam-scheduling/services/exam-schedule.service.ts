@@ -12,6 +12,8 @@ import { NotificationQueueService } from '../../notification/queues/notification
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { EXAM_WINDOW_END_QUEUE_NAME } from '../../result/interfaces/result-lifecycle.interface';
+import { EXAM_CACHE_PREPARATION_QUEUE_NAME } from '../../exam-cache/interfaces/exam-cache.interface';
+import { ExamCacheService } from '../../exam-cache/services/exam-cache.service';
 
 @Injectable()
 export class ExamScheduleService {
@@ -21,8 +23,11 @@ export class ExamScheduleService {
     private readonly prisma: PrismaService,
     private readonly lifecycleService: ExamLifecycleService,
     private readonly notificationQueue: NotificationQueueService,
+    private readonly examCacheService: ExamCacheService,
     @InjectQueue(EXAM_WINDOW_END_QUEUE_NAME)
     private readonly windowEndQueue: Queue,
+    @InjectQueue(EXAM_CACHE_PREPARATION_QUEUE_NAME)
+    private readonly cachePrepQueue: Queue,
   ) {}
 
   /**
@@ -281,6 +286,31 @@ export class ExamScheduleService {
             changedBy: scheduledById,
             changedAt: new Date().toISOString(),
           },
+        },
+      });
+
+      // 5. Create pending ApprovalRequest for Super Admin approval queue
+      const isMock =
+        exam.title.toUpperCase().includes('MOCK') ||
+        exam.title.toUpperCase().includes('PRACTICE');
+
+      await tx.approvalRequest.create({
+        data: {
+          resourceType: isMock ? 'MOCK_TEST' : 'EXAM',
+          resourceId: examId,
+          requestedById: scheduledById,
+          status: 'PENDING',
+          metadata: {
+            examId,
+            title: exam.title,
+            scheduleId: schedule.id,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            totalQuestions: exam.totalQuestions,
+            durationMinutes: exam.durationMinutes,
+            isMock,
+          },
+          submittedAt: new Date(),
         },
       });
 
@@ -682,6 +712,31 @@ export class ExamScheduleService {
         },
       });
 
+      // 6b. Create pending ApprovalRequest for Super Admin approval queue
+      const isMockTest =
+        title.toUpperCase().includes('MOCK') ||
+        title.toUpperCase().includes('PRACTICE');
+
+      await tx.approvalRequest.create({
+        data: {
+          resourceType: isMockTest ? 'MOCK_TEST' : 'EXAM',
+          resourceId: exam.id,
+          requestedById: scheduledById,
+          status: 'PENDING',
+          metadata: {
+            examId: exam.id,
+            title: exam.title,
+            scheduleId: schedule.id,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            totalQuestions: Number(totalQuestions),
+            durationMinutes,
+            isMock: isMockTest,
+          },
+          submittedAt: new Date(),
+        },
+      });
+
       // 7. Audit log
       await this.lifecycleService.recordHistory(
         {
@@ -738,6 +793,29 @@ export class ExamScheduleService {
       });
     } catch (nErr: any) {
       this.logger.warn(`Notification dispatch error: ${nErr.message}`);
+    }
+
+    // Asynchronously dispatch BullMQ exam question cache preparation job
+    try {
+      const cacheJobId = `cache_prep_${scheduleRecord.examId}_${scheduleRecord.examVersionId}`;
+      await this.cachePrepQueue.add(
+        'PREPARE_EXAM_CACHE',
+        {
+          examId: scheduleRecord.examId,
+          examVersionId: scheduleRecord.examVersionId,
+          scheduleId: scheduleRecord.id,
+          officialExamEndTime: scheduleRecord.endTime.toISOString(),
+          userId: scheduledById,
+        },
+        {
+          jobId: cacheJobId,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: true,
+        },
+      );
+    } catch (cErr: any) {
+      this.logger.warn(`Failed to enqueue cache preparation job: ${cErr.message}`);
     }
 
     return scheduleRecord;
@@ -873,6 +951,13 @@ export class ExamScheduleService {
       scheduleId,
     });
 
+    // Update Redis question cache expiration based on new official end time
+    await this.examCacheService
+      .updateExamCacheTTL(schedule.examId, schedule.examVersionId, newEndTime)
+      .catch((tErr: any) => {
+        this.logger.warn(`Failed to update exam cache TTL on reschedule: ${tErr.message}`);
+      });
+
     // Update delayed BullMQ job to trigger automated batch evaluation at newEndTime
     try {
       const nowMs = Date.now();
@@ -1001,6 +1086,20 @@ export class ExamScheduleService {
       this.logger.log(
         `Exam '${schedule.examId}' (Schedule: '${scheduleId}') activated by Super Admin '${performedById}'`,
       );
+
+      // 4. Mark any pending approval request as APPROVED
+      await tx.approvalRequest.updateMany({
+        where: {
+          resourceType: { in: ['EXAM', 'MOCK_TEST', 'MOCK'] },
+          resourceId: schedule.examId,
+          status: 'PENDING',
+        },
+        data: {
+          status: 'APPROVED',
+          reviewedById: performedById,
+          reviewedAt: new Date(),
+        },
+      });
 
       return {
         message: 'Exam successfully activated by Super Admin.',

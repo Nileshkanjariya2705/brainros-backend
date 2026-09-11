@@ -40,6 +40,7 @@ export class AnswerKeyService {
         exam: {
           include: {
             status: { select: { name: true } },
+            examTarget: { select: { id: true, name: true } },
             examQuestions: {
               include: {
                 question: {
@@ -72,6 +73,10 @@ export class AnswerKeyService {
       throw new NotFoundException(`Schedule with ID '${scheduleId}' not found`);
     }
 
+    const studentAttemptsCount = await this.prisma.attempt.count({
+      where: { examId: schedule.examId },
+    });
+
     const versionQuestions = schedule.examVersion?.questions || [];
     let configuredKeysCount = 0;
     let totalQuestions = 0;
@@ -103,10 +108,19 @@ export class AnswerKeyService {
       totalQuestions = schedule.exam?.totalQuestions || 0;
     }
 
+    const isCompleted =
+      schedule.status === 'ENDED' ||
+      (schedule.endTime ? new Date(schedule.endTime) <= new Date() : false);
+
+    const titleUpper = (schedule.exam?.title || '').toUpperCase();
+    const isMock = titleUpper.includes('MOCK') || titleUpper.includes('PRACTICE');
+
     return {
       scheduleId: schedule.id,
       examId: schedule.examId,
       examTitle: schedule.exam.title,
+      examTarget: schedule.exam.examTarget?.name || 'General',
+      examType: isMock ? 'MOCK' : 'LIVE',
       scheduleStatus: schedule.status,
       startTime: schedule.startTime,
       endTime: schedule.endTime,
@@ -124,6 +138,9 @@ export class AnswerKeyService {
       totalQuestions,
       configuredKeysCount,
       isFullyConfigured: totalQuestions > 0 && configuredKeysCount >= totalQuestions,
+      studentAttemptsCount,
+      isCompleted,
+      isLive: !isMock,
     };
   }
 
@@ -324,7 +341,13 @@ export class AnswerKeyService {
     const schedule = await this.prisma.examSchedule.findUnique({
       where: { id: scheduleId },
       include: {
-        exam: { select: { id: true, title: true } },
+        exam: {
+          select: {
+            id: true,
+            title: true,
+            examTarget: { select: { name: true } },
+          },
+        },
         examVersion: {
           include: {
             questions: {
@@ -342,25 +365,42 @@ export class AnswerKeyService {
       throw new NotFoundException(`Schedule with ID '${scheduleId}' not found`);
     }
 
-    // ─── Operator restriction: only COMPLETED / ENDED exams ───
-    const isOperator =
-      userRoles.includes('OPERATOR') &&
-      !userRoles.includes('SUPER_ADMIN') &&
-      !userRoles.includes('ADMIN');
+    // ─── 1. Universal Eligibility Check: Cannot upload answer key before completing exam ───
+    const scheduleStatus = (schedule as any).status;
+    const endTime: Date | null = schedule.endTime ? new Date(schedule.endTime) : null;
+    const currentTime = new Date();
+    const isCompleted =
+      scheduleStatus === 'COMPLETED' ||
+      scheduleStatus === 'ENDED' ||
+      (endTime !== null && endTime <= currentTime);
 
-    if (isOperator) {
-      const scheduleStatus = (schedule as any).status;
-      const endTime: Date | null = schedule.endTime ? new Date(schedule.endTime) : null;
-      const isCompleted =
-        scheduleStatus === 'COMPLETED' ||
-        scheduleStatus === 'ENDED' ||
-        (endTime !== null && endTime <= new Date());
+    if (!isCompleted) {
+      throw new BadRequestException(
+        'Cannot upload answer key before completing exam.',
+      );
+    }
 
-      if (!isCompleted) {
-        throw new ForbiddenException(
-          'Operators are only permitted to upload answer keys for COMPLETED examinations.',
-        );
-      }
+    // ─── 2. Workflow Check: Must be an official/live exam (Not a Mock Test) ───
+    const examTitleUpper = (schedule.exam.title || '').toUpperCase();
+    const isMockExam = examTitleUpper.includes('MOCK') || examTitleUpper.includes('PRACTICE');
+    if (isMockExam) {
+      throw new BadRequestException(
+        'Mock Tests are evaluated immediately on student submission and do not use the official answer-key upload workflow.',
+      );
+    }
+
+    // ─── 3. Immutability Guard: Answer key cannot be modified while evaluation is running ───
+    const activeProcessingCount = await this.prisma.result.count({
+      where: {
+        attempt: { examId: schedule.examId },
+        resultStatus: ResultStatusEnum.PROCESSING,
+      },
+    });
+
+    if (activeProcessingCount > 0) {
+      throw new BadRequestException(
+        'Evaluation is actively in progress for this exam. Answer key cannot be modified while evaluation is running.',
+      );
     }
 
     const versionQuestions = schedule.examVersion?.questions || [];
@@ -377,61 +417,99 @@ export class AnswerKeyService {
 
     // Validation pass
     const validationErrors: string[] = [];
+    const seenQNums = new Set<number>();
     const normalizedEntries: Array<{
       question: typeof versionQuestions[0];
       correctKey: string;
       explanation?: string;
     }> = [];
 
+    // 1. Check for duplicates, extras, and invalid answers per row
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const qNum = Number(row.questionNumber);
-      const correctKey = (row.correctOption || '').trim().toUpperCase();
+      const rawCorrect = (row.correctOption || '').trim();
+      const correctKey = rawCorrect.toUpperCase();
 
       if (!qNum || isNaN(qNum)) {
-        validationErrors.push(`Row ${i + 1}: Invalid Question Number.`);
+        validationErrors.push(`Invalid Question Number at row ${i + 1}.`);
         continue;
       }
 
+      if (seenQNums.has(qNum)) {
+        validationErrors.push(`Duplicate question number: ${qNum}`);
+        continue;
+      }
+      seenQNums.add(qNum);
+
       const q = questionBySeq.get(qNum);
       if (!q) {
-        validationErrors.push(
-          `Row ${i + 1}: Question Number ${qNum} does not exist in this exam paper (Total: ${versionQuestions.length}).`,
-        );
+        validationErrors.push(`Question number ${qNum} does not exist in this exam.`);
         continue;
       }
 
       if (!correctKey) {
-        validationErrors.push(
-          `Row ${i + 1} (Q#${qNum}): Correct Option is missing.`,
-        );
+        validationErrors.push(`Missing answer for question number: ${qNum}`);
         continue;
       }
 
-      // If single/multiple correct, verify option exists
-      if (['SINGLE_CORRECT', 'MULTIPLE_CORRECT'].includes(q.type) && q.options.length > 0) {
-        const availableKeys = q.options.map((o) => o.optionKey.toUpperCase());
-        // Can be comma-separated for MULTIPLE_CORRECT
-        const keysToCheck = correctKey.split(/[\s,;]+/).map((k) => k.trim());
+      // Check question type compatibility
+      if (q.type === 'NUMERICAL') {
+        if (isNaN(Number(rawCorrect))) {
+          validationErrors.push(`Question ${qNum} requires a numerical answer.`);
+          continue;
+        }
+      } else if (q.type === 'SINGLE_CORRECT') {
+        if (correctKey.includes('|') || correctKey.includes(',') || correctKey.includes(';')) {
+          validationErrors.push(
+            `Question ${qNum} is a single-choice question and accepts only one option.`,
+          );
+          continue;
+        }
+        const availableKeys = (q.options || []).map((o) => o.optionKey.toUpperCase());
+        if (availableKeys.length > 0 && !availableKeys.includes(correctKey)) {
+          validationErrors.push(`Invalid answer '${rawCorrect}' for question ${qNum}.`);
+          continue;
+        }
+      } else if (q.type === 'MULTIPLE_CORRECT') {
+        const availableKeys = (q.options || []).map((o) => o.optionKey.toUpperCase());
+        const keysToCheck = correctKey
+          .split(/[\s,|;]+/)
+          .map((k) => k.trim())
+          .filter(Boolean);
         const invalidKey = keysToCheck.find((k) => !availableKeys.includes(k));
         if (invalidKey) {
-          validationErrors.push(
-            `Row ${i + 1} (Q#${qNum}): Option '${invalidKey}' is not valid for this question (Options: ${availableKeys.join(', ')}).`,
-          );
+          validationErrors.push(`Invalid answer '${invalidKey}' for question ${qNum}.`);
           continue;
         }
       }
 
       normalizedEntries.push({
         question: q,
-        correctKey,
+        correctKey: q.type === 'MULTIPLE_CORRECT'
+          ? correctKey.split(/[\s,|;]+/).map((k) => k.trim()).sort().join('|')
+          : rawCorrect,
         explanation: row.explanation?.trim(),
       });
     }
 
+    // 2. Check for missing question numbers from the ExamVersion
+    for (const q of versionQuestions) {
+      if (!seenQNums.has(q.sequenceNumber)) {
+        validationErrors.push(`Missing answer for question number: ${q.sequenceNumber}`);
+      }
+    }
+
+    // 3. Check total question count matches ExamVersion exactly
+    if (rows.length !== versionQuestions.length && validationErrors.length === 0) {
+      validationErrors.push(
+        `Exam version requires ${versionQuestions.length} answers, but received ${rows.length}.`,
+      );
+    }
+
     if (validationErrors.length > 0) {
       throw new BadRequestException({
-        message: 'Answer Key validation failed.',
+        message: validationErrors[0],
         errors: validationErrors,
       });
     }
@@ -519,6 +597,52 @@ export class AnswerKeyService {
           answerKeyUploadedById: userId,
         },
       });
+
+      // 5. Update or Initialize ExamResultPublication as PROCESSING
+      const existingPub = await tx.examResultPublication.findFirst({
+        where: { examId: schedule.examId },
+        orderBy: { publicationVersion: 'desc' },
+      });
+      const publicationVersion = existingPub ? existingPub.publicationVersion : 1;
+
+      await tx.examResultPublication.upsert({
+        where: {
+          examId_publicationVersion: {
+            examId: schedule.examId,
+            publicationVersion,
+          },
+        },
+        update: {
+          status: 'PROCESSING',
+        },
+        create: {
+          examId: schedule.examId,
+          examVersionId: schedule.examVersionId,
+          status: 'PROCESSING',
+          publicationVersion: 1,
+        },
+      });
+
+      // 6. Record Audit Log
+      try {
+        await tx.securityEvent.create({
+          data: {
+            userId,
+            eventType: 'ROLE_CHANGED' as any,
+            ipAddress: 'server-internal',
+            metadata: {
+              action: 'ANSWER_KEY_UPLOADED',
+              scheduleId,
+              examId: schedule.examId,
+              examTitle: schedule.exam.title,
+              configuredQuestions: normalizedEntries.length,
+              uploadedAt: now.toISOString(),
+            },
+          },
+        });
+      } catch {
+        // Non-blocking audit log fallback
+      }
     });
 
     this.logger.log(
@@ -658,7 +782,7 @@ export class AnswerKeyService {
 
     if (qNumIdx === -1 || correctOptIdx === -1) {
       throw new BadRequestException(
-        'CSV must contain "Question Number" and "Correct Option" columns.',
+        'CSV must contain "question_number" and "correct_answer" columns.',
       );
     }
 
@@ -681,6 +805,128 @@ export class AnswerKeyService {
     }
 
     return rows;
+  }
+
+  /**
+   * 5. Parse Excel (.xlsx/.xls) buffer into AnswerKeyRowInput array
+   */
+  async parseExcelAnswerKey(buffer: Buffer): Promise<AnswerKeyRowInput[]> {
+    const workbook = new ExcelJS.Workbook();
+    // @ts-ignore
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      throw new BadRequestException('Excel file does not contain any worksheets.');
+    }
+
+    let qNumCol = -1;
+    let correctOptCol = -1;
+    let explCol = -1;
+    const rows: AnswerKeyRowInput[] = [];
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) {
+        row.eachCell((cell, colNumber) => {
+          const val = String(cell.value || '')
+            .toLowerCase()
+            .trim()
+            .replace(/[\s_()\-]/g, '');
+          if (
+            val.includes('questionnumber') ||
+            val === 'qnum' ||
+            val === 'q#' ||
+            val === 'question'
+          ) {
+            qNumCol = colNumber;
+          } else if (
+            val.includes('correctanswer') ||
+            val.includes('correctoption') ||
+            val.includes('answer') ||
+            val === 'key'
+          ) {
+            correctOptCol = colNumber;
+          } else if (val.includes('explanation')) {
+            explCol = colNumber;
+          }
+        });
+      } else {
+        if (qNumCol === -1 || correctOptCol === -1) return;
+        const qNumVal = row.getCell(qNumCol).value;
+        const correctOptVal = row.getCell(correctOptCol).value;
+        const explVal = explCol >= 0 ? row.getCell(explCol).value : undefined;
+
+        if (qNumVal !== null && qNumVal !== undefined) {
+          const qNum = parseInt(String(qNumVal).trim(), 10);
+          if (!isNaN(qNum)) {
+            rows.push({
+              questionNumber: qNum,
+              correctOption: String(correctOptVal ?? '').trim(),
+              explanation: explVal ? String(explVal).trim() : undefined,
+            });
+          }
+        }
+      }
+    });
+
+    if (qNumCol === -1 || correctOptCol === -1) {
+      throw new BadRequestException(
+        'Excel file must contain "question_number" and "correct_answer" columns.',
+      );
+    }
+
+    if (rows.length === 0) {
+      throw new BadRequestException('Excel file has no data rows.');
+    }
+
+    return rows;
+  }
+
+  /**
+   * 6. Generate Generic Sample CSV Template
+   */
+  generateSampleCsv(): string {
+    return [
+      'question_number,correct_answer',
+      '1,A',
+      '2,B',
+      '3,D',
+      '4,C',
+      '5,A',
+      '6,B',
+      '7,C',
+      '8,D',
+      '9,A',
+      '10,B',
+    ].join('\n');
+  }
+
+  /**
+   * 7. Generate Generic Sample Excel Template
+   */
+  async generateSampleExcel(): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Answer Key Template');
+    worksheet.columns = [
+      { header: 'question_number', key: 'question_number', width: 20 },
+      { header: 'correct_answer', key: 'correct_answer', width: 20 },
+    ];
+    const samples = [
+      [1, 'A'],
+      [2, 'B'],
+      [3, 'D'],
+      [4, 'C'],
+      [5, 'A'],
+      [6, 'B'],
+      [7, 'C'],
+      [8, 'D'],
+      [9, 'A'],
+      [10, 'B'],
+    ];
+    samples.forEach(([qNum, ans]) => {
+      worksheet.addRow({ question_number: qNum, correct_answer: ans });
+    });
+    const buf = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buf);
   }
 
   private parseCsvLine(line: string): string[] {

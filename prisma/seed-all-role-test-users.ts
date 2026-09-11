@@ -54,6 +54,30 @@ async function main() {
       roles: ['SALES_AGENT'],
       name: 'Sales Agent 01',
     },
+    {
+      phone: '+919000000098',
+      email: 'operator01@brainros.test',
+      roles: ['OPERATOR'],
+      name: 'Test Operator',
+    },
+    {
+      phone: '+919000000099',
+      email: 'accountant01@brainros.test',
+      roles: ['ACCOUNTANT'],
+      name: 'Test Accountant',
+    },
+    {
+      phone: '+919000000097',
+      email: 'manager01@brainros.test',
+      roles: ['MANAGER'],
+      name: 'Test Manager',
+    },
+    {
+      phone: '+919000000096',
+      email: 'gm01@brainros.test',
+      roles: ['GENERAL_MANAGER'],
+      name: 'Test General Manager',
+    },
   ];
 
   for (const acc of testAccounts) {
