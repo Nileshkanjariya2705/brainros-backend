@@ -256,8 +256,8 @@ describe('2FA Integration & End-to-End Authentication Flows', () => {
           otp: '12345',
         });
 
-        expect(verifyRes.message).toMatch(/Registration successful/);
-        expect(verifyRes.data.accessToken).toBe('mock-access-token');
+        expect(verifyRes.message).toMatch(/OTP verified/);
+        expect(verifyRes.data.requiresPayment).toBe(true);
       });
 
       it('should reject registration verification with incorrect OTP', async () => {

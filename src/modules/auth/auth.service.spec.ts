@@ -274,20 +274,9 @@ describe('AuthService (Passwordless & OTP Registration)', () => {
         'REGISTER',
         expect.any(Object),
       );
-      expect(prismaMock.user.create).toHaveBeenCalled();
-      expect(prismaMock.student.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            studentCode: expect.stringMatching(/^BRN-/),
-            studentId: expect.stringMatching(/^STU/),
-          }),
-        }),
-      );
-      expect(res.data.accessToken).toBe('mock-access-token');
-      expect(res.data.student.studentCode).toBe('BRN-2026-000043');
-      expect(mockRedisStorage.has(`registration:${registrationId}`)).toBe(
-        false,
-      );
+      expect(res.data.otpVerified).toBe(true);
+      expect(res.data.requiresPayment).toBe(true);
+      expect(res.data.feeAmount).toBe(300);
     });
 
     it('should reject verify registration if registrationId is expired or invalid', async () => {

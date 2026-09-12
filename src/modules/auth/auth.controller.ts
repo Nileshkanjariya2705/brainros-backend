@@ -27,6 +27,10 @@ import { VerifyOtpLoginDto } from './dto/verify-otp.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import {
+  CreateRegistrationPaymentOrderDto,
+  VerifyRegistrationPaymentDto,
+} from './dto/registration-payment.dto';
+import {
   RequestPasswordlessLoginOtpDto,
   VerifyPasswordlessLoginOtpDto,
 } from './dto/passwordless-login.dto';
@@ -107,12 +111,50 @@ export class AuthController {
    * POST /auth/verify-registration-otp
    */
   @Post('verify-registration-otp')
-  @HttpCode(HttpStatus.CREATED)
+  @HttpCode(HttpStatus.OK)
   async verifyRegistrationOtp(
     @Body() dto: VerifyRegistrationOtpDto,
     @Request() req: any,
   ) {
     return this.authService.verifyRegistrationOtp(dto, req);
+  }
+
+  /**
+   * Create Razorpay Payment Order for Public Student Registration.
+   * POST /auth/register/payment/order
+   */
+  @Post('register/payment/order')
+  @HttpCode(HttpStatus.OK)
+  async createRegistrationPaymentOrder(
+    @Body() dto: CreateRegistrationPaymentOrderDto,
+    @Request() req: any,
+  ) {
+    return this.authService.createRegistrationPaymentOrder(dto, req);
+  }
+
+  /**
+   * Verify Razorpay Payment Signature and Server Status for Public Registration.
+   * POST /auth/register/payment/verify
+   */
+  @Post('register/payment/verify')
+  @HttpCode(HttpStatus.OK)
+  async verifyRegistrationPayment(
+    @Body() dto: VerifyRegistrationPaymentDto,
+    @Request() req: any,
+  ) {
+    return this.authService.verifyRegistrationPayment(dto, req);
+  }
+
+  /**
+   * Check Registration Payment Status.
+   * GET /auth/register/payment/status/:registrationId
+   */
+  @Get('register/payment/status/:registrationId')
+  @HttpCode(HttpStatus.OK)
+  async getRegistrationPaymentStatus(
+    @Param('registrationId') registrationId: string,
+  ) {
+    return this.authService.getRegistrationPaymentStatus(registrationId);
   }
 
   // ═══════════════════════════════════════════════════════════════

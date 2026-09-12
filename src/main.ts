@@ -11,6 +11,7 @@ import { parseBooleanFlag } from './modules/feature-flag/feature-flag.constants'
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
+import * as express from 'express';
 
 // Global error handlers to prevent silent process death
 const bootstrapLogger = new AppLoggerService();
@@ -41,7 +42,10 @@ async function bootstrap() {
 
   validateEnvironment(bootstrapLogger);
 
-  const app = await NestFactory.create(AppModule, { logger: bootstrapLogger });
+  const app = await NestFactory.create(AppModule, {
+    logger: bootstrapLogger,
+    rawBody: true,
+  });
 
   const port = process.env.PORT ?? 3000;
 
@@ -58,6 +62,21 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
+  app.use(
+    express.json({
+      verify: (req: any, _res: any, buf: Buffer) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
+  app.use(
+    express.urlencoded({
+      extended: true,
+      verify: (req: any, _res: any, buf: Buffer) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
 
   // Enable HTTP response compression for payloads > 1KB
   app.use(

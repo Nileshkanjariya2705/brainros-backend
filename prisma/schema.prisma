@@ -228,6 +228,7 @@ model User {
   approvedAnalysisReports     ExamAnalysisReport[]    @relation("ReportApprovedBy")
   billsCreated                Bill[]                  @relation("BillsCreated")
   billsApproved               Bill[]                  @relation("BillsApproved")
+  paymentTransactions         PaymentTransaction[]    @relation("UserPaymentTransactions")
 
   @@index([status])
   @@index([email])
@@ -342,6 +343,7 @@ model Student {
   orders              Order[]
   salesLeads          SalesLead[]
   analysisReports     ExamAnalysisReport[]
+  paymentTransactions PaymentTransaction[]    @relation("StudentPaymentTransactions")
 
   @@index([status])
   @@index([stateId])
@@ -2683,6 +2685,46 @@ model Payment {
   @@index([status])
   @@index([paidAt])
   @@map("payments")
+}
+
+enum RegistrationPaymentStatus {
+  CREATED
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  VERIFICATION_FAILED
+  REFUNDED
+  CANCELLED
+}
+
+model PaymentTransaction {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  registrationId        String                    @map("registration_id")
+  userId                String?                   @map("user_id") @db.Uuid
+  studentId             String?                   @map("student_id") @db.Uuid
+  razorpayOrderId       String                    @unique @map("razorpay_order_id")
+  razorpayPaymentId     String?                   @unique @map("razorpay_payment_id")
+  razorpaySignature     String?                   @map("razorpay_signature")
+  signatureVerified     Boolean                   @default(false) @map("signature_verified")
+  amount                Int
+  currency              String                    @default("INR")
+  status                RegistrationPaymentStatus @default(CREATED)
+  method                String?
+  errorCode             String?                   @map("error_code")
+  errorDescription      String?                   @map("error_description")
+  webhookEventId        String?                   @unique @map("webhook_event_id")
+  metadata              Json?
+  paidAt                DateTime?                 @map("paid_at")
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+
+  user                  User?                     @relation("UserPaymentTransactions", fields: [userId], references: [id], onDelete: SetNull)
+  student               Student?                  @relation("StudentPaymentTransactions", fields: [studentId], references: [id], onDelete: SetNull)
+
+  @@index([registrationId])
+  @@index([status])
+  @@map("payment_transactions")
 }
 
 model SalesLead {

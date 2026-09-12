@@ -18,6 +18,10 @@ import { SecurityEventService } from './services/security-event.service';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import {
+  CreateRegistrationPaymentOrderDto,
+  VerifyRegistrationPaymentDto,
+} from './dto/registration-payment.dto';
+import {
   RequestPasswordlessLoginOtpDto,
   VerifyPasswordlessLoginOtpDto,
 } from './dto/passwordless-login.dto';
@@ -26,6 +30,7 @@ import { LoginSendOtpDto, LoginVerifyOtpDto } from './dto/login-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { RedisService } from '../redis/redis.service';
 import * as crypto from 'crypto';
+import axios from 'axios';
 
 export interface PendingRegistrationData {
   registrationId: string;
@@ -40,7 +45,12 @@ export interface PendingRegistrationData {
   classId: string;
   preferredLanguageId: string;
   examTargetId: string;
-  status: 'PENDING_OTP' | 'VERIFIED' | 'COMPLETED';
+  status: 'PENDING_OTP' | 'OTP_VERIFIED' | 'PAYMENT_PENDING' | 'VERIFIED' | 'COMPLETED';
+  otpVerifiedAt?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  paidAt?: string;
+  amountPaise?: number;
   createdAt: string;
 }
 
@@ -414,8 +424,9 @@ export class AuthService {
   }
 
   /**
-   * Verify registration OTP: validates OTP, creates User, assigns STUDENT role,
-   * creates Student with unique Student ID in one transaction, creates session and returns tokens.
+   * Step 2: Verify registration OTP.
+   * Validates OTP and updates registration status in Redis to 'OTP_VERIFIED'.
+   * Does NOT save student DB record yet. User must complete payment first.
    */
   async verifyRegistrationOtp(dto: VerifyRegistrationOtpDto, req?: any) {
     const ctx = this.extractRequestContext(req);
@@ -441,12 +452,356 @@ export class AuthService {
     // 2. Verify OTP for purpose REGISTER
     await this.otpService.verifyOtp(registration.mobile, otp, 'REGISTER', ctx);
 
-    // 3. Mark registration as completed in Redis immediately (prevents duplicate execution)
-    await this.redisService.del(`registration:${registrationId}`);
+    // 3. Mark status as OTP_VERIFIED in Redis and extend TTL to 30 mins (1800s) for payment
+    registration.status = 'OTP_VERIFIED';
+    registration.otpVerifiedAt = new Date().toISOString();
 
-    // 4. Run database transaction: User + Role + Student + Student ID
+    await this.redisService.set(
+      `registration:${registrationId}`,
+      JSON.stringify(registration),
+      1800,
+    );
+
+    await this.securityEventService.log('OTP_VERIFIED', {
+      ...ctx,
+      metadata: {
+        registrationId,
+        purpose: 'REGISTER',
+        mobile: registration.mobile,
+      },
+    });
+
+    const feeAmount = Number(process.env.PUBLIC_REGISTRATION_FEE_INR || 300);
+
+    return {
+      message: 'OTP verified successfully. Please complete registration fee payment.',
+      data: {
+        otpVerified: true,
+        registrationId,
+        requiresPayment: true,
+        feeAmount,
+        currency: 'INR',
+        razorpayApiKey: process.env.RAZORPAY_API_KEY || '',
+      },
+    };
+  }
+
+  /**
+   * Step 3: Create Razorpay Order server-side.
+   * Authoritative fee calculation happens here. Client amounts are strictly ignored.
+   */
+  async createRegistrationPaymentOrder(
+    dto: CreateRegistrationPaymentOrderDto,
+    req?: any,
+  ) {
+    const ctx = this.extractRequestContext(req);
+    const { registrationId } = dto;
+
+    const rawData = await this.redisService.get(
+      `registration:${registrationId}`,
+    );
+    if (!rawData) {
+      throw new BadRequestException(
+        'Registration session expired or invalid. Please register again.',
+      );
+    }
+
+    const registration: PendingRegistrationData = JSON.parse(rawData);
+    if (
+      registration.status !== 'OTP_VERIFIED' &&
+      registration.status !== 'PAYMENT_PENDING'
+    ) {
+      throw new BadRequestException(
+        'OTP verification required before initiating payment.',
+      );
+    }
+
+    const apiKey = process.env.RAZORPAY_API_KEY;
+    const apiSecret = process.env.RAZORPAY_API_SECRET;
+
+    const feeAmountInr = Number(process.env.PUBLIC_REGISTRATION_FEE_INR || 300);
+    const amountPaise = Math.round(feeAmountInr * 100); // Integer paise
+
+    let razorpayOrderId = registration.razorpayOrderId;
+
+    if (!razorpayOrderId || !apiKey || !apiSecret) {
+      if (!apiKey || !apiSecret) {
+        // Fallback for test mode if keys are not configured
+        razorpayOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      } else {
+        try {
+          const authHeader =
+            'Basic ' + Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+          const response = await axios.post(
+            'https://api.razorpay.com/v1/orders',
+            {
+              amount: amountPaise,
+              currency: 'INR',
+              receipt: `rcpt_${registrationId.substring(0, 12)}`,
+              notes: {
+                registrationId,
+                mobile: registration.mobile,
+                name: registration.name,
+              },
+            },
+            {
+              headers: {
+                Authorization: authHeader,
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+          razorpayOrderId = response.data.id;
+        } catch (error: any) {
+          Logger.error(
+            `Razorpay Order Creation Failed: ${error?.response?.data?.error?.description || error.message}`,
+          );
+          throw new BadRequestException(
+            `Failed to create Razorpay payment order: ${error?.response?.data?.error?.description || 'Gateway error'}`,
+          );
+        }
+      }
+    }
+
+    // Upsert PaymentTransaction record in database
+    await this.prisma.paymentTransaction.upsert({
+      where: { razorpayOrderId: razorpayOrderId! },
+      update: {
+        registrationId,
+        amount: amountPaise,
+        currency: 'INR',
+        status: 'CREATED',
+        metadata: {
+          name: registration.name,
+          mobile: registration.mobile,
+          email: registration.email,
+        },
+      },
+      create: {
+        registrationId,
+        razorpayOrderId: razorpayOrderId!,
+        amount: amountPaise,
+        currency: 'INR',
+        status: 'CREATED',
+        metadata: {
+          name: registration.name,
+          mobile: registration.mobile,
+          email: registration.email,
+        },
+      },
+    });
+
+    // Update Redis session state
+    registration.status = 'PAYMENT_PENDING';
+    registration.razorpayOrderId = razorpayOrderId;
+    registration.amountPaise = amountPaise;
+    await this.redisService.set(
+      `registration:${registrationId}`,
+      JSON.stringify(registration),
+      1800,
+    );
+
+    return {
+      message: 'Payment order created successfully.',
+      data: {
+        registrationId,
+        razorpayOrderId: razorpayOrderId!,
+        amount: amountPaise,
+        currency: 'INR',
+        key: apiKey || 'rzp_test_mock',
+        name: registration.name,
+        email: registration.email || '',
+        mobile: registration.mobile,
+      },
+    };
+  }
+
+  /**
+   * Step 4: Verify Razorpay Payment Signature and Server Status.
+   * On successful verification, finalizes and creates the student registration in PENDING approval state.
+   */
+  async verifyRegistrationPayment(
+    dto: VerifyRegistrationPaymentDto,
+    req?: any,
+  ) {
+    const ctx = this.extractRequestContext(req);
+    const {
+      registrationId,
+      razorpay_payment_id,
+      razorpay_order_id,
+      razorpay_signature,
+    } = dto;
+
+    // Load registration from Redis
+    const rawData = await this.redisService.get(
+      `registration:${registrationId}`,
+    );
+    if (!rawData) {
+      // Check if registration was already finalized idempotently in DB
+      const existingTx = await this.prisma.paymentTransaction.findFirst({
+        where: { razorpayOrderId: razorpay_order_id, status: 'CAPTURED' },
+        include: { student: true, user: true },
+      });
+      if (existingTx && existingTx.student) {
+        return {
+          message: 'Payment already verified and registration submitted successfully!',
+          data: {
+            requiresApproval: true,
+            status: 'PENDING_APPROVAL',
+            registrationId,
+            student: {
+              id: existingTx.student.id,
+              studentId: existingTx.student.studentId,
+              studentCode: existingTx.student.studentCode,
+              name: existingTx.student.name,
+              status: 'PENDING',
+            },
+          },
+        };
+      }
+      throw new BadRequestException(
+        'Registration session expired or invalid. Please try registering again.',
+      );
+    }
+
+    const registration: PendingRegistrationData = JSON.parse(rawData);
+
+    // Verify Order ID mapping
+    if (
+      registration.razorpayOrderId &&
+      registration.razorpayOrderId !== razorpay_order_id
+    ) {
+      throw new BadRequestException(
+        'Payment order mismatch for this registration session.',
+      );
+    }
+
+    const apiSecret = process.env.RAZORPAY_API_SECRET;
+    const apiKey = process.env.RAZORPAY_API_KEY;
+
+    let signatureValid = false;
+
+    if (apiSecret) {
+      const generatedSignature = crypto
+        .createHmac('sha256', apiSecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest('hex');
+
+      signatureValid = crypto.timingSafeEqual(
+        Buffer.from(generatedSignature),
+        Buffer.from(razorpay_signature),
+      );
+    } else {
+      // Allow test mode if secret is not set
+      signatureValid = true;
+    }
+
+    if (!signatureValid) {
+      await this.prisma.paymentTransaction.updateMany({
+        where: { razorpayOrderId: razorpay_order_id },
+        data: {
+          status: 'VERIFICATION_FAILED',
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          signatureVerified: false,
+          errorDescription: 'HMAC-SHA256 Signature verification failed',
+        },
+      });
+
+      throw new BadRequestException(
+        'Payment signature verification failed. Registration cannot be completed.',
+      );
+    }
+
+    // Verify payment status with Razorpay API if credentials are provided
+    if (apiKey && apiSecret && !razorpay_order_id.startsWith('order_test_')) {
+      try {
+        const authHeader =
+          'Basic ' + Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+        const paymentRes = await axios.get(
+          `https://api.razorpay.com/v1/payments/${razorpay_payment_id}`,
+          { headers: { Authorization: authHeader } },
+        );
+
+        const paymentData = paymentRes.data;
+        if (
+          paymentData.status !== 'captured' &&
+          paymentData.status !== 'authorized'
+        ) {
+          await this.prisma.paymentTransaction.updateMany({
+            where: { razorpayOrderId: razorpay_order_id },
+            data: {
+              status: 'FAILED',
+              razorpayPaymentId: razorpay_payment_id,
+              errorDescription: `Razorpay status: ${paymentData.status}`,
+            },
+          });
+
+          throw new BadRequestException(
+            `Payment verification failed. Razorpay status is ${paymentData.status}.`,
+          );
+        }
+      } catch (err: any) {
+        if (err instanceof BadRequestException) throw err;
+        Logger.warn(
+          `Razorpay payment status fetch failed: ${err?.message || err}`,
+        );
+      }
+    }
+
+    // Step 5: Persist Student + User + Payment Transaction in DB (Transaction)
+    return await this.finalizeStudentRegistration(
+      registration,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      ctx,
+    );
+  }
+
+  /**
+   * Finalizes public student registration in database after successful Razorpay payment verification.
+   * Atomically creates User, Student, ApprovalRequest, PaymentTransaction, Order, and AuditLog.
+   */
+  async finalizeStudentRegistration(
+    registration: PendingRegistrationData,
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+    razorpaySignature: string,
+    ctx: any,
+  ) {
+    const registrationId = registration.registrationId;
+
+    // Idempotency check: see if PaymentTransaction with this order ID is already finalized
+    const existingTx = await this.prisma.paymentTransaction.findUnique({
+      where: { razorpayOrderId },
+      include: { student: true, user: true },
+    });
+
+    if (existingTx && existingTx.status === 'CAPTURED' && existingTx.student) {
+      await this.redisService.del(`registration:${registrationId}`);
+      return {
+        message: 'Registration submitted successfully! Your account is pending review by Academic Administration.',
+        data: {
+          requiresApproval: true,
+          status: 'PENDING_APPROVAL',
+          registrationId,
+          student: {
+            id: existingTx.student.id,
+            studentId: existingTx.student.studentId,
+            studentCode: existingTx.student.studentCode,
+            name: existingTx.student.name,
+            status: 'PENDING',
+          },
+        },
+      };
+    }
+
+    const feeAmountInr = Number(process.env.PUBLIC_REGISTRATION_FEE_INR || 300);
+    const amountPaise = registration.amountPaise || Math.round(feeAmountInr * 100);
+
     const result = await this.prisma.$transaction(async (tx) => {
-      // Final duplicate check inside transaction
+      // Check existing user to prevent duplicates
       const existingUser = await tx.user.findFirst({
         where: {
           OR: [
@@ -459,11 +814,11 @@ export class AuthService {
 
       if (existingUser) {
         throw new BadRequestException(
-          'A user with this mobile number or email already exists.',
+          'A user with this mobile number or email already exists in the system.',
         );
       }
 
-      // Create User in PENDING status (requires GM/Super Admin approval before login)
+      // 1. Create User in PENDING status (requires GM/Super Admin approval before active login)
       const newUser = await tx.user.create({
         data: {
           phone: registration.mobile,
@@ -477,7 +832,7 @@ export class AuthService {
         },
       });
 
-      // Ensure STUDENT role exists & assign
+      // 2. Ensure STUDENT role exists & assign
       let studentRole = await tx.role.findUnique({
         where: { name: 'STUDENT' },
       });
@@ -489,13 +844,12 @@ export class AuthService {
         data: { userId: newUser.id, roleId: studentRole.id },
       });
 
-      // Generate unique Student ID (BRN-YYYY-XXXXXX / STUXXXXXX)
+      // 3. Generate unique Student ID & Code
       const year = new Date().getFullYear();
       let sequenceNum = (await tx.student.count()) + 1;
       let studentIdStr = `STU${String(sequenceNum + 1000).padStart(6, '0')}`;
       let studentCode = `BRN-${year}-${String(sequenceNum).padStart(6, '0')}`;
 
-      // Check collision if pre-seeded data exists and increment sequence
       let collision = await tx.student.findFirst({
         where: { OR: [{ studentCode }, { studentId: studentIdStr }] },
       });
@@ -508,7 +862,7 @@ export class AuthService {
         });
       }
 
-      // Create Student profile in PENDING status
+      // 4. Create Student profile in PENDING status
       const student = await tx.student.create({
         data: {
           userId: newUser.id,
@@ -527,7 +881,7 @@ export class AuthService {
         },
       });
 
-      // Submit to Approval Queue (General Manager or Super Admin approval required)
+      // 5. Submit to Approval Queue for General Manager / Super Admin approval
       const approvalRequest = await tx.approvalRequest.create({
         data: {
           resourceType: 'STUDENT',
@@ -545,22 +899,86 @@ export class AuthService {
             state: registration.state,
             district: registration.district,
             registrationType: 'PUBLIC_STUDENT_REGISTRATION',
+            razorpayOrderId,
+            razorpayPaymentId,
+            paidAmountInr: feeAmountInr,
           },
         },
       });
 
-      return { user: newUser, student, approvalRequest };
+      // 6. Record PaymentTransaction in DB
+      const paymentTx = await tx.paymentTransaction.upsert({
+        where: { razorpayOrderId },
+        update: {
+          userId: newUser.id,
+          studentId: student.id,
+          razorpayPaymentId,
+          razorpaySignature,
+          signatureVerified: true,
+          status: 'CAPTURED',
+          paidAt: new Date(),
+        },
+        create: {
+          registrationId,
+          userId: newUser.id,
+          studentId: student.id,
+          razorpayOrderId,
+          razorpayPaymentId,
+          razorpaySignature,
+          signatureVerified: true,
+          amount: amountPaise,
+          currency: 'INR',
+          status: 'CAPTURED',
+          paidAt: new Date(),
+        },
+      });
+
+      // 7. Record Order and Payment in system financial tables
+      const orderNum = `ORD-REG-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const order = await tx.order.create({
+        data: {
+          orderNumber: orderNum,
+          userId: newUser.id,
+          studentId: student.id,
+          amount: feeAmountInr,
+          currency: 'INR',
+          status: 'COMPLETED',
+          itemType: 'STUDENT_REGISTRATION',
+          itemName: 'Public Student Registration Fee',
+        },
+      });
+
+      await tx.payment.create({
+        data: {
+          orderId: order.id,
+          paymentNumber: `PAY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          amount: feeAmountInr,
+          currency: 'INR',
+          gateway: 'RAZORPAY',
+          gatewayOrderId: razorpayOrderId,
+          gatewayPaymentId: razorpayPaymentId,
+          status: 'SUCCESS',
+          paidAt: new Date(),
+        },
+      });
+
+      return { user: newUser, student, approvalRequest, paymentTx };
     });
 
-    // 5. Log security events
+    // Clean up Redis session
+    await this.redisService.del(`registration:${registrationId}`);
+
+    // Log security event
     await this.securityEventService.log('REGISTER_SUCCESS', {
       userId: result.user.id,
       ...ctx,
       metadata: {
-        method: 'PUBLIC_OTP_REGISTRATION',
+        method: 'PUBLIC_OTP_RAZORPAY_REGISTRATION',
         studentId: result.student.studentId,
         studentCode: result.student.studentCode,
         approvalRequestId: result.approvalRequest.id,
+        razorpayOrderId,
+        razorpayPaymentId,
         status: 'PENDING_APPROVAL',
       },
     });
@@ -581,6 +999,48 @@ export class AuthService {
         },
       },
     };
+  }
+
+  /**
+   * Query current payment / registration status for a registration session.
+   */
+  async getRegistrationPaymentStatus(registrationId: string) {
+    const rawData = await this.redisService.get(
+      `registration:${registrationId}`,
+    );
+
+    if (rawData) {
+      const registration: PendingRegistrationData = JSON.parse(rawData);
+      return {
+        data: {
+          registrationId,
+          status: registration.status,
+          razorpayOrderId: registration.razorpayOrderId || null,
+          feeAmount: Number(process.env.PUBLIC_REGISTRATION_FEE_INR || 300),
+          currency: 'INR',
+        },
+      };
+    }
+
+    const tx = await this.prisma.paymentTransaction.findFirst({
+      where: { registrationId },
+      include: { student: true },
+    });
+
+    if (tx) {
+      return {
+        data: {
+          registrationId,
+          status: tx.status === 'CAPTURED' ? 'COMPLETED' : tx.status,
+          razorpayOrderId: tx.razorpayOrderId,
+          razorpayPaymentId: tx.razorpayPaymentId,
+          paidAt: tx.paidAt,
+          studentId: tx.student?.studentId || null,
+        },
+      };
+    }
+
+    throw new NotFoundException('Registration payment session not found.');
   }
 
   // ═══════════════════════════════════════════════════════════════

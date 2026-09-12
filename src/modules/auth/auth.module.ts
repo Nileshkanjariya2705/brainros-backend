@@ -22,6 +22,8 @@ import { TwoFactorService } from './two-factor/two-factor.service';
 import { TwoFactorConfig } from './config/two-factor.config';
 import { RedisModule } from '../redis/redis.module';
 
+import { PaymentWebhookController } from './controllers/payment-webhook.controller';
+
 @Module({
   imports: [
     HttpModule,
@@ -33,7 +35,7 @@ import { RedisModule } from '../redis/redis.module';
     }),
     RedisModule,
   ],
-  controllers: [AuthController, OtpController],
+  controllers: [AuthController, OtpController, PaymentWebhookController],
 
   providers: [
     TwoFactorConfig,
