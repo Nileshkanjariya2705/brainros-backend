@@ -32,7 +32,7 @@ export class ExamBlueprintController {
   ) {}
 
   @Post('exams/:examId/blueprints')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async createBlueprint(
     @Param('examId', ParseUUIDPipe) examId: string,
     @Body() dto: CreateBlueprintDto,
@@ -51,7 +51,7 @@ export class ExamBlueprintController {
   }
 
   @Get('exams/:examId/blueprints')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamBlueprints(@Param('examId', ParseUUIDPipe) examId: string) {
     const data = await this.blueprintService.getExamBlueprints(examId);
     return {
@@ -62,7 +62,7 @@ export class ExamBlueprintController {
   }
 
   @Get('blueprints/:id')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getBlueprintById(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.blueprintService.getBlueprintById(id);
     return {
@@ -73,7 +73,7 @@ export class ExamBlueprintController {
   }
 
   @Patch('blueprints/:id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async updateBlueprint(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBlueprintDto,
@@ -87,7 +87,7 @@ export class ExamBlueprintController {
   }
 
   @Delete('blueprints/:id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async deleteBlueprint(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.blueprintService.deleteBlueprint(id);
     return {
@@ -97,7 +97,7 @@ export class ExamBlueprintController {
   }
 
   @Post('blueprints/:blueprintId/rules')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async addRule(
     @Param('blueprintId', ParseUUIDPipe) blueprintId: string,
     @Body() dto: CreateBlueprintRuleDto,
@@ -111,7 +111,7 @@ export class ExamBlueprintController {
   }
 
   @Patch('blueprints/rules/:ruleId')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async updateRule(
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
     @Body() dto: UpdateBlueprintRuleDto,
@@ -125,7 +125,7 @@ export class ExamBlueprintController {
   }
 
   @Delete('blueprints/rules/:ruleId')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async deleteRule(@Param('ruleId', ParseUUIDPipe) ruleId: string) {
     const data = await this.blueprintService.deleteRule(ruleId);
     return {
@@ -135,7 +135,7 @@ export class ExamBlueprintController {
   }
 
   @Post('blueprints/:blueprintId/validate')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async validateBlueprint(
     @Param('blueprintId', ParseUUIDPipe) blueprintId: string,
     @Body() dto: ValidateBlueprintDto,

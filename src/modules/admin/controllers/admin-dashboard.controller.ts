@@ -11,7 +11,7 @@ export class AdminDashboardController {
   constructor(private readonly dashboardService: AdminDashboardService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'ACCOUNTANT', 'SALES_AGENT')
   async getDashboard(@Query() filter: AdminDashboardFilterDto) {
     return this.dashboardService.getDashboardOverview(filter);
   }

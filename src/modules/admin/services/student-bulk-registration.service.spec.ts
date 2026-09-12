@@ -11,8 +11,27 @@ describe('StudentBulkRegistrationService', () => {
   let securityEventMock: any;
   let otpServiceMock: any;
 
+  const mockSchool = {
+    id: 'school-abc-123',
+    name: 'ABC Public School',
+    code: 'ABC001',
+    status: 'ACTIVE',
+  };
+
   beforeEach(async () => {
     prismaMock = {
+      institution: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.id === 'school-abc-123') return Promise.resolve(mockSchool);
+          if (where.id === 'school-inactive-123')
+            return Promise.resolve({ ...mockSchool, id: 'school-inactive-123', status: 'INACTIVE' });
+          return Promise.resolve(null);
+        }),
+        findMany: jest.fn().mockResolvedValue([mockSchool]),
+      },
+      institutionAdmin: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'admin-link-1' }),
+      },
       state: {
         findMany: jest.fn().mockResolvedValue([
           { id: 'state-gujarat-1', name: 'Gujarat', code: 'GJ', isActive: true },
@@ -61,9 +80,9 @@ describe('StudentBulkRegistrationService', () => {
         create: jest.fn().mockResolvedValue({ id: 'student-new-1', studentId: 'STU001006' }),
       },
       bulkUpload: {
-        create: jest.fn().mockResolvedValue({ id: 'upload-123', status: 'VALIDATING' }),
+        create: jest.fn().mockResolvedValue({ id: 'upload-123', status: 'VALIDATING', institutionId: 'school-abc-123' }),
         update: jest.fn().mockResolvedValue({ id: 'upload-123', status: 'READY_FOR_REVIEW' }),
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 'upload-123', institutionId: 'school-abc-123', institution: mockSchool }),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
       },
@@ -99,7 +118,7 @@ describe('StudentBulkRegistrationService', () => {
   });
 
   describe('generateTemplate', () => {
-    it('should generate CSV template with headers', async () => {
+    it('should generate CSV template with student headers and NO school_name column', async () => {
       const { buffer, fileName, mimeType } = await service.generateTemplate('csv');
       expect(fileName).toBe('student_bulk_registration_template.csv');
       expect(mimeType).toBe('text/csv');
@@ -109,9 +128,10 @@ describe('StudentBulkRegistrationService', () => {
       expect(content).toContain('Mobile Number');
       expect(content).toContain('State');
       expect(content).toContain('City');
+      expect(content).not.toContain('School / College / Institution');
     });
 
-    it('should generate XLSX template with formatting', async () => {
+    it('should generate XLSX template without school_name column', async () => {
       const { buffer, fileName, mimeType } = await service.generateTemplate('xlsx');
       expect(fileName).toBe('student_bulk_registration_template.xlsx');
       expect(mimeType).toContain('spreadsheet');
@@ -136,10 +156,10 @@ describe('StudentBulkRegistrationService', () => {
   });
 
   describe('uploadAndValidate', () => {
-    it('should validate valid student rows and stage them as READY_FOR_REVIEW', async () => {
+    it('should throw BadRequestException if schoolId is missing', async () => {
       const csvContent =
-        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language,School\n' +
-        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH,DPS';
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH';
 
       const file = {
         originalname: 'students.csv',
@@ -147,18 +167,77 @@ describe('StudentBulkRegistrationService', () => {
         size: csvContent.length,
       } as any;
 
-      const res = await service.uploadAndValidate(file, { userId: 'admin-1' });
+      await expect(service.uploadAndValidate(file, { userId: 'admin-1' })).rejects.toThrow(
+        /Please select a school before uploading students/,
+      );
+    });
+
+    it('should throw BadRequestException if school does not exist', async () => {
+      const csvContent =
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH';
+
+      const file = {
+        originalname: 'students.csv',
+        buffer: Buffer.from(csvContent),
+        size: csvContent.length,
+      } as any;
+
+      await expect(
+        service.uploadAndValidate(file, { userId: 'admin-1' }, { schoolId: 'non-existent-school' }),
+      ).rejects.toThrow(/Selected school does not exist/);
+    });
+
+    it('should throw BadRequestException if school is inactive', async () => {
+      const csvContent =
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH';
+
+      const file = {
+        originalname: 'students.csv',
+        buffer: Buffer.from(csvContent),
+        size: csvContent.length,
+      } as any;
+
+      await expect(
+        service.uploadAndValidate(file, { userId: 'admin-1' }, { schoolId: 'school-inactive-123' }),
+      ).rejects.toThrow(/Selected school is inactive/);
+    });
+
+    it('should validate valid student rows and assign selected school relationship', async () => {
+      const csvContent =
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH';
+
+      const file = {
+        originalname: 'students.csv',
+        buffer: Buffer.from(csvContent),
+        size: csvContent.length,
+      } as any;
+
+      const res = await service.uploadAndValidate(
+        file,
+        { userId: 'admin-1', roles: ['SUPER_ADMIN'] },
+        { schoolId: 'school-abc-123' },
+      );
 
       expect(res.totalRows).toBe(1);
       expect(res.validRows).toBe(1);
       expect(res.invalidRows).toBe(0);
       expect(res.duplicateRows).toBe(0);
+      expect(prismaMock.bulkUpload.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            institutionId: 'school-abc-123',
+          }),
+        }),
+      );
     });
 
-    it('should flag city and state mismatch as validation error', async () => {
+    it('should ignore school_name inside CSV file and enforce selected UI school', async () => {
       const csvContent =
-        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language,School\n' +
-        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Mumbai,12th,NEET,ENGLISH,DPS';
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language,School Name\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH,XYZ Legacy School';
 
       const file = {
         originalname: 'students.csv',
@@ -166,18 +245,24 @@ describe('StudentBulkRegistrationService', () => {
         size: csvContent.length,
       } as any;
 
-      const res = await service.uploadAndValidate(file, { userId: 'admin-1' });
+      const res = await service.uploadAndValidate(
+        file,
+        { userId: 'admin-1', roles: ['SUPER_ADMIN'] },
+        { schoolId: 'school-abc-123' },
+      );
 
       expect(res.totalRows).toBe(1);
-      expect(res.validRows).toBe(0);
-      expect(res.invalidRows).toBe(1);
+      expect(res.validRows).toBe(1);
+      const rowCall = prismaMock.bulkUploadRow.create.mock.calls[0][0];
+      expect(rowCall.data.normalizedData.institutionId).toBe('school-abc-123');
+      expect(rowCall.data.normalizedData.schoolCollege).toBe('ABC Public School');
     });
 
     it('should flag in-file duplicates', async () => {
       const csvContent =
-        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language,School\n' +
-        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH,DPS\n' +
-        'Another Rohan,9876543210,another@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH,DPS';
+        'Full Name,Mobile Number,Email,State,City,Class,Exam Target,Preferred Language\n' +
+        'Rohan Shah,9876543210,rohan@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH\n' +
+        'Another Rohan,9876543210,another@example.com,Gujarat,Ahmedabad,12th,NEET,ENGLISH';
 
       const file = {
         originalname: 'students.csv',
@@ -185,7 +270,11 @@ describe('StudentBulkRegistrationService', () => {
         size: csvContent.length,
       } as any;
 
-      const res = await service.uploadAndValidate(file, { userId: 'admin-1' });
+      const res = await service.uploadAndValidate(
+        file,
+        { userId: 'admin-1', roles: ['SUPER_ADMIN'] },
+        { schoolId: 'school-abc-123' },
+      );
 
       expect(res.totalRows).toBe(2);
       expect(res.validRows).toBe(1);

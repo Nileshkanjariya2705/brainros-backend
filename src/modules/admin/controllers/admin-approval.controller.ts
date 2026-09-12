@@ -29,25 +29,25 @@ export class AdminApprovalController {
   constructor(private readonly approvalService: ApprovalWorkflowService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async getApprovalQueue(@Query() filter: ApprovalFilterDto) {
     return this.approvalService.getApprovalRequests(filter);
   }
 
   @Get('queue-types')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async getQueueTypes() {
     return this.approvalService.getQueueTypesAndCounts();
   }
 
   @Get(':id')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async getApprovalById(@Param('id') id: string) {
     return this.approvalService.getApprovalById(id);
   }
 
   @Post('submit')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async submitForApproval(
     @CurrentUser() user: any,
     @Body() dto: SubmitApprovalDto,
@@ -59,7 +59,7 @@ export class AdminApprovalController {
   }
 
   @Post(':id/approve')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async approveRequest(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -72,7 +72,7 @@ export class AdminApprovalController {
   }
 
   @Post(':id/reject')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async rejectRequest(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -85,7 +85,7 @@ export class AdminApprovalController {
   }
 
   @Post(':id/cancel')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async cancelRequest(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -98,7 +98,7 @@ export class AdminApprovalController {
   }
 
   @Post('bulk-approve')
-  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR', 'ADMIN')
   async bulkApprove(
     @CurrentUser() user: any,
     @Body() dto: BulkApproveDto,

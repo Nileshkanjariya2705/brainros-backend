@@ -75,7 +75,6 @@ export class StudentBulkRegistrationService {
       { header: 'Class / Grade * (e.g. 11th, 12th, Dropper)', key: 'class', width: 25 },
       { header: 'Exam Target * (e.g. NEET, JEE, CET, or multi-target: NEET, CET)', key: 'examTarget', width: 34 },
       { header: 'Preferred Language * (e.g. ENGLISH, HINDI, GUJARATI)', key: 'preferredLanguage', width: 26 },
-      { header: 'School / College / Institution * (or School Code)', key: 'schoolCollege', width: 34 },
     ];
 
     sheet.columns = headers;
@@ -109,7 +108,6 @@ export class StudentBulkRegistrationService {
         class: '12th',
         examTarget: 'NEET, CET',
         preferredLanguage: 'ENGLISH',
-        schoolCollege: 'Delhi Public School',
       },
       {
         name: 'Priya Patel',
@@ -120,7 +118,6 @@ export class StudentBulkRegistrationService {
         class: '11th',
         examTarget: 'JEE, CET',
         preferredLanguage: 'GUJARATI',
-        schoolCollege: 'St. Xavier High School',
       },
       {
         name: 'Amit Verma',
@@ -131,7 +128,6 @@ export class StudentBulkRegistrationService {
         class: '12th',
         examTarget: 'NEET',
         preferredLanguage: 'HINDI',
-        schoolCollege: 'Kendriya Vidyalaya',
       },
     ];
 
@@ -196,7 +192,7 @@ export class StudentBulkRegistrationService {
         else if (val.includes('class') || val.includes('grade')) headerMap.set(colNumber, 'class');
         else if (val.includes('target') || val.includes('exam')) headerMap.set(colNumber, 'examTarget');
         else if (val.includes('lang')) headerMap.set(colNumber, 'preferredLanguage');
-        else if (val.includes('school') || val.includes('college') || val.includes('institution')) headerMap.set(colNumber, 'schoolCollege');
+        // Legacy school_name/school/college columns in file are ignored - UI selected school is source of truth
       });
 
       sheet.eachRow((row, rowNumber) => {
@@ -263,7 +259,7 @@ export class StudentBulkRegistrationService {
         else if (val.includes('class') || val.includes('grade')) headerMap.set(idx, 'class');
         else if (val.includes('target') || val.includes('exam')) headerMap.set(idx, 'examTarget');
         else if (val.includes('lang')) headerMap.set(idx, 'preferredLanguage');
-        else if (val.includes('school') || val.includes('college') || val.includes('institution')) headerMap.set(idx, 'schoolCollege');
+        // Legacy school_name/school/college columns in file are ignored - UI selected school is source of truth
       });
 
       for (let i = 1; i < lines.length; i++) {
@@ -291,10 +287,42 @@ export class StudentBulkRegistrationService {
    */
   async uploadAndValidate(
     file: Express.Multer.File,
-    actor: { userId: string; email?: string },
-    options?: { institutionId?: string },
+    actor: { userId: string; email?: string; roles?: string[] },
+    options?: { schoolId?: string; institutionId?: string },
   ) {
     this.validateFile(file);
+
+    const targetSchoolId = options?.schoolId || options?.institutionId;
+    if (!targetSchoolId) {
+      throw new BadRequestException('Please select a school before uploading students.');
+    }
+
+    // Verify target school exists in DB
+    const selectedSchool = await this.prisma.institution.findUnique({
+      where: { id: targetSchoolId },
+      select: { id: true, name: true, code: true, status: true },
+    });
+
+    if (!selectedSchool) {
+      throw new BadRequestException('Selected school does not exist.');
+    }
+
+    if (selectedSchool.status !== 'ACTIVE') {
+      throw new BadRequestException('Selected school is inactive and cannot accept student registrations.');
+    }
+
+    // Verify RBAC authorization if actor roles provided
+    if (actor?.userId && actor.roles && actor.roles.length > 0) {
+      const isSuperAdmin = actor.roles.includes('SUPER_ADMIN') || actor.roles.includes('SUPERADMIN');
+      if (!isSuperAdmin) {
+        const hasAccess = await this.prisma.institutionAdmin.findFirst({
+          where: { userId: actor.userId, institutionId: selectedSchool.id, isActive: true },
+        });
+        if (!hasAccess) {
+          throw new BadRequestException('You are not authorized to upload students for this school.');
+        }
+      }
+    }
 
     const rows = await this.parseSpreadsheet(file.buffer, file.originalname);
     if (rows.length === 0) {
@@ -308,7 +336,7 @@ export class StudentBulkRegistrationService {
 
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '').toUpperCase();
 
-    // 1. Create BulkUpload staging record
+    // 1. Create BulkUpload staging record with selected school ID
     const bulkUpload = await this.prisma.bulkUpload.create({
       data: {
         uploadType: 'SUPER_ADMIN_STUDENTS',
@@ -318,6 +346,7 @@ export class StudentBulkRegistrationService {
         rowCount: rows.length,
         status: 'VALIDATING',
         uploadedById: actor.userId,
+        institutionId: selectedSchool.id,
       },
     });
 
@@ -364,17 +393,6 @@ export class StudentBulkRegistrationService {
       languageMap.set(l.name.toLowerCase().trim(), l);
       if (l.code) languageMap.set(l.code.toLowerCase().trim(), l);
     });
-
-    const institutionMap = new Map<string, typeof institutions[0]>();
-    institutions.forEach((inst) => {
-      institutionMap.set(inst.id.toLowerCase(), inst);
-      institutionMap.set(inst.code.toLowerCase().trim(), inst);
-      institutionMap.set(inst.name.toLowerCase().trim(), inst);
-    });
-
-    const selectedInstitution = options?.institutionId
-      ? institutionMap.get(options.institutionId.toLowerCase())
-      : null;
 
     // 3. Batch query DB for existing users with any of the mobiles or emails
     const fileMobiles: string[] = [];
@@ -605,26 +623,9 @@ export class StudentBulkRegistrationService {
         }
       }
 
-      // School / College / Institution Resolution
-      let resolvedInstitutionId: string | null = null;
-      let resolvedInstitutionName: string | null = null;
-
-      if (!schoolCollege && !selectedInstitution) {
-        rowErrors.push({
-          field: 'schoolCollege',
-          errorCode: 'MISSING_SCHOOL_COLLEGE',
-          message: 'School / College / Institution name or code is required.',
-        });
-      } else {
-        const instRes = this.resolveInstitution(
-          schoolCollege,
-          selectedInstitution,
-          institutionMap,
-          institutions,
-        );
-        resolvedInstitutionId = instRes.id;
-        resolvedInstitutionName = instRes.name || schoolCollege;
-      }
+      // School / College / Institution Resolution from selectedSchool (Source of Truth)
+      const resolvedInstitutionId = selectedSchool.id;
+      const resolvedInstitutionName = selectedSchool.name;
 
       // Deduplication checks
       let dedupStatus = 'UNIQUE';
@@ -704,9 +705,9 @@ export class StudentBulkRegistrationService {
         examTargetIds: resolvedExamTargetIds,
         preferredLanguage: languageName,
         preferredLanguageId: resolvedLanguageId,
-        schoolCollege: schoolCollege || resolvedInstitutionName || 'Not Specified',
-        institutionId: resolvedInstitutionId,
-        institutionName: resolvedInstitutionName,
+        schoolCollege: selectedSchool.name,
+        institutionId: selectedSchool.id,
+        institutionName: selectedSchool.name,
       };
 
       stagedRowsData.push({
@@ -812,6 +813,9 @@ export class StudentBulkRegistrationService {
     const upload = await this.prisma.bulkUpload.findUnique({
       where: { id: uploadId },
       include: {
+        institution: {
+          select: { id: true, name: true, code: true },
+        },
         errors: {
           take: 50,
           orderBy: { rowNumber: 'asc' },
@@ -855,7 +859,12 @@ export class StudentBulkRegistrationService {
         createdAt: upload.createdAt,
         processedAt: upload.processedAt,
         activatedAt: upload.activatedAt,
+        institutionId: upload.institutionId,
+        institutionName: upload.institution?.name,
       },
+      selectedSchool: upload.institution
+        ? { id: upload.institution.id, name: upload.institution.name, code: upload.institution.code }
+        : null,
       pagination: {
         page,
         limit,
@@ -1326,7 +1335,11 @@ export class StudentBulkRegistrationService {
   ) {
     const row = await this.prisma.bulkUploadRow.findUnique({
       where: { id: rowId },
-      include: { upload: true },
+      include: {
+        upload: {
+          include: { institution: true },
+        },
+      },
     });
 
     if (!row) {
@@ -1518,15 +1531,9 @@ export class StudentBulkRegistrationService {
       if (resolvedExamTargetIds.length > 0) resolvedExamTargetId = resolvedExamTargetIds[0];
     }
 
-    // Institution resolution
-    const instRes = this.resolveInstitution(
-      schoolCollege,
-      institutionId ? institutionMap.get(institutionId.toLowerCase()) : null,
-      institutionMap,
-      institutions,
-    );
-    resolvedInstitutionId = instRes.id;
-    resolvedInstitutionName = instRes.name || schoolCollege;
+    // Institution resolution fixed to upload context
+    resolvedInstitutionId = row.upload.institutionId || currentNormalized.institutionId;
+    resolvedInstitutionName = row.upload.institution?.name || currentNormalized.institutionName || currentNormalized.schoolCollege || 'Not Specified';
 
     // Deduplication check
     const standardMobile =
@@ -1577,7 +1584,7 @@ export class StudentBulkRegistrationService {
       examTargetIds: resolvedExamTargetIds,
       preferredLanguage: languageName,
       preferredLanguageId: resolvedLanguageId,
-      schoolCollege: schoolCollege || resolvedInstitutionName || 'Not Specified',
+      schoolCollege: resolvedInstitutionName,
       institutionId: resolvedInstitutionId,
       institutionName: resolvedInstitutionName,
     };
@@ -1744,13 +1751,6 @@ export class StudentBulkRegistrationService {
       return examTargets.find((et) => et.name === 'CET') || examTargetMap.get('cet') || null;
     }
 
-    // 5. CAT variations
-    if (
-      /^(cat|cmat|mat|xat|mba)/i.test(raw) ||
-      clean.includes('cat')
-    ) {
-      return examTargets.find((et) => et.name === 'CAT') || examTargetMap.get('cat') || null;
-    }
 
     // 6. Substring match fallback
     for (const et of examTargets) {

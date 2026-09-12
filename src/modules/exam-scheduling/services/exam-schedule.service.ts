@@ -9,6 +9,7 @@ import { ExamLifecycleService } from './exam-lifecycle.service';
 import { ScheduleExamDto, RescheduleExamDto } from '../dto/schedule-exam.dto';
 import { AdminScheduleExamDto, CheckQuestionAvailabilityDto } from '../dto/admin-schedule-exam.dto';
 import { NotificationQueueService } from '../../notification/queues/notification-queue.service';
+import { ScheduleReminderService } from './schedule-reminder.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { EXAM_WINDOW_END_QUEUE_NAME } from '../../result/interfaces/result-lifecycle.interface';
@@ -23,6 +24,7 @@ export class ExamScheduleService {
     private readonly prisma: PrismaService,
     private readonly lifecycleService: ExamLifecycleService,
     private readonly notificationQueue: NotificationQueueService,
+    private readonly scheduleReminderService: ScheduleReminderService,
     private readonly examCacheService: ExamCacheService,
     @InjectQueue(EXAM_WINDOW_END_QUEUE_NAME)
     private readonly windowEndQueue: Queue,
@@ -411,6 +413,26 @@ export class ExamScheduleService {
       this.logger.error(
         `[ScheduleExam] Failed to schedule window-end BullMQ job: ${queueErr.message}`,
       );
+    }
+
+    // 4. Schedule WhatsApp exam reminders (24H + 1H) for eligible students (non-blocking)
+    const examForReminder = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: { examTarget: true },
+    }).catch(() => null);
+
+    if (examForReminder?.examTargetId) {
+      this.scheduleReminderService.scheduleExamWhatsAppReminders({
+        examId,
+        scheduleId: scheduled.id,
+        examTargetId: examForReminder.examTargetId,
+        examTitle: examForReminder.title,
+        examTargetName: examForReminder.examTarget?.name || '',
+        startTime,
+        scheduleVersion: 1,
+      }).catch((reminderErr: any) => {
+        this.logger.warn(`[ScheduleExam] WhatsApp reminder scheduling error (non-blocking): ${reminderErr.message}`);
+      });
     }
 
     return scheduled;
@@ -818,6 +840,23 @@ export class ExamScheduleService {
       this.logger.warn(`Failed to enqueue cache preparation job: ${cErr.message}`);
     }
 
+    // Schedule WhatsApp exam reminders (24H + 1H) for eligible students (non-blocking)
+    if (scheduleRecord.exam?.examTarget?.id || scheduleRecord.exam?.examTargetId) {
+      const targetId = (scheduleRecord.exam as any).examTargetId || scheduleRecord.exam?.examTarget?.id;
+      const targetName = scheduleRecord.exam?.examTarget?.name || '';
+      this.scheduleReminderService.scheduleExamWhatsAppReminders({
+        examId: scheduleRecord.examId,
+        scheduleId: scheduleRecord.id,
+        examTargetId: targetId,
+        examTitle: scheduleRecord.exam?.title || '',
+        examTargetName: targetName,
+        startTime: scheduleRecord.startTime,
+        scheduleVersion: 1,
+      }).catch((reminderErr: any) => {
+        this.logger.warn(`[AdminScheduleExam] WhatsApp reminder scheduling error (non-blocking): ${reminderErr.message}`);
+      });
+    }
+
     return scheduleRecord;
   }
 
@@ -990,6 +1029,29 @@ export class ExamScheduleService {
       this.logger.error(
         `[RescheduleExam] Failed to reschedule window-end BullMQ job: ${queueErr.message}`,
       );
+    }
+
+    // Cancel old WhatsApp reminders and schedule new ones for the updated time (non-blocking)
+    const examForReminder = await this.prisma.exam.findUnique({
+      where: { id: schedule.examId },
+      include: { examTarget: true },
+    }).catch(() => null);
+
+    if (examForReminder?.examTargetId) {
+      // Use updatedAt timestamp as an incrementing version signal
+      const newVersion = Math.floor(Date.now() / 1000);
+      this.scheduleReminderService.handleExamRescheduled(
+        schedule.examId,
+        scheduleId,
+        examForReminder.examTargetId,
+        examForReminder.title,
+        examForReminder.examTarget?.name || '',
+        newStartTime,
+        newVersion - 1,   // cancel reminders from any older version
+        newVersion,       // new version for fresh reminders
+      ).catch((reminderErr: any) => {
+        this.logger.warn(`[RescheduleExam] WhatsApp reminder reschedule error (non-blocking): ${reminderErr.message}`);
+      });
     }
 
     return updated;

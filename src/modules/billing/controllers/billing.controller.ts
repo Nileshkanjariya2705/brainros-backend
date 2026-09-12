@@ -36,7 +36,7 @@ export class BillingController {
    * Retrieve current price per student per month setting
    */
   @Get('pricing')
-  @Roles('SUPER_ADMIN', 'ACCOUNTANT')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT')
   async getPricing() {
     const pricePerStudent = await this.billingService.getPricingSetting();
     return {
@@ -69,7 +69,7 @@ export class BillingController {
    * Retrieve dynamic Indian GST & supplier tax compliance configuration
    */
   @Get('tax-configuration')
-  @Roles('SUPER_ADMIN', 'ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async getTaxConfiguration() {
     const data = await this.billingService.getTaxConfiguration();
     return {
@@ -102,7 +102,7 @@ export class BillingController {
    * Supplies dynamic years, months, schools, and current price
    */
   @Get('filter-options')
-  @Roles('ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async getFilterOptions() {
     const data = await this.billingService.getFilterOptions();
     return {
@@ -117,7 +117,7 @@ export class BillingController {
    * Live preview of calculated student count and total amount before generation
    */
   @Get('invoices/preview')
-  @Roles('SUPER_ADMIN', 'ACCOUNTANT')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT')
   async getInvoicePreview(
     @Query('institutionId') institutionId: string,
     @Query('month') month: string,
@@ -170,7 +170,7 @@ export class BillingController {
    * Dynamic dropdown of authorized institutions
    */
   @Get('schools')
-  @Roles('ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async getSchools(
     @CurrentUser('userId') userId: string,
     @CurrentUser('roles') roles: string[],
@@ -209,7 +209,7 @@ export class BillingController {
    * List bills with role-based scope filtering, status tabs, and server-side search
    */
   @Get('bills')
-  @Roles('ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async listBills(
     @CurrentUser('userId') userId: string,
     @CurrentUser('roles') roles: string[],
@@ -228,7 +228,7 @@ export class BillingController {
    * Get complete bill details
    */
   @Get('bills/:id')
-  @Roles('ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async getBillById(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('userId') userId: string,
@@ -360,7 +360,7 @@ export class BillingController {
    * Download / preview invoice PDF
    */
   @Get('bills/:id/pdf')
-  @Roles('ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT', 'MANAGER')
   async downloadPdf(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('userId') userId: string,

@@ -17,6 +17,9 @@ export interface ExamReportEmailJobData {
   attemptId: string;
   studentId: string;
   recipientEmail: string;
+  recipientType?: 'STUDENT' | 'INSTITUTE';
+  institutionId?: string;
+  institutionName?: string;
   requestedByAdminId?: string;
   reportType: string;
 }
@@ -306,8 +309,57 @@ export class ExamReportEmailProcessor extends WorkerHost {
         : 'Recently';
 
       const rankText = pdfData.rank?.rank ? `#${pdfData.rank.rank.toLocaleString()}` : 'N/A';
-      const emailSubject = `Brainros Exam Report - ${attempt.exam.title}`;
-      const htmlBody = `
+      const isInstitute = job.data.recipientType === 'INSTITUTE' || job.data.reportType === 'EXAM_ANALYSIS_INSTITUTE';
+      const instituteName = job.data.institutionName || 'Institute Partner';
+
+      const emailSubject = isInstitute
+        ? `Student Analysis Report - ${attempt.student.name} - ${attempt.exam.title}`
+        : `Brainros Exam Report - ${attempt.exam.title}`;
+
+      const htmlBody = isInstitute
+        ? `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
+          <div style="background-color: #0f172a; padding: 24px; border-radius: 8px 8px 0 0; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">BRAINROS</h1>
+            <p style="color: #94a3b8; margin: 6px 0 0 0; font-size: 13px;">Official Student Analysis Report</p>
+          </div>
+          
+          <div style="background-color: #ffffff; padding: 28px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+            <h2 style="color: #0f172a; margin-top: 0;">Dear ${instituteName},</h2>
+            <p>Please find attached the Student Analysis Report for:</p>
+            
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #4f46e5; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Student & Exam Information</h3>
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <tr>
+                  <td style="padding: 6px 0; color: #64748b;">Student:</td>
+                  <td style="padding: 6px 0; font-weight: bold; color: #0f172a; text-align: right;">${attempt.student.name} (${attempt.student.studentCode || attempt.student.studentId})</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #64748b;">Exam:</td>
+                  <td style="padding: 6px 0; font-weight: bold; color: #0f172a; text-align: right;">${attempt.exam.title}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #64748b;">Total Score:</td>
+                  <td style="padding: 6px 0; font-weight: bold; color: #0f172a; text-align: right;">${attempt.result.totalScore} / ${attempt.result.maxScore} (${Number(attempt.result.percentage).toFixed(1)}%)</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #64748b;">Accuracy:</td>
+                  <td style="padding: 6px 0; font-weight: bold; color: #10b981; text-align: right;">${Number(attempt.result.accuracy).toFixed(1)}%</td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="font-size: 13px; color: #64748b;">The attached PDF contains complete details including subject performance, accuracy breakdown, and assessment analytics.</p>
+            
+            <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 18px; font-size: 12px; color: #94a3b8;">
+              <p style="margin: 0;">Regards,</p>
+              <p style="margin: 4px 0 0 0; font-weight: bold; color: #0f172a;">Brainros Assessment Team</p>
+            </div>
+          </div>
+        </div>
+      `
+        : `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
           <div style="background-color: #0f172a; padding: 24px; border-radius: 8px 8px 0 0; text-align: center;">
             <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">BRAINROS</h1>
@@ -410,12 +462,13 @@ export class ExamReportEmailProcessor extends WorkerHost {
       // Audit Log
       await this.auditLogService.logAction({
         actorUserId: requestedByAdminId || null,
-        action: 'EXAM_REPORT_EMAIL_SENT',
+        action: isInstitute ? 'EXAM_REPORT_INSTITUTE_EMAIL_SENT' : 'EXAM_REPORT_EMAIL_SENT',
         entityType: 'Attempt',
         entityId: attemptId,
         metadata: {
           examId,
           studentId: attempt.studentId,
+          institutionId: job.data.institutionId,
           recipientEmail: targetEmail,
           messageId: sendResult.messageId,
         },

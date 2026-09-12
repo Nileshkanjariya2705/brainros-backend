@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
-import { NOTIFICATION_QUEUE_NAME } from './interfaces/exam-notification-job.interface';
+import {
+  NOTIFICATION_QUEUE_NAME,
+  WHATSAPP_REMINDER_QUEUE_NAME,
+} from './interfaces/exam-notification-job.interface';
 
 // Providers
 import { EmailProvider } from './providers/email.provider';
@@ -16,7 +20,10 @@ import { NotificationTemplateService } from './services/notification-template.se
 import { NotificationPreferenceService } from './services/notification-preference.service';
 import { NotificationService } from './services/notification.service';
 import { NotificationQueueService } from './queues/notification-queue.service';
+
+// Processors
 import { NotificationProcessor } from './processors/notification.processor';
+import { WhatsAppReminderProcessor } from './processors/whatsapp-reminder.processor';
 
 // Controllers
 import { NotificationController } from './controllers/notification.controller';
@@ -26,22 +33,30 @@ import { AdminNotificationController } from './controllers/admin-notification.co
   imports: [
     PrismaModule,
     RedisModule,
-    BullModule.registerQueue({
-      name: NOTIFICATION_QUEUE_NAME,
-    }),
+    ConfigModule,
+    BullModule.registerQueue(
+      // Existing in-app notification queue
+      { name: NOTIFICATION_QUEUE_NAME },
+      // New WhatsApp Messaging queue (separate from in-app / OTP)
+      { name: WHATSAPP_REMINDER_QUEUE_NAME },
+    ),
   ],
   controllers: [NotificationController, AdminNotificationController],
   providers: [
+    // Channel providers
     EmailProvider,
     SmsProvider,
     WhatsAppProvider,
     PushProvider,
     ProviderRegistry,
+    // Services
     NotificationTemplateService,
     NotificationPreferenceService,
     NotificationService,
     NotificationQueueService,
+    // Processors
     NotificationProcessor,
+    WhatsAppReminderProcessor,
   ],
   exports: [
     NotificationService,
@@ -49,7 +64,8 @@ import { AdminNotificationController } from './controllers/admin-notification.co
     NotificationPreferenceService,
     NotificationQueueService,
     ProviderRegistry,
+    WhatsAppProvider,
+    BullModule,
   ],
 })
 export class NotificationModule {}
-

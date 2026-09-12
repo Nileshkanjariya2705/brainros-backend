@@ -19,7 +19,7 @@ import {
   RECONCILIATION_QUEUE_NAME,
   EXAM_WINDOW_END_QUEUE_NAME,
 } from './interfaces/result-lifecycle.interface';
-import { NOTIFICATION_QUEUE_NAME } from '../notification/interfaces/exam-notification-job.interface';
+import { NOTIFICATION_QUEUE_NAME, WHATSAPP_REMINDER_QUEUE_NAME } from '../notification/interfaces/exam-notification-job.interface';
 import { EvaluationProcessor } from './processors/evaluation.processor';
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { RankingProcessor } from './processors/ranking.processor';
@@ -42,6 +42,7 @@ import { ResultProcessingMonitorService } from './services/result-processing-mon
       { name: NOTIFICATION_QUEUE_NAME },
       { name: RECONCILIATION_QUEUE_NAME },
       { name: EXAM_WINDOW_END_QUEUE_NAME },
+      { name: WHATSAPP_REMINDER_QUEUE_NAME },
     ),
   ],
   controllers: [ResultController, ExamPublicationController],

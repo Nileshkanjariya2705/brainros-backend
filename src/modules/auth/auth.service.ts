@@ -99,6 +99,7 @@ export class AuthService {
     );
     return {
       userId: user.id,
+      name: user.name || user.fullName || user.student?.name || null,
       email: user.email,
       mobileNumber: user.mobileNumber || user.phone,
       status: user.status,

@@ -32,7 +32,7 @@ export class SubjectMockController {
    * 1. Get Subject Mock Stats for Physics, Chemistry, Mathematics, Biology
    */
   @Get('stats')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async getSubjectStats() {
     const data = await this.subjectMockService.getSubjectStats();
     return {
@@ -46,7 +46,7 @@ export class SubjectMockController {
    * 2. Download Subject Mock Template (XLSX / CSV) with sample questions for selected subject
    */
   @Get('template')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async downloadTemplate(
     @Query() query: SubjectTemplateQueryDto,
     @Res() res: Response,
@@ -70,7 +70,7 @@ export class SubjectMockController {
    * 3. Upload & Validate Subject Mock Questions File (CSV / XLSX / XLS)
    */
   @Post('upload')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
@@ -105,7 +105,7 @@ export class SubjectMockController {
    * 4. Transactionally Generate Subject-wise Mock Exam from Validated Upload
    */
   @Post('generate')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async generateSubjectMock(
     @Body() dto: GenerateSubjectMockDto,
     @CurrentUser('id') userId: string,

@@ -31,7 +31,7 @@ export class AdminStudentsController {
    * Production-grade server-side paginated, sorted, filtered student list
    */
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'INSTITUTION_ADMIN')
   async getStudents(@Query() query: AdminStudentsQueryDto, @Req() req: any) {
     const actorUserId = req.user?.id || req.user?.userId;
     return this.studentsService.getStudents(query, actorUserId);
@@ -42,7 +42,7 @@ export class AdminStudentsController {
    * Master data filter options for dynamic dropdowns
    */
   @Get('filter-options')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'INSTITUTION_ADMIN')
   async getFilterOptions() {
     return this.studentsService.getFilterOptions();
   }
@@ -52,7 +52,7 @@ export class AdminStudentsController {
    * List all linked parents for a given student
    */
   @Get(':studentId/parents')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   async getStudentParents(@Param('studentId') studentId: string) {
     return this.studentsService.getStudentParents(studentId);
   }
@@ -62,7 +62,7 @@ export class AdminStudentsController {
    * Add/Link parent to a student (creates or reuses Parent user)
    */
   @Post(':studentId/parents')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   @HttpCode(HttpStatus.CREATED)
   async addParentToStudent(
     @Param('studentId') studentId: string,
@@ -78,7 +78,7 @@ export class AdminStudentsController {
    * Revoke/Unlink parent relationship
    */
   @Delete(':studentId/parents/:linkId')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   @HttpCode(HttpStatus.OK)
   async revokeParentLink(
     @Param('studentId') studentId: string,
@@ -94,7 +94,7 @@ export class AdminStudentsController {
    * Update student details (name, email, mobile, school, class, target, status)
    */
   @Patch(':studentId')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.OK)
   async updateStudent(
     @Param('studentId') studentId: string,

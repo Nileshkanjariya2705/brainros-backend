@@ -38,7 +38,7 @@ export class AdminDashboardService {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // 1. Users Aggregation
+    // 1. Stage A: User Metrics Aggregation (bounded concurrency)
     const [
       totalUsers,
       totalStudents,
@@ -59,49 +59,105 @@ export class AdminDashboardService {
       this.prisma.user.count({ where: { createdAt: { gte: startOfMonth } } }),
     ]);
 
-    // 2. Question Bank Aggregation
+    // 2. Stage B: Question Bank & Exam Lifecycle Aggregation
     const [
-      totalQuestions,
-      draftQuestions,
-      submittedQuestions,
-      underReviewQuestions,
-      approvedQuestions,
-      rejectedQuestions,
-      archivedQuestions,
+      questionStatusGroups,
       totalQuestionTranslations,
+      translationGroups,
+      activeSupportedLanguages,
+      examStatuses,
+      examStatusGroups,
     ] = await Promise.all([
-      this.prisma.question.count(),
-      this.prisma.question.count({ where: { status: 'DRAFT' } }),
-      this.prisma.question.count({ where: { status: 'SUBMITTED' } }),
-      this.prisma.question.count({ where: { status: 'UNDER_REVIEW' } }),
-      this.prisma.question.count({ where: { status: 'APPROVED' } }),
-      this.prisma.question.count({ where: { status: 'REJECTED' } }),
-      this.prisma.question.count({ where: { status: 'ARCHIVED' } }),
+      this.prisma.question.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
       this.prisma.questionTranslation.count(),
+      this.prisma.questionTranslation.groupBy({
+        by: ['languageId'],
+        _count: { _all: true },
+      }),
+      this.prisma.preferredLanguage.findMany({
+        where: { isActive: true },
+        select: { id: true, code: true, name: true },
+      }),
+      this.prisma.examStatus.findMany({ select: { id: true, name: true } }),
+      this.prisma.exam.groupBy({
+        by: ['statusId'],
+        _count: { _all: true },
+      }),
     ]);
 
-    const activeSupportedLanguages =
-      await this.prisma.preferredLanguage.findMany({
-        where: { isActive: true },
-      });
-
-    const languageBreakdowns = await Promise.all(
-      activeSupportedLanguages.map(async (lang) => {
-        const count = await this.prisma.questionTranslation.count({
-          where: { languageId: lang.id },
-        });
-        const completionRate =
-          totalQuestions > 0
-            ? Number(((count / totalQuestions) * 100).toFixed(1))
-            : 0;
-        return {
-          code: lang.code || '',
-          name: lang.name,
-          translatedCount: count,
-          completionRate,
-        };
+    // 3. Stage C: Attempts, Evaluation, Institutions, Reports & Approvals
+    const [
+      attemptStatuses,
+      attemptStatusGroups,
+      evalResults,
+      institutionStatusGroups,
+      totalBatches,
+      totalStudentsManaged,
+      reportStatusGroups,
+      pendingApprovalsTotal,
+      pendingApprovalGroups,
+    ] = await Promise.all([
+      this.prisma.attemptStatus.findMany({ select: { id: true, name: true } }),
+      this.prisma.attempt.groupBy({
+        by: ['statusId'],
+        _count: { _all: true },
       }),
+      this.prisma.result.aggregate({
+        _avg: { totalScore: true, percentage: true, accuracy: true },
+        _count: { id: true },
+      }),
+      this.prisma.institution.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.institutionBatch.count(),
+      this.prisma.batchStudent.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.reportJob.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.approvalRequest.count({ where: { status: 'PENDING' } }),
+      this.prisma.approvalRequest.groupBy({
+        by: ['resourceType'],
+        where: { status: 'PENDING' },
+        _count: { id: true },
+      }),
+    ]);
+
+    // Map Question status counts
+    const questionCounts: Record<string, number> = {};
+    let totalQuestions = 0;
+    for (const g of questionStatusGroups) {
+      questionCounts[g.status] = g._count._all;
+      totalQuestions += g._count._all;
+    }
+    const draftQuestions = questionCounts['DRAFT'] || 0;
+    const submittedQuestions = questionCounts['SUBMITTED'] || 0;
+    const underReviewQuestions = questionCounts['UNDER_REVIEW'] || 0;
+    const approvedQuestions = questionCounts['APPROVED'] || 0;
+    const rejectedQuestions = questionCounts['REJECTED'] || 0;
+    const archivedQuestions = questionCounts['ARCHIVED'] || 0;
+
+    // Map Translations
+    const translationCountMap = new Map<string, number>(
+      translationGroups.map((tg) => [tg.languageId, tg._count._all]),
     );
+    const languageBreakdowns = activeSupportedLanguages.map((lang) => {
+      const count = translationCountMap.get(lang.id) || 0;
+      const completionRate =
+        totalQuestions > 0
+          ? Number(((count / totalQuestions) * 100).toFixed(1))
+          : 0;
+      return {
+        code: lang.code || '',
+        name: lang.name,
+        translatedCount: count,
+        completionRate,
+      };
+    });
 
     const overallTranslationCoverage =
       totalQuestions > 0 && activeSupportedLanguages.length > 0
@@ -114,86 +170,63 @@ export class AdminDashboardService {
           )
         : 0;
 
-    // 3. Exam Lifecycle Aggregation
-    const [
-      totalExams,
-      draftExams,
-      submittedExams,
-      approvedExams,
-      scheduledExams,
-      activeExams,
-      endedExams,
-      completedExams,
-      cancelledExams,
-    ] = await Promise.all([
-      this.prisma.exam.count(),
-      this.prisma.exam.count({ where: { status: { name: 'DRAFT' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'SUBMITTED' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'APPROVED' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'SCHEDULED' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'ACTIVE' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'ENDED' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'COMPLETED' } } }),
-      this.prisma.exam.count({ where: { status: { name: 'CANCELLED' } } }),
-    ]);
+    // Map Exam Statuses
+    const examStatusMap = new Map<string, string>(
+      examStatuses.map((s) => [s.id, s.name]),
+    );
+    const examCountsByStatusName: Record<string, number> = {};
+    let totalExams = 0;
+    for (const g of examStatusGroups) {
+      const name = examStatusMap.get(g.statusId) || 'UNKNOWN';
+      examCountsByStatusName[name] = (examCountsByStatusName[name] || 0) + g._count._all;
+      totalExams += g._count._all;
+    }
+    const draftExams = examCountsByStatusName['DRAFT'] || 0;
+    const submittedExams = examCountsByStatusName['SUBMITTED'] || 0;
+    const approvedExams = examCountsByStatusName['APPROVED'] || 0;
+    const scheduledExams = examCountsByStatusName['SCHEDULED'] || 0;
+    const activeExams = examCountsByStatusName['ACTIVE'] || 0;
+    const endedExams = examCountsByStatusName['ENDED'] || 0;
+    const completedExams = examCountsByStatusName['COMPLETED'] || 0;
+    const cancelledExams = examCountsByStatusName['CANCELLED'] || 0;
 
-    // 4. Attempts & Evaluation Aggregation
-    const [
-      totalAttempts,
-      inProgressAttempts,
-      submittedAttempts,
-      completedAttempts,
-      evalResults,
-    ] = await Promise.all([
-      this.prisma.attempt.count(),
-      this.prisma.attempt.count({ where: { status: { name: 'IN_PROGRESS' } } }),
-      this.prisma.attempt.count({ where: { status: { name: 'SUBMITTED' } } }),
-      this.prisma.attempt.count({ where: { status: { name: 'COMPLETED' } } }),
-      this.prisma.result.aggregate({
-        _avg: { totalScore: true, percentage: true, accuracy: true },
-        _count: { id: true },
-      }),
-    ]);
+    // Map Attempt Statuses
+    const attemptStatusMap = new Map<string, string>(
+      attemptStatuses.map((s) => [s.id, s.name]),
+    );
+    const attemptCountsByStatusName: Record<string, number> = {};
+    let totalAttempts = 0;
+    for (const g of attemptStatusGroups) {
+      const name = attemptStatusMap.get(g.statusId) || 'UNKNOWN';
+      attemptCountsByStatusName[name] = (attemptCountsByStatusName[name] || 0) + g._count._all;
+      totalAttempts += g._count._all;
+    }
+    const inProgressAttempts = attemptCountsByStatusName['IN_PROGRESS'] || 0;
+    const submittedAttempts = attemptCountsByStatusName['SUBMITTED'] || 0;
+    const completedAttempts = attemptCountsByStatusName['COMPLETED'] || 0;
 
-    // 5. Institutions Aggregation
-    const [
-      totalInstitutions,
-      activeInstitutions,
-      pendingInstitutions,
-      suspendedInstitutions,
-      totalBatches,
-      totalStudentsManaged,
-    ] = await Promise.all([
-      this.prisma.institution.count(),
-      this.prisma.institution.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.institution.count({
-        where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } },
-      }),
-      this.prisma.institution.count({ where: { status: 'SUSPENDED' } }),
-      this.prisma.institutionBatch.count(),
-      this.prisma.batchStudent.count({ where: { status: 'ACTIVE' } }),
-    ]);
+    // Map Institution Statuses
+    const institutionCounts: Record<string, number> = {};
+    let totalInstitutions = 0;
+    for (const g of institutionStatusGroups) {
+      institutionCounts[g.status] = g._count._all;
+      totalInstitutions += g._count._all;
+    }
+    const activeInstitutions = institutionCounts['ACTIVE'] || 0;
+    const pendingInstitutions =
+      (institutionCounts['SUBMITTED'] || 0) +
+      (institutionCounts['UNDER_REVIEW'] || 0);
+    const suspendedInstitutions = institutionCounts['SUSPENDED'] || 0;
 
-    // 6. Reports & Approvals Aggregation
-    const [
-      queuedReports,
-      processingReports,
-      completedReports,
-      failedReports,
-      pendingApprovalsTotal,
-      pendingApprovalGroups,
-    ] = await Promise.all([
-      this.prisma.reportJob.count({ where: { status: 'QUEUED' } }),
-      this.prisma.reportJob.count({ where: { status: 'PROCESSING' } }),
-      this.prisma.reportJob.count({ where: { status: 'COMPLETED' } }),
-      this.prisma.reportJob.count({ where: { status: 'FAILED' } }),
-      this.prisma.approvalRequest.count({ where: { status: 'PENDING' } }),
-      this.prisma.approvalRequest.groupBy({
-        by: ['resourceType'],
-        where: { status: 'PENDING' },
-        _count: { id: true },
-      }),
-    ]);
+    // Map Report Statuses
+    const reportCounts: Record<string, number> = {};
+    for (const g of reportStatusGroups) {
+      reportCounts[g.status] = g._count._all;
+    }
+    const queuedReports = reportCounts['QUEUED'] || 0;
+    const processingReports = reportCounts['PROCESSING'] || 0;
+    const completedReports = reportCounts['COMPLETED'] || 0;
+    const failedReports = reportCounts['FAILED'] || 0;
 
     const byEntityType: Record<string, number> = {};
     for (const group of pendingApprovalGroups) {

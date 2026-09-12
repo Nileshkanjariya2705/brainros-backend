@@ -16,7 +16,19 @@ import {
 } from '../interfaces/result-lifecycle.interface';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NOTIFICATION_QUEUE_NAME } from '../../notification/interfaces/exam-notification-job.interface';
+import {
+  NOTIFICATION_QUEUE_NAME,
+  WHATSAPP_REMINDER_QUEUE_NAME,
+  WhatsAppReminderJobData,
+  WHATSAPP_JOB_NAMES,
+} from '../../notification/interfaces/exam-notification-job.interface';
+import {
+  NotificationChannel,
+  NotificationPriority,
+  NotificationStatus,
+  NotificationType,
+} from '@prisma/client';
+import { normalizeToWhatsApp, maskPhone } from '../../notification/utils/phone-normalizer.util';
 
 @Injectable()
 export class ExamPublicationService {
@@ -28,6 +40,8 @@ export class ExamPublicationService {
     private readonly readinessService: ResultReadinessService,
     @InjectQueue(NOTIFICATION_QUEUE_NAME)
     private readonly notificationQueue: Queue,
+    @InjectQueue(WHATSAPP_REMINDER_QUEUE_NAME)
+    private readonly whatsAppQueue: Queue,
   ) {}
 
   /**
@@ -330,6 +344,17 @@ export class ExamPublicationService {
         );
       });
 
+      // 6. Enqueue WhatsApp result notification per student (non-blocking, after successful publish)
+      this.enqueueWhatsAppResultNotifications(
+        exam,
+        publicationResult.eligibleAttempts,
+        publicationResult.updatedPub.publicationVersion,
+      ).catch((err) => {
+        this.logger.error(
+          `[WhatsApp] Result notification queuing error (non-blocking): ${err}`,
+        );
+      });
+
       this.logger.log(
         `Official results for Live Exam '${exam.title}' (${examId}) PUBLISHED by Super Admin '${superAdminUserId}' for ${publicationResult.totalPublished} candidates.`,
       );
@@ -383,5 +408,132 @@ export class ExamPublicationService {
         // Individual notification failure does not block publication
       }
     }
+  }
+
+  /**
+   * Enqueue WhatsApp result notification jobs for each student after result publication.
+   *
+   * Each job is idempotent via a unique Notification.idempotencyKey and BullMQ jobId.
+   * Failures here NEVER affect the published result — fully isolated.
+   */
+  private async enqueueWhatsAppResultNotifications(
+    exam: any,
+    attempts: Array<{ id: string; studentId: string }>,
+    publicationVersion: number,
+  ): Promise<void> {
+    if (!attempts || attempts.length === 0) return;
+
+    // Batch-fetch student + user phone info for all eligible attempts
+    const studentIds = attempts.map((a) => a.studentId);
+    const students = await this.prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        user: {
+          select: { phone: true, mobileNumber: true },
+        },
+      },
+    });
+
+    const studentMap = new Map(students.map((s) => [s.id, s]));
+    const examTargetName = exam.examTarget?.name || '';
+
+    const jobsToEnqueue: any[] = [];
+
+    for (const att of attempts) {
+      const student = studentMap.get(att.studentId);
+      if (!student) continue;
+
+      const rawPhone = student.user?.phone || student.user?.mobileNumber;
+      if (!rawPhone) {
+        this.logger.debug(
+          `[WhatsApp Result] Student '${student.userId}' has no phone. Skipping WhatsApp notification.`,
+        );
+        continue;
+      }
+
+      const whatsappTo = normalizeToWhatsApp(rawPhone);
+      if (!whatsappTo) {
+        this.logger.warn(
+          `[WhatsApp Result] Invalid phone for student '${student.userId}': ${maskPhone(rawPhone)}`,
+        );
+        continue;
+      }
+
+      const idempotencyKey = `wa_result_${exam.id}_v${publicationVersion}_${student.userId}`;
+
+      // Create Notification record (idempotent via unique key)
+      let notification: any;
+      try {
+        notification = await this.prisma.notification.upsert({
+          where: { idempotencyKey },
+          update: {},
+          create: {
+            userId: student.userId,
+            recipientUserId: student.userId,
+            recipientAddress: rawPhone,
+            channel: NotificationChannel.WHATSAPP,
+            type: NotificationType.EXAM_RESULT_PUBLISHED,
+            title: `Result Published: ${exam.title}`,
+            message: `Your ${exam.title} result has been published. View your result and analysis in Brainros.`,
+            payload: {
+              examId: exam.id,
+              examTitle: exam.title,
+              examTarget: examTargetName,
+              publicationVersion,
+              reminderType: 'EXAM_RESULT_PUBLISHED',
+            },
+            priority: NotificationPriority.HIGH,
+            status: NotificationStatus.QUEUED,
+            idempotencyKey,
+          },
+        });
+      } catch (dbErr: any) {
+        this.logger.error(
+          `[WhatsApp Result] DB error creating notification for student '${student.userId}': ${dbErr.message}`,
+        );
+        continue;
+      }
+
+      jobsToEnqueue.push({
+        name: WHATSAPP_JOB_NAMES.SEND_REMINDER,
+        data: {
+          notificationId: notification.id,
+          recipientUserId: student.userId,
+          phone: rawPhone,
+          examId: exam.id,
+          examTitle: exam.title,
+          examTarget: examTargetName,
+          reminderType: 'EXAM_RESULT_PUBLISHED',
+          studentName: student.name,
+        } as WhatsAppReminderJobData,
+        opts: {
+          jobId: `wa_${notification.id}`,
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 200,
+          removeOnFail: 1000,
+        },
+      });
+    }
+
+    // Bulk-enqueue in chunks of 500 for optimal Redis pipeline throughput
+    const BULK_CHUNK_SIZE = 500;
+    for (let i = 0; i < jobsToEnqueue.length; i += BULK_CHUNK_SIZE) {
+      const chunk = jobsToEnqueue.slice(i, i + BULK_CHUNK_SIZE);
+      try {
+        await this.whatsAppQueue.addBulk(chunk);
+      } catch (queueErr: any) {
+        this.logger.error(
+          `[WhatsApp Result] Bulk queue error for chunk [${i}..${i + chunk.length}]: ${queueErr.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[WhatsApp Result] Enqueued ${jobsToEnqueue.length} WhatsApp result notifications for exam '${exam.title}'.`,
+    );
   }
 }

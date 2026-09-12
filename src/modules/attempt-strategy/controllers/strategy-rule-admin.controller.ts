@@ -21,7 +21,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 
 @Controller('analysis/strategy-rules')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'SUPER_ADMIN')
+@Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
 export class StrategyRuleAdminController {
   constructor(private readonly adminService: StrategyRuleAdminService) {}
 

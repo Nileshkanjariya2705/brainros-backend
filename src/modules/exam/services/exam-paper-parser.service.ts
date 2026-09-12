@@ -149,63 +149,82 @@ export class ExamPaperParserService {
     raw: Record<string, any>,
     rowNumber: number,
   ): ParsedExamPaperRow {
+    const getVal = (aliases: string[]): string => {
+      for (const alias of aliases) {
+        if (
+          raw[alias] !== undefined &&
+          raw[alias] !== null &&
+          String(raw[alias]).trim() !== ''
+        ) {
+          return String(raw[alias]).trim();
+        }
+      }
+      return '';
+    };
+
+    const qNumStr = getVal([
+      'question_number',
+      'question_num',
+      'q_num',
+      'qn',
+      'questionnumber',
+      'q_number',
+      'number',
+      'sr_no',
+      's_no',
+      'no',
+      '#',
+    ]);
+
+    const questionText = getVal([
+      'question',
+      'question_text',
+      'questiontext',
+      'q_text',
+      'q_statement',
+      'statement',
+      'text',
+    ]);
+
+    const optionA = getVal(['option_a', 'optiona', 'opt_a', 'op_a', 'a', 'option_1']);
+    const optionB = getVal(['option_b', 'optionb', 'opt_b', 'op_b', 'b', 'option_2']);
+    const optionC = getVal(['option_c', 'optionc', 'opt_c', 'op_c', 'c', 'option_3']);
+    const optionD = getVal(['option_d', 'optiond', 'opt_d', 'op_d', 'd', 'option_4']);
+
     return {
       rowNumber,
-      examCode: raw.exam_code || raw.examcode || raw.code || '',
-      examName:
-        raw.exam_name ||
-        raw.examname ||
-        raw.exam_title ||
-        raw.title ||
-        'Imported Question Paper Exam',
-      examDescription:
-        raw.exam_description || raw.description || raw.instructions || '',
-      examTarget: raw.exam_target || raw.target || 'NEET',
-      durationMinutes: raw.duration_minutes
-        ? parseInt(raw.duration_minutes, 10)
-        : raw.duration
-        ? parseInt(raw.duration, 10)
+      questionNumber: qNumStr ? parseInt(qNumStr, 10) : rowNumber - 1,
+      questionText,
+      optionA,
+      optionB,
+      optionC,
+      optionD,
+      optionE: getVal(['option_e', 'optione', 'e']),
+      optionF: getVal(['option_f', 'optionf', 'f']),
+      examCode: getVal(['exam_code', 'examcode', 'code']) || 'EXAM-PAPER',
+      examName: getVal(['exam_name', 'examname', 'title']) || 'Imported Question Paper',
+      examDescription: getVal(['exam_description', 'description']) || '',
+      examTarget: getVal(['exam_target', 'target']) || 'NEET',
+      durationMinutes: getVal(['duration_minutes', 'duration'])
+        ? parseInt(getVal(['duration_minutes', 'duration']), 10)
         : 200,
-      totalMarks: raw.total_marks ? parseFloat(raw.total_marks) : undefined,
-      subject: raw.subject || raw.subject_name || '',
-      sectionName: raw.section_name || raw.section || '',
-      chapter: raw.chapter || raw.chapter_name || '',
-      topic: raw.topic || raw.topic_name || '',
-      questionNumber: raw.question_number
-        ? parseInt(raw.question_number, 10)
-        : rowNumber - 1,
-      questionType: (
-        raw.question_type ||
-        raw.type ||
-        'SINGLE_CORRECT'
-      ).toUpperCase(),
-      questionText:
-        raw.question_text || raw.question || raw.text || raw.statement || '',
-      passageText: raw.passage_text || raw.passage || '',
-      assertionText: raw.assertion_text || raw.assertion || '',
-      reasonText: raw.reason_text || raw.reason || '',
-      optionA: raw.option_a || raw.optiona || raw.a || '',
-      optionB: raw.option_b || raw.optionb || raw.b || '',
-      optionC: raw.option_c || raw.optionc || raw.c || '',
-      optionD: raw.option_d || raw.optiond || raw.d || '',
-      optionE: raw.option_e || raw.optione || raw.e || '',
-      optionF: raw.option_f || raw.optionf || raw.f || '',
-      correctAnswer: (
-        raw.correct_answer ||
-        raw.correctanswer ||
-        raw.answer ||
-        raw.correct_option ||
-        ''
-      ).trim(),
-      marks: raw.marks ? parseFloat(raw.marks) : 4.0,
-      negativeMarks: raw.negative_marks
-        ? parseFloat(raw.negative_marks)
-        : raw.negativemarks
-        ? parseFloat(raw.negativemarks)
+      totalMarks: getVal(['total_marks']) ? parseFloat(getVal(['total_marks'])) : undefined,
+      subject: getVal(['subject', 'subject_name']) || 'General',
+      sectionName: getVal(['section_name', 'section']) || '',
+      chapter: getVal(['chapter', 'chapter_name']) || '',
+      topic: getVal(['topic', 'topic_name']) || '',
+      questionType: (getVal(['question_type', 'type']) || 'SINGLE_CORRECT').toUpperCase(),
+      passageText: getVal(['passage_text', 'passage']) || undefined,
+      assertionText: getVal(['assertion_text', 'assertion']) || undefined,
+      reasonText: getVal(['reason_text', 'reason']) || undefined,
+      correctAnswer: getVal(['correct_answer', 'correctanswer', 'answer']).toUpperCase(),
+      marks: getVal(['marks']) ? parseFloat(getVal(['marks'])) : 4.0,
+      negativeMarks: getVal(['negative_marks', 'negativemarks'])
+        ? parseFloat(getVal(['negative_marks', 'negativemarks']))
         : 1.0,
-      difficulty: (raw.difficulty || raw.difficulty_level || 'MEDIUM').toUpperCase(),
-      explanation: raw.explanation || raw.solution || '',
-      language: (raw.language || raw.language_code || 'en').toLowerCase(),
+      difficulty: (getVal(['difficulty', 'difficulty_level']) || 'MEDIUM').toUpperCase(),
+      explanation: getVal(['explanation', 'solution']) || undefined,
+      language: (getVal(['language', 'language_code']) || 'en').toLowerCase(),
     };
   }
 }

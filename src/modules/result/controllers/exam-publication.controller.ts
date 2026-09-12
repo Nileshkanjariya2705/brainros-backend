@@ -26,7 +26,7 @@ export class ExamPublicationController {
    * GET /admin/exams/results/publication-dashboard
    */
   @Get('admin/exams/results/publication-dashboard')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   async getPublicationDashboard() {
     const data =
       await this.publicationService.getLiveExamsPublicationDashboard();
@@ -48,7 +48,7 @@ export class ExamPublicationController {
     'super-admin/exams/:examId/results/readiness',
     'admin/exams/:examId/results/readiness',
   ])
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   async getPublicationPreview(@Param('examId') examId: string) {
     const data = await this.publicationService.getPublicationPreview(examId);
     return {
@@ -67,7 +67,7 @@ export class ExamPublicationController {
     'super-admin/exams/:examId/results/publish',
     'admin/exams/:examId/results/publish',
   ])
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER')
   async publishExamResults(
     @Param('examId') examId: string,
     @CurrentUser('id') userId: string,

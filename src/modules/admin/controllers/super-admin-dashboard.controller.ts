@@ -51,6 +51,7 @@ export class SuperAdminDashboardController {
   }
 
   @Get('revenue')
+  @Roles('SUPER_ADMIN', 'ACCOUNTANT', 'GENERAL_MANAGER', 'ADMIN')
   async getRevenue(@Query() filter: SuperAdminAnalyticsFilterDto) {
     return this.dashboardService.getRevenueAnalytics(filter);
   }

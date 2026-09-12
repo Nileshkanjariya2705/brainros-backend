@@ -10,6 +10,7 @@ import { InfrastructureStateService } from './common/infrastructure/infrastructu
 import { parseBooleanFlag } from './modules/feature-flag/feature-flag.constants';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 
 // Global error handlers to prevent silent process death
 const bootstrapLogger = new AppLoggerService();
@@ -57,6 +58,19 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
+
+  // Enable HTTP response compression for payloads > 1KB
+  app.use(
+    compression({
+      threshold: 1024,
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) {
+          return false;
+        }
+        return compression.filter(req, res);
+      },
+    }),
+  );
 
   // Normalize duplicate slashes in request URLs (e.g. //auth/refresh -> /auth/refresh)
   app.use((req: any, _res: any, next: any) => {

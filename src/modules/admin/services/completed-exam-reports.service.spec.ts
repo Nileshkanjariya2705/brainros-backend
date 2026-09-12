@@ -194,4 +194,72 @@ describe('CompletedExamReportsService', () => {
       );
     });
   });
+
+  describe('queueReportToInstituteEmail', () => {
+    it('should throw error if student institute email is missing', async () => {
+      prisma.attempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        examId: 'exam-1',
+        studentId: 'student-1',
+        exam: { title: 'NEET Live Exam' },
+        student: {
+          id: 'student-1',
+          name: 'Rahul Patel',
+          institution: null,
+        },
+        result: { totalScore: 500 },
+      });
+
+      await expect(
+        service.queueReportToInstituteEmail('exam-1', 'attempt-1', { id: 'admin-1' }),
+      ).rejects.toThrow('Institute email is not configured for this student.');
+    });
+
+    it('should resolve student institution email server-side and enqueue BullMQ job', async () => {
+      prisma.attempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        examId: 'exam-1',
+        studentId: 'student-1',
+        exam: {
+          title: 'NEET Live Exam',
+        },
+        student: {
+          id: 'student-1',
+          name: 'Rahul Patel',
+          userId: 'user-1',
+          user: { id: 'user-1', email: 'rahul.patel@example.com' },
+          institution: {
+            id: 'inst-1',
+            name: 'ABC Coaching Institute',
+            email: 'admin@abccoaching.com',
+          },
+        },
+        result: { totalScore: 500, maxScore: 720 },
+      });
+
+      prisma.notification.create.mockResolvedValue({
+        id: 'notif-inst-1',
+        status: 'PENDING',
+      });
+
+      emailQueue.add.mockResolvedValue({ id: 'bullmq-job-inst-1' });
+
+      const res = await service.queueReportToInstituteEmail('exam-1', 'attempt-1', { id: 'admin-1' });
+
+      expect(res.success).toBe(true);
+      expect(res.status).toEqual('QUEUED');
+      expect(res.recipientEmail).toEqual('admin@abccoaching.com');
+      expect(res.institutionName).toEqual('ABC Coaching Institute');
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        'send-student-report-email',
+        expect.objectContaining({
+          attemptId: 'attempt-1',
+          recipientEmail: 'admin@abccoaching.com',
+          recipientType: 'INSTITUTE',
+          institutionId: 'inst-1',
+        }),
+        expect.anything(),
+      );
+    });
+  });
 });

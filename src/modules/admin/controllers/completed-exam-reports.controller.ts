@@ -15,7 +15,16 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'SUPER_ADMIN')
+@Roles(
+  'SUPER_ADMIN',
+  'ADMIN',
+  'GENERAL_MANAGER',
+  'MANAGER',
+  'OPERATOR',
+  'ACCOUNTANT',
+  'SALES_AGENT',
+  'STAFF',
+)
 export class CompletedExamReportsController {
   constructor(
     private readonly reportsService: CompletedExamReportsService,
@@ -176,6 +185,32 @@ export class CompletedExamReportsController {
     return {
       statusCode: HttpStatus.ACCEPTED,
       message: 'Student report email job queued successfully',
+      data,
+    };
+  }
+
+  /**
+   * Queue PDF report generation and email delivery to student's Institute via BullMQ.
+   * POST /admin/completed-exams/:examId/attempts/:attemptId/send-report-to-institute
+   * POST /super-admin/completed-exams/:examId/attempts/:attemptId/send-report-to-institute
+   */
+  @Post([
+    'admin/completed-exams/:examId/attempts/:attemptId/send-report-to-institute',
+    'super-admin/completed-exams/:examId/attempts/:attemptId/send-report-to-institute',
+  ])
+  async sendInstituteReportEmail(
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+    @CurrentUser() user: any,
+  ) {
+    const data = await this.reportsService.queueReportToInstituteEmail(
+      examId,
+      attemptId,
+      user,
+    );
+    return {
+      statusCode: HttpStatus.ACCEPTED,
+      message: 'Student analysis report has been queued for sending to the institute.',
       data,
     };
   }

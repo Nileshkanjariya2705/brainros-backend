@@ -195,6 +195,15 @@ export class BulkUploadActivationService {
         ? parseInt(String(data.admissionYear).replace(/\D/g, ''), 10) || null
         : null;
 
+      let schoolName = data.schoolCollege || 'Not Specified';
+      if (institutionId) {
+        const inst = await tx.institution.findUnique({
+          where: { id: institutionId },
+          select: { name: true },
+        });
+        if (inst) schoolName = inst.name;
+      }
+
       const student = await tx.student.create({
         data: {
           userId: user.id,
@@ -202,7 +211,7 @@ export class BulkUploadActivationService {
           name: data.name,
           state: data.state || 'Not Specified',
           district: data.district || 'Not Specified',
-          schoolCollege: data.schoolCollege || 'Not Specified',
+          schoolCollege: schoolName,
           institutionId: institutionId || null,
           admissionYear: parsedAdmissionYear,
           classId: classRecord.id,

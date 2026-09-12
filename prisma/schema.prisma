@@ -348,6 +348,9 @@ model Student {
   @@index([districtId])
   @@index([institutionId])
   @@index([admissionYear])
+  @@index([examTargetId])
+  @@index([classId])
+  @@index([preferredLanguageId])
   @@map("students")
 }
 
@@ -440,6 +443,7 @@ model RolePermission {
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
+  @@index([permissionId])
   @@map("role_permissions")
 }
 
@@ -936,6 +940,7 @@ model ExamQuestion {
   @@unique([examId, questionId])
   @@index([examId])
   @@index([sectionId])
+  @@index([questionId])
   @@map("exam_questions")
 }
 
@@ -1018,6 +1023,10 @@ model Attempt {
   @@index([statusId])
   @@index([riskLevel])
   @@index([isFlagged])
+  @@index([scheduleId])
+  @@index([examVersionId])
+  @@index([studentId, scheduleId])
+  @@index([statusId, createdAt])
   @@map("attempts")
 }
 
@@ -1167,6 +1176,7 @@ model AttemptQuestion {
 
   @@unique([attemptId, examQuestionId])
   @@index([attemptId, displayOrder])
+  @@index([examQuestionId])
   @@map("attempt_questions")
 }
 
@@ -1182,6 +1192,7 @@ model AttemptQuestionOption {
 
   @@unique([attemptQuestionId, examQuestionOptionId])
   @@index([attemptQuestionId, displayOrder])
+  @@index([examQuestionOptionId])
   @@map("attempt_question_options")
 }
 
@@ -1203,6 +1214,7 @@ model Answer {
 
   @@unique([attemptId, examQuestionId])
   @@index([attemptId])
+  @@index([examQuestionId])
   @@map("answers")
 }
 
@@ -1227,6 +1239,7 @@ model QuestionTimeLog {
   @@index([attemptId, examQuestionId])
   @@index([attemptId, startTime])
   @@index([eventId])
+  @@index([examQuestionId])
   @@map("question_time_logs")
 }
 
@@ -1392,6 +1405,7 @@ model SubjectResult {
 
   @@unique([resultId, subjectId])
   @@index([resultId])
+  @@index([subjectId])
   @@map("subject_results")
 }
 
@@ -1416,6 +1430,7 @@ model ChapterResult {
 
   @@unique([resultId, chapterId])
   @@index([resultId])
+  @@index([chapterId])
   @@map("chapter_results")
 }
 
@@ -1468,6 +1483,8 @@ model BlueprintRule {
   @@index([blueprintId])
   @@index([subjectId])
   @@index([chapterId])
+  @@index([topicId])
+  @@index([subTopicId])
   @@map("blueprint_rules")
 }
 
@@ -1631,6 +1648,8 @@ model ExamSchedule {
   @@index([status])
   @@index([startTime])
   @@index([endTime])
+  @@index([scheduledById])
+  @@index([status, startTime, endTime])
   @@map("exam_schedules")
 }
 
@@ -1703,6 +1722,7 @@ model RankSnapshot {
 
   @@unique([examId, snapshotVersion])
   @@index([examId])
+  @@index([examVersionId])
   @@index([status])
   @@map("rank_snapshots")
 }
@@ -2114,6 +2134,7 @@ model Bill {
   @@unique([institutionId, billingYear, billingMonth])
   @@index([institutionId])
   @@index([createdById])
+  @@index([approvedById])
   @@index([status])
   @@index([billNumber])
   @@index([billingYear, billingMonth])
@@ -2160,6 +2181,7 @@ model InstitutionBatch {
 
   @@unique([institutionId, name])
   @@index([institutionId])
+  @@index([examTargetId])
   @@index([status])
   @@map("institution_batches")
 }
@@ -2460,6 +2482,7 @@ model Notification {
   @@index([userId, isRead])
   @@index([userId, createdAt])
   @@index([recipientUserId])
+  @@index([templateId])
   @@index([type])
   @@index([status])
   @@index([channel])

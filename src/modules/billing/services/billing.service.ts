@@ -672,6 +672,7 @@ export class BillingService {
     });
 
     const totalSchools = institutions.length;
+    const instIds = institutions.map((i) => i.id);
     const jobId = `bulk_invoice_${billingYear}_${billingMonth}_${Date.now()}`;
 
     await this.jobProgressService.publishStarted(
@@ -682,6 +683,51 @@ export class BillingService {
       { totalSchools, billingMonth, billingYear, pricePerStudent },
     );
 
+    // 1. Batch pre-fetch existing bills for this period across all candidate institutions
+    const existingBills = await this.prisma.bill.findMany({
+      where: {
+        billingYear,
+        billingMonth,
+        institutionId: { in: instIds },
+      },
+      select: { institutionId: true },
+    });
+    const existingInstitutionIds = new Set(existingBills.map((b) => b.institutionId));
+
+    // 2. Batch pre-aggregate student counts across all candidate institutions
+    const studentCountGroups = await this.prisma.student.groupBy({
+      by: ['institutionId'],
+      where: {
+        institutionId: { in: instIds },
+        status: 'ACTIVE',
+        user: { isActive: true },
+      },
+      _count: { _all: true },
+    });
+    const studentCountMap = new Map<string, number>();
+    for (const sc of studentCountGroups) {
+      if (sc.institutionId) {
+        studentCountMap.set(sc.institutionId, sc._count._all);
+      }
+    }
+
+    // 3. Determine starting invoice sequence for this period
+    const yearMonth = `${billingYear}${String(billingMonth).padStart(2, '0')}`;
+    const invoicePrefix = `INV-${yearMonth}-`;
+    const latestBill = await this.prisma.bill.findFirst({
+      where: { billNumber: { startsWith: invoicePrefix } },
+      orderBy: { billNumber: 'desc' },
+      select: { billNumber: true },
+    });
+    let currentSequence = 1;
+    if (latestBill && latestBill.billNumber) {
+      const parts = latestBill.billNumber.split('-');
+      const lastSeq = parseInt(parts[2] || '0', 10);
+      if (!isNaN(lastSeq)) {
+        currentSequence = lastSeq + 1;
+      }
+    }
+
     let generatedCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
@@ -690,26 +736,16 @@ export class BillingService {
     for (let i = 0; i < totalSchools; i++) {
       const inst = institutions[i];
       try {
-        const existing = await this.prisma.bill.findUnique({
-          where: {
-            institutionId_billingYear_billingMonth: {
-              institutionId: inst.id,
-              billingYear,
-              billingMonth,
-            },
-          },
-        });
-
-        if (existing) {
+        if (existingInstitutionIds.has(inst.id)) {
           skippedCount++;
         } else {
-          const studentCount = await this.countEligibleStudents(inst.id);
+          const studentCount = studentCountMap.get(inst.id) || 0;
           if (studentCount === 0) {
             skippedCount++;
           } else {
             const taxableAmount = studentCount * pricePerStudent;
             const taxDetails = this.calculateTaxForInstitution(taxableAmount, inst, taxConfig);
-            const billNumber = await this.generateInvoiceNumber(billingYear, billingMonth);
+            const billNumber = `${invoicePrefix}${String(currentSequence++).padStart(4, '0')}`;
 
             const taxSnapshot = {
               ...taxDetails,
@@ -945,11 +981,166 @@ export class BillingService {
     const limit = Number(filter.limit) || 20;
     const skip = (page - 1) * limit;
 
+    const includeUnbilled = String(filter.includeUnbilled) === 'true' || filter.includeUnbilled === true;
+
+    if (includeUnbilled && filter.month && filter.year) {
+      const monthNum = Number(filter.month);
+      const yearNum = Number(filter.year);
+      const currentPrice = await this.getPricingSetting();
+      const taxConfig = await this.getTaxConfiguration();
+
+      const allSchools = await this.prisma.institution.findMany({
+        where: { status: { in: ['ACTIVE', 'APPROVED', 'DRAFT'] } },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          email: true,
+          phone: true,
+          city: true,
+          state: true,
+          address: true,
+          stateRef: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      const existingBills = await this.prisma.bill.findMany({
+        where: {
+          billingMonth: monthNum,
+          billingYear: yearNum,
+        },
+        include: {
+          institution: { select: { id: true, name: true, code: true, email: true, phone: true, city: true, address: true } },
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              mobileNumber: true,
+              userRoles: { include: { role: true } },
+            },
+          },
+          approvedBy: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      const billMap = new Map<string, any>();
+      for (const b of existingBills) {
+        billMap.set(b.institutionId, b);
+      }
+
+      let combined: any[] = [];
+      for (const school of allSchools) {
+        if (filter.institutionId && filter.institutionId !== 'ALL' && filter.institutionId !== school.id) {
+          continue;
+        }
+
+        const existingBill = billMap.get(school.id);
+        if (existingBill) {
+          const staffRole = existingBill.createdBy?.userRoles?.[0]?.role?.name || 'STAFF';
+          combined.push({
+            id: existingBill.id,
+            billNumber: existingBill.billNumber,
+            billDate: existingBill.billDate,
+            billingMonth: existingBill.billingMonth,
+            billingYear: existingBill.billingYear,
+            billingPeriod: `${MONTH_NAMES[existingBill.billingMonth] || 'Month ' + existingBill.billingMonth} ${existingBill.billingYear}`,
+            studentCount: existingBill.studentCount,
+            pricePerStudent: existingBill.pricePerStudent,
+            description: existingBill.description,
+            amount: existingBill.amount,
+            tax: existingBill.tax,
+            totalAmount: existingBill.totalAmount,
+            status: existingBill.status,
+            rejectionReason: existingBill.rejectionReason,
+            emailStatus: existingBill.emailStatus || 'IDLE',
+            emailFailedReason: existingBill.emailFailedReason,
+            sentAt: existingBill.sentAt,
+            institution: existingBill.institution || school,
+            createdBy: existingBill.createdBy
+              ? {
+                  id: existingBill.createdBy.id,
+                  name: existingBill.createdBy.name || 'Staff Member',
+                  email: existingBill.createdBy.email,
+                  mobileNumber: existingBill.createdBy.mobileNumber,
+                  role: staffRole,
+                }
+              : null,
+            approvedBy: existingBill.approvedBy
+              ? { id: existingBill.approvedBy.id, name: existingBill.approvedBy.name || existingBill.approvedBy.email }
+              : null,
+            approvedAt: existingBill.approvedAt,
+            createdAt: existingBill.createdAt,
+            isUnbilled: false,
+          });
+        } else {
+          const studentCount = await this.countEligibleStudents(school.id);
+          const taxableAmount = studentCount * currentPrice;
+          const taxDetails = this.calculateTaxForInstitution(taxableAmount, school, taxConfig);
+
+          combined.push({
+            id: `unbilled_${school.id}`,
+            billNumber: null,
+            billDate: null,
+            billingMonth: monthNum,
+            billingYear: yearNum,
+            billingPeriod: `${MONTH_NAMES[monthNum]} ${yearNum}`,
+            studentCount,
+            pricePerStudent: currentPrice,
+            description: `Student Platform Subscription (${MONTH_NAMES[monthNum]} ${yearNum})`,
+            amount: taxableAmount,
+            tax: taxDetails.totalTax,
+            totalAmount: taxDetails.grandTotal,
+            status: 'NOT_GENERATED',
+            emailStatus: 'IDLE',
+            institution: school,
+            createdBy: null,
+            approvedBy: null,
+            createdAt: new Date().toISOString(),
+            isUnbilled: true,
+          });
+        }
+      }
+
+      // Filter by search query
+      if (filter.search && filter.search.trim()) {
+        const q = filter.search.trim().toLowerCase();
+        combined = combined.filter(
+          (item) =>
+            item.billNumber?.toLowerCase().includes(q) ||
+            item.institution?.name?.toLowerCase().includes(q) ||
+            item.institution?.code?.toLowerCase().includes(q) ||
+            item.institution?.city?.toLowerCase().includes(q) ||
+            item.description?.toLowerCase().includes(q),
+        );
+      }
+
+      // Filter by status
+      if (filter.status && filter.status !== 'ALL') {
+        const targetStatus = filter.status.toUpperCase();
+        combined = combined.filter((item) => item.status === targetStatus);
+      }
+
+      const total = combined.length;
+      const paginated = combined.slice(skip, skip + limit);
+
+      return {
+        data: paginated,
+        meta: {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 1,
+        },
+      };
+    }
+
     const where: any = {};
 
     // Scope enforcement: Platform staff & super admins see all invoices (or filter by institutionId)
     const isPlatformStaff = userRoles.some((r) =>
-      ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'MANAGER', 'GENERAL_MANAGER'].includes(r),
+      ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(r),
     );
 
     if (!isPlatformStaff) {

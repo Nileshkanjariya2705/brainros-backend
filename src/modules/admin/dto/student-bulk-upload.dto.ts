@@ -79,6 +79,10 @@ export class UpdateBulkStudentRowDto {
   @IsOptional()
   @IsUUID()
   institutionId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  schoolId?: string;
 }
 
 export interface BulkStudentRowNormalized {

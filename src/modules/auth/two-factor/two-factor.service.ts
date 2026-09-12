@@ -180,10 +180,10 @@ export class TwoFactorService {
       }
     }
 
-    // 3. Check Resend Cooldown
+    // 3. Check Resend Cooldown (enforced in production real SMS mode)
     const cooldownKeyStr = this.cooldownKey(purpose, mobileNumber);
     const isCooldownActive = await this.redisService.get(cooldownKeyStr);
-    if (isCooldownActive) {
+    if (this.config.enable2FA && isCooldownActive) {
       throw new BadRequestException(
         `Please wait ${this.config.resendCooldown} seconds before requesting another OTP.`,
       );

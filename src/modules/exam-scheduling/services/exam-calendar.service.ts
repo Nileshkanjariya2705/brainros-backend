@@ -11,7 +11,6 @@ import {
   RescheduleCalendarEventDto,
   CalendarFilterDto,
 } from '../dto/calendar.dto';
-import { ScheduleReminderService } from './schedule-reminder.service';
 
 @Injectable()
 export class ExamCalendarService {
@@ -19,7 +18,6 @@ export class ExamCalendarService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly reminderService: ScheduleReminderService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -232,12 +230,10 @@ export class ExamCalendarService {
       },
     });
 
-    // Schedule automated reminders
-    try {
-      await this.reminderService.scheduleExamReminders(event as any);
-    } catch {
-      this.logger.warn('Reminder scheduling failed (non-fatal)');
-    }
+    // Note: WhatsApp reminders are triggered from ExamScheduleService.scheduleAdminExam()
+    // after the actual ExamSchedule DB record is created. Calendar events are planning
+    // artifacts only — no WhatsApp reminders are scheduled at this stage.
+    this.logger.debug('[ExamCalendar] Calendar event created. WhatsApp reminders will be scheduled when exam is officially scheduled via ExamScheduleService.');
 
     return event;
   }
@@ -434,14 +430,10 @@ export class ExamCalendarService {
       include: { exam: true, cycle: true },
     });
 
-    try {
-      await this.reminderService.handleExamRescheduled(
-        updated as any,
-        existing.scheduleVersion,
-      );
-    } catch {
-      this.logger.warn('Reminder reschedule failed (non-fatal)');
-    }
+    // Note: WhatsApp reminder rescheduling is handled in ExamScheduleService.rescheduleExam()
+    // after the actual ExamSchedule is updated. Calendar rescheduling here only updates
+    // the planning calendar — no WhatsApp reminders are directly managed here.
+    this.logger.debug('[ExamCalendar] Calendar event rescheduled. WhatsApp reminders will be updated when exam schedule is rescheduled via ExamScheduleService.');
 
     return updated;
   }

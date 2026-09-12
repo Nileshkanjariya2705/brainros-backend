@@ -40,7 +40,7 @@ export class ExamTranslationController {
    * GET /exams/:examId/translations/coverage
    */
   @Get('coverage')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getExamTranslationCoverage(@Param('examId') examId: string) {
     const data =
       await this.examTranslationService.getExamTranslationCoverage(examId);
@@ -56,7 +56,7 @@ export class ExamTranslationController {
    * GET /exams/:examId/translations/template?languageId=...&format=xlsx
    */
   @Get('template')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async downloadExamTranslationTemplate(
     @Param('examId') examId: string,
@@ -84,7 +84,7 @@ export class ExamTranslationController {
    * GET /exams/:examId/translations/export?languageId=...&format=xlsx
    */
   @Get('export')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async exportExamTranslations(
     @Param('examId') examId: string,
@@ -112,7 +112,7 @@ export class ExamTranslationController {
    * POST /exams/:examId/translations/validate
    */
   @Post('validate')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @UseInterceptors(FileInterceptor('file'))
   async validateExamTranslation(
@@ -146,7 +146,7 @@ export class ExamTranslationController {
    * POST /exams/:examId/translations/import or POST /exams/:examId/translations/upload
    */
   @Post(['import', 'upload'])
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @UseInterceptors(FileInterceptor('file'))
   async importExamTranslations(

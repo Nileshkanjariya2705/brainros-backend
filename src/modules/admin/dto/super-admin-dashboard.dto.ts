@@ -24,6 +24,11 @@ export class SuperAdminAnalyticsFilterDto {
   dateRange?: DateRangePreset;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  year?: number;
+
+  @IsOptional()
   @IsString()
   from?: string;
 

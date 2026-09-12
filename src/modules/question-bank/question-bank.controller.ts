@@ -63,7 +63,7 @@ export class QuestionBankController {
    * GET /questions/import/template
    */
   @Get('import/template')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   async downloadTemplate(
     @Query('format') format: ImportFormatEnum = ImportFormatEnum.XLSX,
@@ -85,7 +85,7 @@ export class QuestionBankController {
    * POST /questions/import
    */
   @Post('import')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   @UseInterceptors(FileInterceptor('file'))
   async uploadImportFile(
@@ -110,7 +110,7 @@ export class QuestionBankController {
    * GET /questions/import/:importId
    */
   @Get('import/:importId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   getImportSession(@Param('importId') importId: string) {
     return this.questionImportService.getImportSession(importId);
@@ -121,7 +121,7 @@ export class QuestionBankController {
    * GET /questions/import/:importId/rows
    */
   @Get('import/:importId/rows')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   getImportRows(
     @Param('importId') importId: string,
@@ -135,7 +135,7 @@ export class QuestionBankController {
    * PATCH /questions/import/:importId/rows/:rowId
    */
   @Patch('import/:importId/rows/:rowId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   updateImportRow(
     @Param('importId') importId: string,
@@ -150,7 +150,7 @@ export class QuestionBankController {
    * POST /questions/import/:importId/confirm
    */
   @Post('import/:importId/confirm')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   @HttpCode(HttpStatus.OK)
   async confirmImport(
@@ -170,7 +170,7 @@ export class QuestionBankController {
    * POST /questions/import/:importId/cancel
    */
   @Post('import/:importId/cancel')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   @HttpCode(HttpStatus.OK)
   cancelImport(@Param('importId') importId: string) {
@@ -182,7 +182,7 @@ export class QuestionBankController {
    * GET /questions/import/:importId/errors/export
    */
   @Get('import/:importId/errors/export')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_QUESTION)
   async exportImportErrors(
     @Param('importId') importId: string,
@@ -209,7 +209,7 @@ export class QuestionBankController {
    * POST /questions
    */
   @Post()
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.ADD_QUESTION)
   @HttpCode(HttpStatus.CREATED)
   createQuestion(
@@ -224,7 +224,7 @@ export class QuestionBankController {
    * GET /questions
    */
   @Get()
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   findQuestions(@Query() filter: QuestionFilterDto) {
     return this.questionBankService.findQuestions(filter);
@@ -235,7 +235,7 @@ export class QuestionBankController {
    * GET /questions/stats
    */
   @Get('stats')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   getOverallQuestionStats(@Query('examTargetId') examTargetId?: string) {
     return this.questionBankService.getQuestionStats(examTargetId);
@@ -246,7 +246,7 @@ export class QuestionBankController {
    * GET /questions/stats/:examTargetId
    */
   @Get('stats/:examTargetId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   getQuestionStatsByExam(@Param('examTargetId') examTargetId: string) {
     return this.questionBankService.getQuestionStats(examTargetId);
@@ -257,7 +257,7 @@ export class QuestionBankController {
    * GET /questions/:id
    */
   @Get(':id')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   findQuestionById(@Param('id') id: string) {
     return this.questionBankService.findQuestionById(id);
@@ -268,7 +268,7 @@ export class QuestionBankController {
    * GET /questions/:id/history
    */
   @Get(':id/history')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   getQuestionHistory(@Param('id') id: string) {
     return this.questionBankService.getQuestionHistory(id);
@@ -279,7 +279,7 @@ export class QuestionBankController {
    * GET /questions/:id/versions
    */
   @Get(':id/versions')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   getQuestionVersions(@Param('id') id: string) {
     return this.questionBankService.getQuestionVersions(id);
@@ -290,7 +290,7 @@ export class QuestionBankController {
    * PATCH /questions/:id
    */
   @Patch(':id')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   updateQuestion(
     @Param('id') id: string,
@@ -310,7 +310,7 @@ export class QuestionBankController {
    * POST /questions/:id/submit
    */
   @Post(':id/submit')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   @HttpCode(HttpStatus.OK)
   submitQuestion(
@@ -403,7 +403,7 @@ export class QuestionBankController {
    * DELETE /questions/:id
    */
   @Delete(':id')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.QUESTION_BANK)
   deleteQuestion(
     @Param('id') id: string,

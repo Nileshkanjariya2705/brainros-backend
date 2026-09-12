@@ -174,6 +174,11 @@ export class BillFilterDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includeUnbilled?: boolean;
 }
 
 export class AdditionalChargeDto {

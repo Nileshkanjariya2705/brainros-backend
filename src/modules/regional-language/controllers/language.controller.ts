@@ -45,7 +45,7 @@ export class LanguageController {
    */
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.CREATED)
   createLanguage(@Body() dto: CreateLanguageDto) {
     return this.languageService.createLanguage(dto);
@@ -57,7 +57,7 @@ export class LanguageController {
    */
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   updateLanguage(@Param('id') id: string, @Body() dto: UpdateLanguageDto) {
     return this.languageService.updateLanguage(id, dto);
   }
@@ -68,7 +68,7 @@ export class LanguageController {
    */
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'OPERATOR')
   deleteLanguage(@Param('id') id: string) {
     return this.languageService.deleteLanguage(id);
   }

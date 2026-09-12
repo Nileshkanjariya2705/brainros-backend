@@ -33,25 +33,16 @@ describe('ExamPaperValidatorService', () => {
     prisma = module.get(PrismaService);
   });
 
-  it('should validate a correct question paper dataset', async () => {
+  it('should validate a correct 6-column question paper dataset', async () => {
     const rows: ParsedExamPaperRow[] = [
       {
         rowNumber: 2,
-        examCode: 'NEET-01',
-        examName: 'NEET Test',
-        durationMinutes: 200,
-        subject: 'Physics',
-        sectionName: 'Section A',
-        questionType: 'SINGLE_CORRECT',
-        questionText: 'What is gravitational constant?',
-        optionA: '6.67 x 10^-11',
-        optionB: '9.8',
-        optionC: '3 x 10^8',
-        optionD: '1.6 x 10^-19',
-        correctAnswer: 'A',
-        marks: 4,
-        negativeMarks: 1,
-        difficulty: 'EASY',
+        questionNumber: 1,
+        questionText: 'What is 2 + 2?',
+        optionA: '2',
+        optionB: '3',
+        optionC: '4',
+        optionD: '5',
       },
     ];
 
@@ -60,25 +51,16 @@ describe('ExamPaperValidatorService', () => {
     expect(result.validRows).toBe(1);
     expect(result.invalidRows).toBe(0);
     expect(result.errors).toHaveLength(0);
-    expect(result.sections).toHaveLength(1);
   });
 
-  it('should detect missing question text and invalid correct answer', async () => {
+  it('should detect missing question text and invalid question number', async () => {
     const rows: ParsedExamPaperRow[] = [
       {
         rowNumber: 2,
-        examCode: 'NEET-01',
-        examName: 'NEET Test',
-        durationMinutes: 200,
-        subject: 'Physics',
-        sectionName: 'Section A',
-        questionType: 'SINGLE_CORRECT',
+        questionNumber: -1, // invalid!
         questionText: '', // missing!
         optionA: 'Opt 1',
-        optionB: 'Opt 2',
-        correctAnswer: 'Z', // invalid option key!
-        marks: 4,
-        negativeMarks: 1,
+        optionB: '', // missing!
       },
     ];
 

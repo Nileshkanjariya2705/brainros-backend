@@ -53,7 +53,7 @@ export class TranslationController {
    * GET /translations/import/template
    */
   @Get('import/template')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async downloadTemplate(
     @Query('format') format: TranslationImportFormatEnum = TranslationImportFormatEnum.XLSX,
@@ -75,7 +75,7 @@ export class TranslationController {
    * POST /translations/import
    */
   @Post('import')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @UseInterceptors(FileInterceptor('file'))
   async uploadImportFile(
@@ -98,7 +98,7 @@ export class TranslationController {
    * GET /translations/import/:importId
    */
   @Get('import/:importId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   getImportSession(@Param('importId') importId: string) {
     return this.translationImportService.getImportSession(importId);
@@ -109,7 +109,7 @@ export class TranslationController {
    * GET /translations/import/:importId/rows
    */
   @Get('import/:importId/rows')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   getImportRows(
     @Param('importId') importId: string,
@@ -123,7 +123,7 @@ export class TranslationController {
    * PATCH /translations/import/:importId/rows/:rowId
    */
   @Patch('import/:importId/rows/:rowId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   updateImportRow(
     @Param('importId') importId: string,
@@ -138,7 +138,7 @@ export class TranslationController {
    * POST /translations/import/:importId/confirm
    */
   @Post('import/:importId/confirm')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @HttpCode(HttpStatus.OK)
   async confirmImport(
@@ -158,7 +158,7 @@ export class TranslationController {
    * POST /translations/import/:importId/cancel
    */
   @Post('import/:importId/cancel')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   @HttpCode(HttpStatus.OK)
   cancelImport(@Param('importId') importId: string) {
@@ -170,7 +170,7 @@ export class TranslationController {
    * GET /translations/import/:importId/errors/export
    */
   @Get('import/:importId/errors/export')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @RequireFeature(FEATURE_KEYS.BULK_IMPORT_TRANSLATION)
   async exportImportErrors(
     @Param('importId') importId: string,
@@ -197,7 +197,7 @@ export class TranslationController {
    * GET /translations/completeness/:questionId
    */
   @Get('completeness/:questionId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getCompleteness(@Param('questionId') questionId: string) {
     return this.translationService.getTranslationCompleteness(questionId);
   }
@@ -207,7 +207,7 @@ export class TranslationController {
    * GET /translations/question/:questionId
    */
   @Get('question/:questionId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getQuestionTranslations(@Param('questionId') questionId: string) {
     return this.translationService.getQuestionTranslations(questionId);
   }
@@ -217,7 +217,7 @@ export class TranslationController {
    * POST /translations/question/:questionId
    */
   @Post('question/:questionId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.OK)
   upsertQuestionTranslation(
     @Param('questionId') questionId: string,
@@ -231,7 +231,7 @@ export class TranslationController {
    * POST /translations/question/:questionId/full
    */
   @Post('question/:questionId/full')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.OK)
   upsertFullQuestionTranslation(
     @Param('questionId') questionId: string,
@@ -248,7 +248,7 @@ export class TranslationController {
    * DELETE /translations/question/:questionId/:languageId
    */
   @Delete('question/:questionId/:languageId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   deleteQuestionTranslation(
     @Param('questionId') questionId: string,
     @Param('languageId') languageId: string,
@@ -264,7 +264,7 @@ export class TranslationController {
    * POST /translations/option/:optionId
    */
   @Post('option/:optionId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.OK)
   upsertOptionTranslation(
     @Param('optionId') optionId: string,

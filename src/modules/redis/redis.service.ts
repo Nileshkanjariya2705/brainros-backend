@@ -388,4 +388,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return true;
     }
   }
+
+  /**
+   * Unified Cache Helper: Fetches from cache if available, otherwise runs fetcher, caches result, and returns.
+   */
+  async getOrSet<T>(
+    key: string,
+    ttlSeconds: number,
+    fetcher: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      const cached = await this.get(key);
+      if (cached !== null && cached !== undefined) {
+        return JSON.parse(cached) as T;
+      }
+    } catch {
+      // Ignore JSON parse errors and proceed to fetcher
+    }
+
+    const freshData = await fetcher();
+    if (freshData !== undefined && freshData !== null) {
+      try {
+        await this.set(key, JSON.stringify(freshData), ttlSeconds);
+      } catch {
+        // Cache set failure shouldn't fail the request
+      }
+    }
+    return freshData;
+  }
 }

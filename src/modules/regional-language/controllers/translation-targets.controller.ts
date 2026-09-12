@@ -25,7 +25,7 @@ export class TranslationTargetsController {
    * GET /translations/targets or GET /admin/translations/targets
    */
   @Get('translations/targets')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getTranslationTargets(
     @Query() query: ExamTranslationTargetsQueryDto,
     @CurrentUser() user: any,
@@ -42,7 +42,7 @@ export class TranslationTargetsController {
   }
 
   @Get('admin/translations/targets')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getAdminTranslationTargets(
     @Query() query: ExamTranslationTargetsQueryDto,
     @CurrentUser() user: any,

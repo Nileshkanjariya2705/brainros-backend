@@ -26,7 +26,7 @@ export class AdminRankController {
    * Trigger batch rank & percentile generation for an exam population
    */
   @Post('generate')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   generateRanks(@Param('examId') examId: string, @Body() dto: GenerateRankDto) {
     return this.rankGenerationService.generateRanks({
       examId,
@@ -40,6 +40,7 @@ export class AdminRankController {
    * Check RankSnapshot status and summary aggregates
    */
   @Get('status')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getSnapshotStatus(
     @Param('examId') examId: string,
     @Query('version') version?: number,
@@ -54,6 +55,7 @@ export class AdminRankController {
    * Get paginated leaderboard for the exam (by Overall, State, District, School, Category)
    */
   @Get('leaderboard')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getLeaderboard(
     @Param('examId') examId: string,
     @Query() query: QueryLeaderboardDto,

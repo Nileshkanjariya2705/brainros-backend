@@ -24,7 +24,11 @@ export class PrismaService
 
   constructor(private readonly infrastructureState: InfrastructureStateService) {
     const dbUrl = process.env.DATABASE_URL || '';
+    const poolMax = process.env.DATABASE_POOL_MAX
+      ? parseInt(process.env.DATABASE_POOL_MAX, 10)
+      : 20;
     let poolConfig: PoolConfig = {};
+
     if (dbUrl) {
       const parsed = parse(dbUrl);
       poolConfig = {
@@ -36,7 +40,7 @@ export class PrismaService
         database: parsed.database || undefined,
         connectionTimeoutMillis: 5000,
         idleTimeoutMillis: 30000,
-        max: 10,
+        max: poolMax,
         ssl:
           dbUrl.includes('supabase.com') ||
           dbUrl.includes('aivencloud.com') ||

@@ -21,7 +21,7 @@ export class ExamGenerationController {
   constructor(private readonly generationService: ExamGenerationService) {}
 
   @Post('blueprints/:blueprintId/generate')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async generateExamVersion(
     @Param('blueprintId', ParseUUIDPipe) blueprintId: string,
     @Body() dto: GenerateExamDto,
@@ -40,7 +40,7 @@ export class ExamGenerationController {
   }
 
   @Get('exams/:examId/versions')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamVersions(@Param('examId', ParseUUIDPipe) examId: string) {
     const data = await this.generationService.getExamVersions(examId);
     return {
@@ -51,7 +51,7 @@ export class ExamGenerationController {
   }
 
   @Get('exam-versions/:versionId')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamVersionById(
     @Param('versionId', ParseUUIDPipe) versionId: string,
   ) {
@@ -64,7 +64,7 @@ export class ExamGenerationController {
   }
 
   @Post('exam-versions/:versionId/publish')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async publishExamVersion(
     @Param('versionId', ParseUUIDPipe) versionId: string,
   ) {
@@ -77,7 +77,7 @@ export class ExamGenerationController {
   }
 
   @Get('exam-versions/:versionId/questions')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamVersionQuestions(
     @Param('versionId', ParseUUIDPipe) versionId: string,
     @Query('languageId') languageId?: string,

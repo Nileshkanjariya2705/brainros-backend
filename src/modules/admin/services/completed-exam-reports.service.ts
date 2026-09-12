@@ -317,6 +317,7 @@ export class CompletedExamReportsService {
             include: {
               user: { select: { id: true, email: true, phone: true } },
               preferredLanguage: { select: { name: true, code: true } },
+              institution: { select: { id: true, name: true, code: true, email: true } },
             },
           },
           result: true,
@@ -384,6 +385,9 @@ export class CompletedExamReportsService {
         studentCode: att.student.studentCode || att.student.studentId,
         email: att.student.user.email,
         phone: att.student.user.phone,
+        institutionId: att.student.institution?.id || null,
+        institutionName: att.student.institution?.name || null,
+        institutionEmail: att.student.institution?.email || null,
         attemptStatus: att.status.name,
         startedAt: att.startedAt,
         submittedAt: att.submittedAt,
@@ -694,6 +698,166 @@ export class CompletedExamReportsService {
       status: 'QUEUED',
       jobId,
       recipientEmail,
+    };
+  }
+
+  /**
+   * Enqueues a BullMQ job to send the student analysis report to the student's registered Institute/School.
+   */
+  async queueReportToInstituteEmail(examId: string, attemptId: string, adminUser: any) {
+    const attempt = await this.prisma.attempt.findUnique({
+      where: { id: attemptId },
+      include: {
+        exam: {
+          include: {
+            resultPublications: { take: 1, orderBy: { createdAt: 'desc' } },
+          },
+        },
+        student: {
+          include: {
+            user: { select: { id: true, email: true, phone: true } },
+            institution: true,
+          },
+        },
+        result: true,
+      },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Student analysis report is not available.');
+    }
+
+    if (attempt.examId !== examId) {
+      throw new BadRequestException('The requested attempt does not belong to the specified exam.');
+    }
+
+    if (!attempt.result) {
+      throw new BadRequestException('Student analysis report is not available.');
+    }
+
+    const institution = attempt.student.institution;
+    if (!institution || !institution.email || !institution.email.trim() || !institution.email.includes('@')) {
+      throw new BadRequestException('Institute email is not configured for this student.');
+    }
+
+    const recipientEmail = institution.email.trim();
+    const adminId = adminUser?.userId || adminUser?.id || null;
+
+    // Idempotency: create Notification record for institute dispatch
+    const idempotencyKey = `report-inst-email:${examId}:${attemptId}:${Date.now()}`;
+    const notification = await this.prisma.notification.create({
+      data: {
+        userId: attempt.student.userId,
+        recipientUserId: attempt.student.userId,
+        recipientAddress: recipientEmail,
+        channel: NotificationChannel.EMAIL,
+        type: NotificationType.REPORT_READY,
+        title: `Student Analysis Report - ${attempt.student.name} - ${attempt.exam.title}`,
+        message: `Student analysis report for ${attempt.student.name} on ${attempt.exam.title}`,
+        status: NotificationStatus.PENDING,
+        correlationId: attemptId,
+        idempotencyKey,
+        data: {
+          examId,
+          attemptId,
+          studentId: attempt.studentId,
+          institutionId: institution.id,
+          recipientType: 'INSTITUTE',
+          requestedByAdminId: adminId,
+        },
+      },
+    });
+
+    let jobId = `report_inst_email_${attemptId}_${Date.now()}`;
+    try {
+      const job = await this.emailReportQueue.add(
+        'send-student-report-email',
+        {
+          notificationId: notification.id,
+          examId,
+          attemptId,
+          studentId: attempt.studentId,
+          recipientEmail,
+          recipientType: 'INSTITUTE',
+          institutionId: institution.id,
+          institutionName: institution.name,
+          requestedByAdminId: adminId,
+          reportType: 'EXAM_ANALYSIS_INSTITUTE',
+        },
+        {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 3000,
+          },
+          removeOnComplete: 100,
+          removeOnFail: 200,
+        },
+      );
+      if (job?.id) {
+        jobId = job.id;
+      }
+    } catch (queueErr: any) {
+      this.logger.warn(
+        `[CompletedExamReportsService] Queue service unavailable (${queueErr.message || queueErr}). Falling back to asynchronous direct email dispatch.`,
+      );
+
+      setImmediate(async () => {
+        try {
+          const processor = this.moduleRef?.get(ExamReportEmailProcessor, { strict: false });
+          if (processor) {
+            await processor.process({
+              id: jobId,
+              name: 'send-student-report-email',
+              data: {
+                notificationId: notification.id,
+                examId,
+                attemptId,
+                studentId: attempt.studentId,
+                recipientEmail,
+                recipientType: 'INSTITUTE',
+                institutionId: institution.id,
+                institutionName: institution.name,
+                requestedByAdminId: adminId,
+                reportType: 'EXAM_ANALYSIS_INSTITUTE',
+              },
+            } as any);
+          }
+        } catch (dispatchErr: any) {
+          this.logger.error(
+            `[CompletedExamReportsService] Direct institute report email dispatch failed: ${dispatchErr.message || dispatchErr}`,
+          );
+        }
+      });
+    }
+
+    // Audit Log
+    await this.auditLogService.logAction({
+      actorUserId: adminId,
+      action: 'EXAM_REPORT_INSTITUTE_EMAIL_REQUESTED',
+      entityType: 'Attempt',
+      entityId: attemptId,
+      metadata: {
+        examId,
+        studentId: attempt.studentId,
+        institutionId: institution.id,
+        institutionName: institution.name,
+        recipientEmail,
+        jobId,
+      },
+    });
+
+    this.logger.log(
+      `[CompletedExamReportsService] Dispatched report email job '${jobId}' for institute '${institution.name}' (${recipientEmail}) on attempt '${attemptId}'`,
+    );
+
+    return {
+      success: true,
+      message: 'Student analysis report has been queued for sending to the institute.',
+      status: 'QUEUED',
+      jobId,
+      recipientEmail,
+      institutionName: institution.name,
     };
   }
 

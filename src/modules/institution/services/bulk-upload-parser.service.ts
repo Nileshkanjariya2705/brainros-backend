@@ -13,7 +13,6 @@ const OPTIONAL_COLUMNS = [
   'studentId',
   'state',
   'district',
-  'schoolCollege',
   'class',
   'examTarget',
   'preferredLanguage',

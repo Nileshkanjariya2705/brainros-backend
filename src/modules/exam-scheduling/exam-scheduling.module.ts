@@ -7,6 +7,7 @@ import {
   EXAM_WINDOW_END_QUEUE_NAME,
   EVALUATION_QUEUE_NAME,
 } from '../result/interfaces/result-lifecycle.interface';
+import { WHATSAPP_REMINDER_QUEUE_NAME } from '../notification/interfaces/exam-notification-job.interface';
 
 // Existing Services
 import { ExamLifecycleService } from './services/exam-lifecycle.service';
@@ -35,12 +36,10 @@ import { ExamCacheModule } from '../exam-cache/exam-cache.module';
     forwardRef(() => AdminModule),
     ExamCacheModule,
     BullModule.registerQueue(
-      {
-        name: EXAM_WINDOW_END_QUEUE_NAME,
-      },
-      {
-        name: EVALUATION_QUEUE_NAME,
-      },
+      { name: EXAM_WINDOW_END_QUEUE_NAME },
+      { name: EVALUATION_QUEUE_NAME },
+      // WhatsApp reminder queue — needed by ScheduleReminderService via @InjectQueue
+      { name: WHATSAPP_REMINDER_QUEUE_NAME },
     ),
   ],
   controllers: [

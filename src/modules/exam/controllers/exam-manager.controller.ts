@@ -43,7 +43,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/blueprints
    */
   @Get('blueprints')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getBlueprints() {
     const data = await this.examPaperImportService.getActiveBlueprints();
     return {
@@ -58,7 +58,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/validate
    */
   @Post('validate')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @UseInterceptors(AnyFilesInterceptor())
   async validateUpload(
     @UploadedFiles() files: Express.Multer.File[],
@@ -113,7 +113,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/create-from-upload
    */
   @Post('create-from-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @UseInterceptors(AnyFilesInterceptor())
   async createExamFromUpload(
     @UploadedFiles() files: Express.Multer.File[],
@@ -167,7 +167,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/template
    */
   @Get('template')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async downloadTemplate(
     @Query('format') format: ExamImportFormatEnum = ExamImportFormatEnum.XLSX,
     @Res() res: Response,
@@ -188,7 +188,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/import
    */
   @Post('import')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async uploadQuestionPaper(
     @UploadedFile() file: Express.Multer.File,
@@ -205,7 +205,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/import/:importId
    */
   @Get('import/:importId')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getImportSession(@Param('importId') importId: string) {
     return this.examPaperImportService.getImportSession(importId);
   }
@@ -215,7 +215,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/import/:importId/rows
    */
   @Get('import/:importId/rows')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getImportRows(
     @Param('importId') importId: string,
     @Query() query: ExamImportFilterDto,
@@ -228,7 +228,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/import-history
    */
   @Get('import-history')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getImportHistory(@Query() query: ExamImportFilterDto) {
     return this.examPaperImportService.getImportHistory(query);
   }
@@ -238,7 +238,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/import/:importId/errors/export
    */
   @Get('import/:importId/errors/export')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async exportImportErrors(
     @Param('importId') importId: string,
     @Query('format') format: ExamImportFormatEnum = ExamImportFormatEnum.XLSX,
@@ -260,7 +260,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams
    */
   @Get('exams')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getAllExams(@Query() filter: ExamManagerFilterDto) {
     return this.examPaperImportService.getAllExamsList(filter);
   }
@@ -270,7 +270,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams/:id
    */
   @Get('exams/:id')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   getExamById(@Param('id') id: string) {
     return this.examService.findExamById(id);
   }
@@ -280,7 +280,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/preview-upload
    */
   @Post('exams/:examId/preview-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async previewQuestionPaperUpload(
     @Param('examId') examId: string,
@@ -307,7 +307,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/submit-upload
    */
   @Post('exams/:examId/submit-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file'))
   async submitQuestionPaperUpload(
     @Param('examId') examId: string,
@@ -334,7 +334,7 @@ export class ExamManagerController {
    * GET /admin/exam-manager/exams/:examId/question-paper
    */
   @Get('exams/:examId/question-paper')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getExamQuestionPaper(@Param('examId') examId: string) {
     const data = await this.examPaperImportService.getExamQuestionPaper(examId);
     return {
@@ -349,7 +349,7 @@ export class ExamManagerController {
    * POST /admin/exam-manager/exams/:examId/retry-upload
    */
   @Post('exams/:examId/retry-upload')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'OPERATOR', 'GENERAL_MANAGER')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async retryQuestionPaperUpload(
     @Param('examId') examId: string,
     @CurrentUser() user: { userId: string },

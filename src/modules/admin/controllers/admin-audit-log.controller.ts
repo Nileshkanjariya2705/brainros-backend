@@ -11,13 +11,13 @@ export class AdminAuditLogController {
   constructor(private readonly auditService: AuditLogService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   async getAuditLogs(@Query() filter: AuditLogFilterDto) {
     return this.auditService.getAuditLogs(filter);
   }
 
   @Get(':id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER')
   async getAuditLogById(@Param('id') id: string) {
     return this.auditService.getAuditLogById(id);
   }

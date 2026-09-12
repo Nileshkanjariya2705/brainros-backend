@@ -34,7 +34,7 @@ export class ExamSchedulingController {
   ) {}
 
   @Get('admin/exams/check-availability')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async checkQuestionAvailability(
     @Query() dto: CheckQuestionAvailabilityDto,
   ) {
@@ -46,7 +46,7 @@ export class ExamSchedulingController {
   }
 
   @Post('admin/exams/schedule')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async scheduleAdminExam(
     @CurrentUser('id') userId: string,
     @Body() dto: AdminScheduleExamDto,
@@ -60,7 +60,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/submit')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async submitExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -79,7 +79,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/approve')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR')
   async approveExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -98,7 +98,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/reject')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR')
   async rejectExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -117,7 +117,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/schedule')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async scheduleExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -133,7 +133,7 @@ export class ExamSchedulingController {
   }
 
   @Patch('exam-schedules/:scheduleId')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async rescheduleExam(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @CurrentUser('id') userId: string,
@@ -152,7 +152,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exam-schedules/:scheduleId/activate')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR')
   async activateExam(
     @Param('scheduleId', ParseUUIDPipe) scheduleId: string,
     @CurrentUser('id') userId: string,
@@ -166,7 +166,7 @@ export class ExamSchedulingController {
   }
 
   @Post('exams/:examId/cancel')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async cancelExam(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -185,7 +185,7 @@ export class ExamSchedulingController {
   }
 
   @Get('exams/:examId/lifecycle')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamLifecycleHistory(
     @Param('examId', ParseUUIDPipe) examId: string,
   ) {
@@ -198,7 +198,7 @@ export class ExamSchedulingController {
   }
 
   @Get('exams/:examId/schedule')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'STUDENT')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT')
   async getExamSchedule(@Param('examId', ParseUUIDPipe) examId: string) {
     const data = await this.scheduleService.getExamSchedule(examId);
     return {
@@ -209,7 +209,7 @@ export class ExamSchedulingController {
   }
 
   @Get('exams/:examId/access-check')
-  @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @Roles('STUDENT', 'ADMIN', 'SUPER_ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async checkExamAccess(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,
@@ -223,7 +223,7 @@ export class ExamSchedulingController {
   }
 
   @Get(['super-admin/exams/scheduling-candidates', 'exams/scheduling-candidates'])
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getSchedulingCandidates(@CurrentUser('id') _userId: string) {
     const data = await this.scheduleService.getSchedulingCandidates();
     return {
@@ -234,7 +234,7 @@ export class ExamSchedulingController {
   }
 
   @Post(['super-admin/exams/:examId/activate', 'exams/:examId/activate'])
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'OPERATOR')
   async activateExamDirectly(
     @Param('examId', ParseUUIDPipe) examId: string,
     @CurrentUser('id') userId: string,

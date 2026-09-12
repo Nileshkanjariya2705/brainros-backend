@@ -20,13 +20,13 @@ export class AdminNotificationController {
   ) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'ACCOUNTANT', 'SALES_AGENT')
   async getNotifications(@Query() filter: NotificationFilterDto) {
     return this.notificationService.getNotifications(filter);
   }
 
   @Get('templates')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'ACCOUNTANT', 'SALES_AGENT')
   async getTemplates() {
     return this.prisma.notificationTemplate.findMany({
       orderBy: [{ notificationType: 'asc' }, { version: 'desc' }],
@@ -34,7 +34,7 @@ export class AdminNotificationController {
   }
 
   @Post('templates')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER')
   async createTemplate(@Body() dto: CreateNotificationTemplateDto) {
     return this.templateService.saveTemplate(dto);
   }

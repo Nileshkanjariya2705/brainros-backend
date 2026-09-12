@@ -47,6 +47,13 @@ export class AdminStudentsQueryDto {
   pageSize?: number = 20;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
   @IsString()
   search?: string;
 

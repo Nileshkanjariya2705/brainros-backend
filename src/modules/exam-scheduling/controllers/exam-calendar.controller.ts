@@ -34,7 +34,7 @@ export class ExamCalendarController {
    * Returns distinct years from calendar entries (for the year dropdown).
    */
   @Get('years')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async getAvailableYears() {
     return this.calendarService.getAvailableYears();
   }
@@ -44,7 +44,7 @@ export class ExamCalendarController {
    * List calendar events with optional filters (year, status, search, etc.)
    */
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN', 'STUDENT', 'PARENT', 'INSTITUTION_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR', 'STUDENT', 'PARENT', 'INSTITUTION_ADMIN')
   async getCalendarEvents(@Query() filter: CalendarFilterDto) {
     return this.calendarService.getCalendarEvents(filter);
   }
@@ -54,7 +54,7 @@ export class ExamCalendarController {
    * Create a new academic calendar entry.
    */
   @Post()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async createCalendarEvent(
     @CurrentUser() user: any,
     @Body() dto: CreateExamCalendarEventDto,
@@ -68,7 +68,7 @@ export class ExamCalendarController {
    * End time is recalculated server-side from durationMinutes.
    */
   @Put(':id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async updateCalendarEvent(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -82,7 +82,7 @@ export class ExamCalendarController {
    * Delete only the calendar entry — does NOT delete the Exam record.
    */
   @Delete(':id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   @HttpCode(HttpStatus.OK)
   async deleteCalendarEvent(
     @CurrentUser() user: any,
@@ -95,7 +95,7 @@ export class ExamCalendarController {
    * PATCH /exam-calendar/:id/reschedule (legacy endpoint — kept for backward compat)
    */
   @Patch(':id/reschedule')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
   async rescheduleEvent(
     @CurrentUser() user: any,
     @Param('id') id: string,
