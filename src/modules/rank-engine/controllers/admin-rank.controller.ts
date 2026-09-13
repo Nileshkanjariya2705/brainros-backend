@@ -40,7 +40,19 @@ export class AdminRankController {
    * Check RankSnapshot status and summary aggregates
    */
   @Get('status')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
+  @Roles(
+    'SUPER_ADMIN',
+    'ADMIN',
+    'GENERAL_MANAGER',
+    'MANAGER',
+    'OPERATOR',
+    'STUDENT',
+    'INSTITUTION',
+    'PARENT',
+    'TEACHER',
+    'STAFF',
+    'ACCOUNTANT',
+  )
   getSnapshotStatus(
     @Param('examId') examId: string,
     @Query('version') version?: number,
@@ -55,7 +67,19 @@ export class AdminRankController {
    * Get paginated leaderboard for the exam (by Overall, State, District, School, Category)
    */
   @Get('leaderboard')
-  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
+  @Roles(
+    'SUPER_ADMIN',
+    'ADMIN',
+    'GENERAL_MANAGER',
+    'MANAGER',
+    'OPERATOR',
+    'STUDENT',
+    'INSTITUTION',
+    'PARENT',
+    'TEACHER',
+    'STAFF',
+    'ACCOUNTANT',
+  )
   getLeaderboard(
     @Param('examId') examId: string,
     @Query() query: QueryLeaderboardDto,

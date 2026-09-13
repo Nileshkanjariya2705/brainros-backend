@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
+import { SessionService } from './services/session.service';
 import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 
 describe('Auth OTP Flows (MSG91 Registration & Login)', () => {

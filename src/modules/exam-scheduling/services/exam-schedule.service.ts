@@ -38,7 +38,7 @@ export class ExamScheduleService {
   async checkQuestionAvailability(dto: CheckQuestionAvailabilityDto) {
     const examTypeUpper = (dto.examType || '').toUpperCase();
     let availableCount = 0;
-    const requiredCount = Number(dto.questionCount || 0);
+    const requiredCount = Number(dto.questionCount || dto.requestedCount || 0);
 
     let resolvedTargetId = dto.examTargetId;
     if (dto.examTargetName) {
@@ -48,42 +48,99 @@ export class ExamScheduleService {
       if (matched) resolvedTargetId = matched.id;
     }
 
+    const breakdown: any[] = [];
+
     if (examTypeUpper === 'SPECIFIC_CHAPTER') {
-      if (dto.chapterId) {
-        if (dto.subjectId) {
+      let groups: { subjectId: string; chapterIds: string[]; questionCount?: number }[] = [];
+      if (dto.subjectGroups && Array.isArray(dto.subjectGroups) && dto.subjectGroups.length > 0) {
+        groups = dto.subjectGroups;
+      } else if (dto.subjectId) {
+        const rawChIds = dto.chapterIds
+          ? Array.isArray(dto.chapterIds)
+            ? dto.chapterIds
+            : [dto.chapterIds]
+          : [];
+        const chIds = rawChIds.length > 0 ? rawChIds : dto.chapterId ? [dto.chapterId] : [];
+        groups = [{ subjectId: dto.subjectId, chapterIds: chIds }];
+      }
+
+      for (const group of groups) {
+        if (!group.subjectId) continue;
+        const sub = await this.prisma.subject.findUnique({
+          where: { id: group.subjectId },
+          select: { id: true, name: true, examTargetId: true },
+        });
+        if (!sub) continue;
+
+        let groupAvailable = 0;
+        const chaptersInfo: any[] = [];
+
+        const chIds = group.chapterIds || [];
+        for (const chId of chIds) {
           const chapter = await this.prisma.chapter.findUnique({
-            where: { id: dto.chapterId },
-            select: { subjectId: true },
+            where: { id: chId },
+            select: { id: true, name: true, subjectId: true },
           });
-          if (chapter && chapter.subjectId !== dto.subjectId) {
-            throw new BadRequestException('Selected Chapter does not belong to the selected Subject.');
+          if (!chapter) continue;
+          if (chapter.subjectId !== group.subjectId) {
+            throw new BadRequestException(`Chapter '${chapter.name}' does not belong to Subject '${sub.name}'.`);
           }
+
+          const count = await this.prisma.question.count({
+            where: {
+              chapterId: chId,
+              status: 'APPROVED',
+              isActive: true,
+            },
+          });
+          groupAvailable += count;
+          availableCount += count;
+          chaptersInfo.push({
+            chapterId: chapter.id,
+            chapterName: chapter.name,
+            availableCount: count,
+          });
         }
-        availableCount = await this.prisma.question.count({
+
+        breakdown.push({
+          subjectId: sub.id,
+          subjectName: sub.name,
+          availableCount: groupAvailable,
+          chapters: chaptersInfo,
+        });
+      }
+    } else if (examTypeUpper === 'SPECIFIC_SUBJECT') {
+      const subIds: string[] = [];
+      if (dto.subjectIds) {
+        const rawSubIds = Array.isArray(dto.subjectIds) ? dto.subjectIds : [dto.subjectIds];
+        subIds.push(...rawSubIds);
+      } else if (dto.subjectId) {
+        subIds.push(dto.subjectId);
+      }
+
+      const uniqueSubIds = Array.from(new Set(subIds));
+      for (const sId of uniqueSubIds) {
+        const subject = await this.prisma.subject.findUnique({
+          where: { id: sId },
+          select: { id: true, name: true, examTargetId: true },
+        });
+        if (!subject) continue;
+        if (resolvedTargetId && subject.examTargetId && subject.examTargetId !== resolvedTargetId) {
+          throw new BadRequestException(`Subject '${subject.name}' does not belong to the selected Exam Target.`);
+        }
+
+        const count = await this.prisma.question.count({
           where: {
-            chapterId: dto.chapterId,
+            subjectId: sId,
             status: 'APPROVED',
             isActive: true,
           },
         });
-      }
-    } else if (examTypeUpper === 'SPECIFIC_SUBJECT') {
-      if (dto.subjectId) {
-        if (resolvedTargetId) {
-          const subject = await this.prisma.subject.findUnique({
-            where: { id: dto.subjectId },
-            select: { examTargetId: true },
-          });
-          if (subject && subject.examTargetId !== resolvedTargetId) {
-            throw new BadRequestException('Selected Subject does not belong to the selected Exam Target.');
-          }
-        }
-        availableCount = await this.prisma.question.count({
-          where: {
-            subjectId: dto.subjectId,
-            status: 'APPROVED',
-            isActive: true,
-          },
+        availableCount += count;
+        breakdown.push({
+          subjectId: subject.id,
+          subjectName: subject.name,
+          availableCount: count,
         });
       }
     } else {
@@ -114,14 +171,16 @@ export class ExamScheduleService {
       }
     }
 
-    const isAvailable = true;
+    const isAvailable = requiredCount > 0 ? availableCount >= requiredCount : true;
     return {
       availableCount,
+      totalAvailable: availableCount,
       requiredCount,
       isAvailable,
+      breakdown,
       message: availableCount > 0
-        ? `${availableCount} question(s) available in bank (Question paper can also be uploaded after scheduling).`
-        : 'Question paper can be uploaded after scheduling.',
+        ? `${availableCount} question(s) available in bank.`
+        : 'Question paper can also be uploaded after scheduling.',
     };
   }
 
@@ -440,6 +499,7 @@ export class ExamScheduleService {
 
   /**
    * Admin Exam Scheduling Flow: SPECIFIC_SUBJECT | SPECIFIC_CHAPTER | FULL_EXAM (JEE / NEET / CET)
+   * Supports Create and Edit (when dto.examId is passed)
    */
   async scheduleAdminExam(dto: AdminScheduleExamDto, scheduledById: string) {
     const startTime = new Date(dto.startTime);
@@ -451,13 +511,9 @@ export class ExamScheduleService {
     let durationMinutes = Number(dto.duration || dto.durationMinutes || 180);
     let totalQuestions = Number(dto.questionCount || dto.totalQuestions || 100);
     let examTargetId = dto.examTargetId;
-    let subjectId = dto.subjectId;
-    let chapterId = dto.chapterId;
     let blueprintId = dto.blueprintId;
 
     let targetName = dto.examTargetName || 'General';
-    let subjectObj: any = null;
-    let chapterObj: any = null;
     let blueprintObj: any = null;
 
     const examTypeUpper = (dto.examType || '').toUpperCase();
@@ -473,27 +529,56 @@ export class ExamScheduleService {
       }
     }
 
+    const resolvedSubjects: any[] = [];
+    const resolvedSubjectGroups: { subject: any; chapters: any[]; questionCount?: number }[] = [];
+
     if (examTypeUpper === 'SPECIFIC_SUBJECT') {
-      if (!subjectId) {
-        throw new BadRequestException('Subject is required for Specific Subject exams.');
-      }
-      subjectObj = await this.prisma.subject.findUnique({
-        where: { id: subjectId },
-        include: { examTarget: true },
-      });
-      if (!subjectObj) {
-        throw new NotFoundException(`Subject with ID '${subjectId}' not found.`);
-      }
-
-      // Validate Target -> Subject hierarchy
-      if (examTargetId && subjectObj.examTargetId && subjectObj.examTargetId !== examTargetId) {
-        throw new BadRequestException('Selected Subject does not belong to the selected Exam Target.');
+      const subjectList: { subjectId: string; questionCount?: number }[] = [];
+      if (dto.subjects && Array.isArray(dto.subjects) && dto.subjects.length > 0) {
+        for (const item of dto.subjects) {
+          if (typeof item === 'string') subjectList.push({ subjectId: item });
+          else if (item?.subjectId) subjectList.push({ subjectId: item.subjectId, questionCount: item.questionCount });
+        }
+      } else if (dto.subjectIds && Array.isArray(dto.subjectIds) && dto.subjectIds.length > 0) {
+        for (const sId of dto.subjectIds) {
+          subjectList.push({ subjectId: sId });
+        }
+      } else if (dto.subjectId) {
+        subjectList.push({ subjectId: dto.subjectId });
       }
 
-      examTargetId = subjectObj.examTargetId;
-      targetName = subjectObj.examTarget?.name || targetName;
+      if (subjectList.length === 0) {
+        throw new BadRequestException('At least one Subject is required for Specific Subject exams.');
+      }
+
+      // Check duplicates
+      const seenSubjects = new Set<string>();
+      for (const s of subjectList) {
+        if (seenSubjects.has(s.subjectId)) {
+          throw new BadRequestException('Duplicate subjects are not allowed.');
+        }
+        seenSubjects.add(s.subjectId);
+
+        const subObj = await this.prisma.subject.findUnique({
+          where: { id: s.subjectId },
+          include: { examTarget: true },
+        });
+        if (!subObj) {
+          throw new NotFoundException(`Subject with ID '${s.subjectId}' not found.`);
+        }
+        if (examTargetId && subObj.examTargetId && subObj.examTargetId !== examTargetId) {
+          throw new BadRequestException(`Subject '${subObj.name}' does not belong to the selected Exam Target.`);
+        }
+        resolvedSubjects.push({ ...subObj, customQuestionCount: s.questionCount });
+      }
+
+      if (!examTargetId && resolvedSubjects[0]?.examTargetId) {
+        examTargetId = resolvedSubjects[0].examTargetId;
+        targetName = resolvedSubjects[0].examTarget?.name || targetName;
+      }
+
       if (!title) {
-        title = `${subjectObj.name} Subject Exam`;
+        title = `${resolvedSubjects.map((s) => s.name).join(' & ')} Subject Exam`;
       }
       if (totalQuestions <= 0) {
         throw new BadRequestException('Question count must be greater than 0.');
@@ -501,54 +586,86 @@ export class ExamScheduleService {
       if (durationMinutes <= 0) {
         throw new BadRequestException('Duration in minutes must be greater than 0.');
       }
-
-      // Pool availability check for subject
-      const availableCount = await this.prisma.question.count({
-        where: {
-          subjectId,
-          status: 'APPROVED',
-          isActive: true,
-        },
-      });
-
-      if (availableCount < totalQuestions) {
-        throw new BadRequestException(
-          `Only ${availableCount} valid questions are available. ${totalQuestions} are required.`,
-        );
-      }
     } else if (examTypeUpper === 'SPECIFIC_CHAPTER') {
-      if (!subjectId || !chapterId) {
-        throw new BadRequestException('Both Subject and Chapter are required for Specific Chapter exams.');
-      }
-      subjectObj = await this.prisma.subject.findUnique({
-        where: { id: subjectId },
-        include: { examTarget: true },
-      });
-      if (!subjectObj) {
-        throw new NotFoundException(`Subject with ID '${subjectId}' not found.`);
+      let groups: { subjectId: string; chapterIds: string[]; questionCount?: number }[] = [];
+      if (dto.subjectGroups && Array.isArray(dto.subjectGroups) && dto.subjectGroups.length > 0) {
+        groups = dto.subjectGroups;
+      } else if (dto.subjectId) {
+        const chIds = dto.chapterIds && dto.chapterIds.length > 0 ? dto.chapterIds : (dto.chapterId ? [dto.chapterId] : []);
+        groups = [{ subjectId: dto.subjectId, chapterIds: chIds, questionCount: dto.questionCount }];
       }
 
-      // Validate Target -> Subject hierarchy
-      if (examTargetId && subjectObj.examTargetId && subjectObj.examTargetId !== examTargetId) {
-        throw new BadRequestException('Selected Subject does not belong to the selected Exam Target.');
+      if (groups.length === 0) {
+        throw new BadRequestException('At least one Subject group is required for Specific Chapter exams.');
       }
 
-      chapterObj = await this.prisma.chapter.findUnique({
-        where: { id: chapterId },
-      });
-      if (!chapterObj) {
-        throw new NotFoundException(`Chapter with ID '${chapterId}' not found.`);
+      const seenSubjects = new Set<string>();
+      const allSelectedChapterIds: string[] = [];
+
+      for (const group of groups) {
+        if (!group.subjectId) {
+          throw new BadRequestException('Subject is required for all chapter groups.');
+        }
+        if (seenSubjects.has(group.subjectId)) {
+          throw new BadRequestException('Duplicate subjects in chapter groups are not allowed.');
+        }
+        seenSubjects.add(group.subjectId);
+
+        const subObj = await this.prisma.subject.findUnique({
+          where: { id: group.subjectId },
+          include: { examTarget: true },
+        });
+        if (!subObj) {
+          throw new NotFoundException(`Subject with ID '${group.subjectId}' not found.`);
+        }
+        if (examTargetId && subObj.examTargetId && subObj.examTargetId !== examTargetId) {
+          throw new BadRequestException(`Subject '${subObj.name}' does not belong to the selected Exam Target.`);
+        }
+
+        const chIds = group.chapterIds || [];
+        if (chIds.length === 0) {
+          throw new BadRequestException(`Please select at least one Chapter for Subject '${subObj.name}'.`);
+        }
+
+        const seenChapters = new Set<string>();
+        const groupChapters: any[] = [];
+
+        for (const chId of chIds) {
+          if (seenChapters.has(chId)) {
+            throw new BadRequestException(`Duplicate chapter selection detected in Subject '${subObj.name}'.`);
+          }
+          seenChapters.add(chId);
+          allSelectedChapterIds.push(chId);
+
+          const chapterObj = await this.prisma.chapter.findUnique({
+            where: { id: chId },
+          });
+          if (!chapterObj) {
+            throw new NotFoundException(`Chapter with ID '${chId}' not found.`);
+          }
+          if (chapterObj.subjectId !== group.subjectId) {
+            throw new BadRequestException(`Chapter '${chapterObj.name}' does not belong to Subject '${subObj.name}'.`);
+          }
+          groupChapters.push(chapterObj);
+        }
+
+        resolvedSubjectGroups.push({
+          subject: subObj,
+          chapters: groupChapters,
+          questionCount: group.questionCount,
+        });
       }
 
-      // Validate Subject -> Chapter hierarchy
-      if (chapterObj.subjectId && chapterObj.subjectId !== subjectId) {
-        throw new BadRequestException('Selected Chapter does not belong to the selected Subject.');
+      if (!examTargetId && resolvedSubjectGroups[0]?.subject?.examTargetId) {
+        examTargetId = resolvedSubjectGroups[0].subject.examTargetId;
+        targetName = resolvedSubjectGroups[0].subject.examTarget?.name || targetName;
       }
 
-      examTargetId = subjectObj.examTargetId;
-      targetName = subjectObj.examTarget?.name || targetName;
       if (!title) {
-        title = `${subjectObj.name} - ${chapterObj.name} Chapter Exam`;
+        const parts = resolvedSubjectGroups.map(
+          (g) => `${g.subject.name} (${g.chapters.map((c) => c.name).join(', ')})`,
+        );
+        title = `${parts.join(' + ')} Chapter Exam`;
       }
       if (totalQuestions <= 0) {
         throw new BadRequestException('Question count must be greater than 0.');
@@ -632,30 +749,81 @@ export class ExamScheduleService {
 
     const scheduledStatus = await this.lifecycleService.getOrCreateExamStatus('SCHEDULED');
 
-    // Create Exam, Version & Schedule in a transaction
-    const scheduleRecord = await this.prisma.$transaction(async (tx) => {
+    // Create or Edit Exam, Version & Schedule in a transaction
+    const scheduleRecord: any = await this.prisma.$transaction(async (tx) => {
       const marksPerQ = dto.marksPerQuestion !== undefined && dto.marksPerQuestion >= 0 ? Number(dto.marksPerQuestion) : 4;
       const negMarks = dto.negativeMarks !== undefined && dto.negativeMarks >= 0 ? Number(dto.negativeMarks) : 1;
 
-      // 1. Create Exam record (Metadata and schedule window defined; questions attached on Question Paper upload)
-      const exam = await tx.exam.create({
-        data: {
-          examTargetId,
-          title,
-          description: dto.description?.trim() || `Scheduled via Admin Exam Manager (${dto.examType})`,
-          totalQuestions: Number(totalQuestions),
-          totalMarks: Number(totalQuestions) * marksPerQ,
-          durationMinutes,
-          defaultMarksPerQuestion: marksPerQ,
-          defaultNegativeMarks: negMarks,
-          statusId: scheduledStatus.id,
-          startTime,
-          endTime,
-          createdById: scheduledById,
-        },
-      });
+      let exam: any;
+      let isEdit = false;
+
+      if (dto.examId) {
+        // Edit existing exam
+        exam = await tx.exam.findUnique({
+          where: { id: dto.examId },
+          include: { sections: true, blueprints: true, schedules: true },
+        });
+        if (!exam) {
+          throw new NotFoundException(`Exam with ID '${dto.examId}' not found.`);
+        }
+        isEdit = true;
+
+        exam = await tx.exam.update({
+          where: { id: dto.examId },
+          data: {
+            examTargetId,
+            title,
+            description: dto.description?.trim() || exam.description,
+            totalQuestions: Number(totalQuestions),
+            totalMarks: Number(totalQuestions) * marksPerQ,
+            durationMinutes,
+            defaultMarksPerQuestion: marksPerQ,
+            defaultNegativeMarks: negMarks,
+            startTime,
+            endTime,
+            performanceThresholds: JSON.parse(
+              JSON.stringify({
+                examType: dto.examType,
+                subjectGroups: dto.subjectGroups,
+                subjects: dto.subjects,
+                subjectIds: dto.subjectIds,
+              }),
+            ),
+          },
+        });
+
+        // Delete existing sections to rebuild
+        await tx.examSection.deleteMany({ where: { examId: exam.id } });
+      } else {
+        // Create new Exam record
+        exam = await tx.exam.create({
+          data: {
+            examTargetId,
+            title,
+            description: dto.description?.trim() || `Scheduled via Admin Exam Manager (${dto.examType})`,
+            totalQuestions: Number(totalQuestions),
+            totalMarks: Number(totalQuestions) * marksPerQ,
+            durationMinutes,
+            defaultMarksPerQuestion: marksPerQ,
+            defaultNegativeMarks: negMarks,
+            statusId: scheduledStatus.id,
+            startTime,
+            endTime,
+            createdById: scheduledById,
+            performanceThresholds: JSON.parse(
+              JSON.stringify({
+                examType: dto.examType,
+                subjectGroups: dto.subjectGroups,
+                subjects: dto.subjects,
+                subjectIds: dto.subjectIds,
+              }),
+            ),
+          },
+        });
+      }
 
       if (dto.languageId) {
+        await tx.examLanguage.deleteMany({ where: { examId: exam.id } });
         await tx.examLanguage.create({
           data: {
             examId: exam.id,
@@ -666,18 +834,63 @@ export class ExamScheduleService {
         }).catch(() => null);
       }
 
-      // 2. Create Section
-      if (subjectId) {
-        await tx.examSection.create({
+      // 2. Create Sections
+      if (examTypeUpper === 'SPECIFIC_SUBJECT') {
+        const sectionQ = Math.floor(Number(totalQuestions) / (resolvedSubjects.length || 1));
+        for (let i = 0; i < resolvedSubjects.length; i++) {
+          const s = resolvedSubjects[i];
+          await tx.examSection.create({
+            data: {
+              examId: exam.id,
+              subjectId: s.id,
+              name: `${s.name} Section`,
+              totalQuestions: s.customQuestionCount || sectionQ,
+              displayOrder: i + 1,
+            },
+          });
+        }
+      } else if (examTypeUpper === 'SPECIFIC_CHAPTER') {
+        const sectionQ = Math.floor(Number(totalQuestions) / (resolvedSubjectGroups.length || 1));
+        for (let i = 0; i < resolvedSubjectGroups.length; i++) {
+          const g = resolvedSubjectGroups[i];
+          await tx.examSection.create({
+            data: {
+              examId: exam.id,
+              subjectId: g.subject.id,
+              name: `${g.subject.name} Section`,
+              totalQuestions: g.questionCount || sectionQ,
+              displayOrder: i + 1,
+            },
+          });
+        }
+
+        // Create blueprint rules for chapters
+        const bp = await tx.examBlueprint.create({
           data: {
             examId: exam.id,
-            subjectId,
-            name: subjectObj?.name || 'Section A',
+            name: `${title} Blueprint`,
             totalQuestions: Number(totalQuestions),
-            displayOrder: 1,
+            createdById: scheduledById,
           },
         });
+
+        const totalChs = resolvedSubjectGroups.reduce((acc, g) => acc + g.chapters.length, 0) || 1;
+        const perChQ = Math.max(1, Math.floor(Number(totalQuestions) / totalChs));
+
+        for (const g of resolvedSubjectGroups) {
+          for (const ch of g.chapters) {
+            await tx.blueprintRule.create({
+              data: {
+                blueprintId: bp.id,
+                subjectId: g.subject.id,
+                chapterId: ch.id,
+                selectionCount: perChQ,
+              },
+            });
+          }
+        }
       } else {
+        // FULL_EXAM
         const subjectsList = await tx.subject.findMany({
           where: { examTargetId },
           take: 4,
@@ -696,107 +909,127 @@ export class ExamScheduleService {
         }
       }
 
-      // 3. Create ExamVersion (Snapshot; question paper is prepared and uploaded separately)
-      const version = await tx.examVersion.create({
-        data: {
-          examId: exam.id,
-          blueprintId: blueprintId || undefined,
-          versionNumber: 1,
-          status: 'PUBLISHED',
-          totalQuestions: Number(totalQuestions),
-          durationMinutes,
-          totalMarks: Number(totalQuestions) * marksPerQ,
-          generatedById: scheduledById,
-        },
-      });
-
-
-      // 6. Create ExamSchedule
-      const schedule = await tx.examSchedule.create({
-        data: {
-          examId: exam.id,
-          examVersionId: version.id,
-          startTime,
-          endTime,
-          timezone: dto.timezone || 'Asia/Kolkata',
-          status: 'SCHEDULED',
-          scheduledById,
-        },
-        include: {
-          exam: {
-            include: {
-              status: true,
-              examTarget: true,
-              sections: { include: { subject: true } },
-            },
+      // 3. Create or update ExamVersion
+      let version = await tx.examVersion.findFirst({ where: { examId: exam.id } });
+      if (version) {
+        version = await tx.examVersion.update({
+          where: { id: version.id },
+          data: {
+            blueprintId: blueprintId || undefined,
+            totalQuestions: Number(totalQuestions),
+            durationMinutes,
+            totalMarks: Number(totalQuestions) * marksPerQ,
           },
-          examVersion: true,
-        },
-      });
+        });
+      } else {
+        version = await tx.examVersion.create({
+          data: {
+            examId: exam.id,
+            blueprintId: blueprintId || undefined,
+            versionNumber: 1,
+            status: 'PUBLISHED',
+            totalQuestions: Number(totalQuestions),
+            durationMinutes,
+            totalMarks: Number(totalQuestions) * marksPerQ,
+            generatedById: scheduledById,
+          },
+        });
+      }
 
-      // 6b. Create pending ApprovalRequest for Super Admin approval queue
+      // 4. Create or update ExamSchedule
+      let schedule = await tx.examSchedule.findFirst({ where: { examId: exam.id } });
+      if (schedule) {
+        schedule = await tx.examSchedule.update({
+          where: { id: schedule.id },
+          data: {
+            examVersionId: version.id,
+            startTime,
+            endTime,
+            timezone: dto.timezone || 'Asia/Kolkata',
+            status: 'SCHEDULED',
+          },
+          include: {
+            exam: {
+              include: {
+                status: true,
+                examTarget: true,
+                sections: { include: { subject: true } },
+              },
+            },
+            examVersion: true,
+          },
+        });
+      } else {
+        schedule = await tx.examSchedule.create({
+          data: {
+            examId: exam.id,
+            examVersionId: version.id,
+            startTime,
+            endTime,
+            timezone: dto.timezone || 'Asia/Kolkata',
+            status: 'SCHEDULED',
+            scheduledById,
+          },
+          include: {
+            exam: {
+              include: {
+                status: true,
+                examTarget: true,
+                sections: { include: { subject: true } },
+              },
+            },
+            examVersion: true,
+          },
+        });
+      }
+
+      // 5. Create or update pending ApprovalRequest
       const isMockTest =
         title.toUpperCase().includes('MOCK') ||
         title.toUpperCase().includes('PRACTICE');
 
-      await tx.approvalRequest.create({
-        data: {
-          resourceType: isMockTest ? 'MOCK_TEST' : 'EXAM',
-          resourceId: exam.id,
-          requestedById: scheduledById,
-          status: 'PENDING',
-          metadata: {
-            examId: exam.id,
-            title: exam.title,
-            scheduleId: schedule.id,
-            startTime: startTime.toISOString(),
-            endTime: endTime.toISOString(),
-            totalQuestions: Number(totalQuestions),
-            durationMinutes,
-            isMock: isMockTest,
-          },
-          submittedAt: new Date(),
-        },
+      const existingApproval = await tx.approvalRequest.findFirst({
+        where: { resourceId: exam.id },
       });
 
-      // 7. Audit log
-      await this.lifecycleService.recordHistory(
-        {
-          examId: exam.id,
-          examVersionId: version.id,
-          scheduleId: schedule.id,
-          action: 'SCHEDULE',
-          fromStatus: 'DRAFT',
-          toStatus: 'SCHEDULED',
-          performedById: scheduledById,
-          comment: `Scheduled ${dto.examType} exam for window ${startTime.toISOString()} - ${endTime.toISOString()}`,
+      if (!existingApproval) {
+        await tx.approvalRequest.create({
+          data: {
+            resourceType: isMockTest ? 'MOCK_TEST' : 'EXAM',
+            resourceId: exam.id,
+            requestedById: scheduledById,
+            status: 'PENDING',
+            metadata: {
+              examId: exam.id,
+              title: exam.title,
+              scheduleId: schedule.id,
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              totalQuestions: Number(totalQuestions),
+              durationMinutes,
+              isMock: isMockTest,
+            },
+            submittedAt: new Date(),
+          },
+        });
+      }
+
+      // 6. Record AuditLog
+      await tx.auditLog.create({
+        data: {
+          actorUserId: scheduledById,
+          action: isEdit ? 'EXAM_SCHEDULE_UPDATE' : 'EXAM_SCHEDULE_CHANGE',
+          entityType: 'EXAM_SCHEDULE',
+          entityId: schedule.id,
+          beforeState: { isEdit },
+          afterState: { startTime: startTime.toISOString(), endTime: endTime.toISOString() },
           metadata: {
             examType: dto.examType,
-            subjectId,
-            chapterId,
+            title,
             totalQuestions,
             durationMinutes,
             startTime: startTime.toISOString(),
             endTime: endTime.toISOString(),
-          },
-        },
-        tx,
-      );
-
-      // 8. Record AuditLog for Super Admin Exam Time Control
-      await tx.auditLog.create({
-        data: {
-          actorUserId: scheduledById,
-          action: 'EXAM_SCHEDULE_CHANGE',
-          entityType: 'EXAM_SCHEDULE',
-          entityId: schedule.id,
-          beforeState: { startTime: null, endTime: null },
-          afterState: { startTime: startTime.toISOString(), endTime: endTime.toISOString() },
-          metadata: {
-            previousStartTime: null,
-            newStartTime: startTime.toISOString(),
-            previousEndTime: null,
-            newEndTime: endTime.toISOString(),
             changedBy: scheduledById,
             changedAt: new Date().toISOString(),
           },
@@ -858,6 +1091,61 @@ export class ExamScheduleService {
     }
 
     return scheduleRecord;
+  }
+
+  /**
+   * Fetch complete structured schedule configuration for editing
+   */
+  async getExamScheduleDetail(examId: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: true,
+        status: true,
+        sections: { include: { subject: true } },
+        blueprints: {
+          include: {
+            rules: {
+              include: {
+                chapter: true,
+                subject: true,
+              },
+            },
+          },
+        },
+        languages: { include: { language: true } },
+        schedules: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    const schedule = exam.schedules?.[0];
+    const thresholdMetadata = (exam.performanceThresholds as any) || {};
+
+    return {
+      examId: exam.id,
+      title: exam.title,
+      description: exam.description,
+      examTargetId: exam.examTargetId,
+      examTargetName: exam.examTarget?.name,
+      totalQuestions: exam.totalQuestions,
+      durationMinutes: exam.durationMinutes,
+      defaultMarksPerQuestion: exam.defaultMarksPerQuestion,
+      defaultNegativeMarks: exam.defaultNegativeMarks,
+      startTime: schedule?.startTime || exam.startTime,
+      endTime: schedule?.endTime || exam.endTime,
+      timezone: schedule?.timezone || 'Asia/Kolkata',
+      languageId: exam.languages?.[0]?.languageId,
+      examType: thresholdMetadata.examType || (exam.sections.length > 1 ? 'FULL_EXAM' : 'SPECIFIC_SUBJECT'),
+      subjectGroups: thresholdMetadata.subjectGroups || [],
+      subjects: thresholdMetadata.subjects || exam.sections.map((s) => ({ subjectId: s.subjectId, name: s.subject?.name, questionCount: s.totalQuestions })),
+      subjectIds: thresholdMetadata.subjectIds || exam.sections.map((s) => s.subjectId),
+      sections: exam.sections,
+      blueprints: exam.blueprints,
+    };
   }
 
   /**

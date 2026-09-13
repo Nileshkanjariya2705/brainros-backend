@@ -36,6 +36,7 @@ import { RecommendationModule } from './modules/recommendation/recommendation.mo
 import { BillingModule } from './modules/billing/billing.module';
 import { ExamCacheModule } from './modules/exam-cache/exam-cache.module';
 import { ExportModule } from './modules/export/export.module';
+import { AiTranslationModule } from './modules/ai-translation/ai-translation.module';
 
 @Module({
   imports: [
@@ -144,6 +145,7 @@ import { ExportModule } from './modules/export/export.module';
     BillingModule,
     ExamCacheModule,
     ExportModule,
+    AiTranslationModule,
   ],
   providers: [],
 })

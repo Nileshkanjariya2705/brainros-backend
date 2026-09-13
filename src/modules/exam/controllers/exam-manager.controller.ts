@@ -24,6 +24,7 @@ import {
   ExamImportFilterDto,
   CreateExamFromUploadDto,
   ExamManagerFilterDto,
+  SubmitManualQuestionsDto,
 } from '../dto/exam-manager.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -326,6 +327,29 @@ export class ExamManagerController {
       statusCode: 202,
       message: result.message,
       data: result,
+    };
+  }
+
+  /**
+   * Submit Manually Entered Questions for an Exam
+   * POST /admin/exam-manager/exams/:examId/manual-questions
+   */
+  @Post('exams/:examId/manual-questions')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
+  async submitManualQuestions(
+    @Param('examId') examId: string,
+    @Body() dto: SubmitManualQuestionsDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const result = await this.examPaperImportService.submitManualQuestions(
+      examId,
+      dto,
+      user.userId,
+    );
+    return {
+      statusCode: 200,
+      message: result.message,
+      data: result.data,
     };
   }
 

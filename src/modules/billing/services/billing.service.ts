@@ -16,6 +16,8 @@ import {
   RejectBillDto,
   BillFilterDto,
   GenerateInvoiceDto,
+  UpdateSchoolPricingDto,
+  SendBulkInvoicesDto,
 } from '../dto/billing.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -208,6 +210,192 @@ export class BillingService {
       pricePerStudent: newPrice,
       message: `Price per student per month updated to ₹${newPrice}. Future invoices will use this rate; historical invoices remain strictly unaffected.`,
     };
+  }
+
+  /**
+   * ── SCHOOL-SPECIFIC PRICING RESOLUTION ───────────────────────────
+   * Resolves the active price per student for a specific institution.
+   * Checks institution_pricings first; falls back to system setting rate.
+   */
+  async getSchoolPrice(institutionId: string, forDate: Date = new Date()): Promise<number> {
+    const pricing = await (this.prisma as any).institutionPricing.findFirst({
+      where: {
+        institutionId,
+        isActive: true,
+        effectiveFrom: { lte: forDate },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: forDate } }],
+      },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    if (pricing && pricing.pricePerStudent > 0) {
+      return pricing.pricePerStudent;
+    }
+
+    return this.getPricingSetting();
+  }
+
+  /**
+   * ── GET ALL SCHOOL PRICINGS ──────────────────────────────────────
+   * Returns list of all institutions with their current active pricing.
+   */
+  async getSchoolPricings() {
+    const institutions = await this.prisma.institution.findMany({
+      where: { status: { in: ['ACTIVE', 'APPROVED', 'DRAFT'] } },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        email: true,
+        phone: true,
+        city: true,
+        state: true,
+        pricings: {
+          where: { isActive: true },
+          orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+          take: 1,
+          include: {
+            updatedBy: { select: { id: true, name: true, email: true } },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const defaultPrice = await this.getPricingSetting();
+
+    return institutions.map((inst: any) => {
+      const activePricing = inst.pricings?.[0];
+      return {
+        institutionId: inst.id,
+        name: inst.name,
+        code: inst.code,
+        email: inst.email,
+        phone: inst.phone,
+        city: inst.city,
+        state: inst.state,
+        pricePerStudent: activePricing ? activePricing.pricePerStudent : defaultPrice,
+        currency: activePricing?.currency || 'INR',
+        effectiveFrom: activePricing?.effectiveFrom || null,
+        effectiveTo: activePricing?.effectiveTo || null,
+        isActive: activePricing?.isActive ?? true,
+        isCustom: Boolean(activePricing),
+        updatedBy: activePricing?.updatedBy || null,
+        updatedAt: activePricing?.updatedAt || null,
+      };
+    });
+  }
+
+  /**
+   * ── GET PRICING FOR A SPECIFIC SCHOOL ───────────────────────────
+   */
+  async getSchoolPricing(institutionId: string) {
+    const institution = await this.prisma.institution.findUnique({
+      where: { id: institutionId },
+      include: {
+        pricings: {
+          orderBy: { effectiveFrom: 'desc' },
+          include: {
+            updatedBy: { select: { id: true, name: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!institution) {
+      throw new NotFoundException(`School/Institution '${institutionId}' not found.`);
+    }
+
+    const defaultPrice = await this.getPricingSetting();
+    const activePricing = institution.pricings.find((p: any) => p.isActive);
+
+    return {
+      institutionId: institution.id,
+      name: institution.name,
+      code: institution.code,
+      currentPrice: activePricing ? activePricing.pricePerStudent : defaultPrice,
+      isCustom: Boolean(activePricing),
+      activePricing: activePricing || null,
+      history: institution.pricings,
+    };
+  }
+
+  /**
+   * ── UPDATE SCHOOL-SPECIFIC PRICING ──────────────────────────────
+   */
+  async updateSchoolPricing(
+    institutionId: string,
+    dto: UpdateSchoolPricingDto,
+    userId: string,
+  ) {
+    if (!dto.pricePerStudent || isNaN(dto.pricePerStudent) || dto.pricePerStudent <= 0) {
+      throw new BadRequestException('Invalid pricing rate. Price must be greater than zero.');
+    }
+
+    const institution = await this.prisma.institution.findUnique({
+      where: { id: institutionId },
+    });
+
+    if (!institution) {
+      throw new NotFoundException(`School/Institution '${institutionId}' not found.`);
+    }
+
+    const oldPrice = await this.getSchoolPrice(institutionId);
+    const effectiveFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date();
+    const effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
+
+    return this.prisma.$transaction(async (tx) => {
+      // Deactivate previous active pricing records
+      await (tx as any).institutionPricing.updateMany({
+        where: { institutionId, isActive: true },
+        data: { isActive: false, effectiveTo: effectiveFrom },
+      });
+
+      // Insert new active pricing record
+      const newPricing = await (tx as any).institutionPricing.create({
+        data: {
+          institutionId,
+          pricePerStudent: dto.pricePerStudent,
+          currency: 'INR',
+          effectiveFrom,
+          effectiveTo,
+          isActive: dto.isActive ?? true,
+          updatedById: userId,
+        },
+        include: {
+          updatedBy: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      // Price Audit Log
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'SCHOOL_PRICE_CHANGED',
+          entityType: 'INSTITUTION',
+          entityId: institutionId,
+          beforeState: { pricePerStudent: oldPrice },
+          afterState: { pricePerStudent: dto.pricePerStudent },
+          metadata: {
+            schoolName: institution.name,
+            schoolCode: institution.code,
+            oldPrice,
+            newPrice: dto.pricePerStudent,
+            effectiveFrom: effectiveFrom.toISOString(),
+            changedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      this.logger.log(
+        `School pricing for '${institution.name}' updated from ₹${oldPrice} to ₹${dto.pricePerStudent} by user '${userId}'`,
+      );
+
+      return {
+        pricing: newPricing,
+        message: `Pricing for ${institution.name} updated to ₹${dto.pricePerStudent}/student/month. Future invoices will adhere to this rate; historical invoices remain strictly unaffected.`,
+      };
+    });
   }
 
   /**
@@ -483,8 +671,8 @@ export class BillingService {
     }
 
     const studentCount = await this.countEligibleStudents(institutionId);
-    const defaultPrice = await this.getPricingSetting();
-    const pricePerStudent = typeof customPrice === 'number' && customPrice >= 0 ? customPrice : defaultPrice;
+    const schoolPrice = await this.getSchoolPrice(institutionId);
+    const pricePerStudent = typeof customPrice === 'number' && customPrice >= 0 ? customPrice : schoolPrice;
     const taxableAmount = studentCount * pricePerStudent;
     const taxConfig = await this.getTaxConfiguration();
     const taxDetails = this.calculateTaxForInstitution(taxableAmount, institution, taxConfig);
@@ -566,12 +754,12 @@ export class BillingService {
       );
     }
 
-    // Current price snapshot and dynamic GST calculation
-    const defaultPrice = await this.getPricingSetting();
+    // Current school-specific price snapshot and dynamic GST calculation
+    const schoolPrice = await this.getSchoolPrice(institutionId);
     const pricePerStudent =
       typeof dto.pricePerStudent === 'number' && dto.pricePerStudent >= 0
         ? dto.pricePerStudent
-        : defaultPrice;
+        : schoolPrice;
     const taxableAmount = studentCount * pricePerStudent;
     const taxConfig = await this.getTaxConfiguration();
     const taxDetails = this.calculateTaxForInstitution(taxableAmount, institution, taxConfig);
@@ -659,10 +847,6 @@ export class BillingService {
     const { billingMonth, billingYear } = dto;
     const periodLabel = `${MONTH_NAMES[billingMonth]} ${billingYear}`;
     const defaultPrice = await this.getPricingSetting();
-    const pricePerStudent =
-      typeof dto.pricePerStudent === 'number' && dto.pricePerStudent >= 0
-        ? dto.pricePerStudent
-        : defaultPrice;
     const taxConfig = await this.getTaxConfiguration();
 
     const institutions = await this.prisma.institution.findMany({
@@ -680,10 +864,25 @@ export class BillingService {
       jobId,
       'INVOICE_GENERATION',
       `Generating invoices for ${totalSchools} schools (${periodLabel})...`,
-      { totalSchools, billingMonth, billingYear, pricePerStudent },
+      { totalSchools, billingMonth, billingYear },
     );
 
-    // 1. Batch pre-fetch existing bills for this period across all candidate institutions
+    // 1. Batch pre-fetch active custom pricings across candidate institutions
+    const customPricings = await (this.prisma as any).institutionPricing.findMany({
+      where: {
+        institutionId: { in: instIds },
+        isActive: true,
+      },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+    });
+    const pricingMap = new Map<string, number>();
+    for (const p of customPricings) {
+      if (!pricingMap.has(p.institutionId)) {
+        pricingMap.set(p.institutionId, p.pricePerStudent);
+      }
+    }
+
+    // 2. Batch pre-fetch existing bills for this period across all candidate institutions
     const existingBills = await this.prisma.bill.findMany({
       where: {
         billingYear,
@@ -694,7 +893,7 @@ export class BillingService {
     });
     const existingInstitutionIds = new Set(existingBills.map((b) => b.institutionId));
 
-    // 2. Batch pre-aggregate student counts across all candidate institutions
+    // 3. Batch pre-aggregate student counts across all candidate institutions
     const studentCountGroups = await this.prisma.student.groupBy({
       by: ['institutionId'],
       where: {
@@ -711,7 +910,7 @@ export class BillingService {
       }
     }
 
-    // 3. Determine starting invoice sequence for this period
+    // 4. Determine starting invoice sequence for this period
     const yearMonth = `${billingYear}${String(billingMonth).padStart(2, '0')}`;
     const invoicePrefix = `INV-${yearMonth}-`;
     const latestBill = await this.prisma.bill.findFirst({
@@ -743,7 +942,11 @@ export class BillingService {
           if (studentCount === 0) {
             skippedCount++;
           } else {
-            const taxableAmount = studentCount * pricePerStudent;
+            const schoolPrice =
+              typeof dto.pricePerStudent === 'number' && dto.pricePerStudent >= 0
+                ? dto.pricePerStudent
+                : (pricingMap.get(inst.id) || defaultPrice);
+            const taxableAmount = studentCount * schoolPrice;
             const taxDetails = this.calculateTaxForInstitution(taxableAmount, inst, taxConfig);
             const billNumber = `${invoicePrefix}${String(currentSequence++).padStart(4, '0')}`;
 
@@ -762,7 +965,7 @@ export class BillingService {
                 billingMonth,
                 billingYear,
                 studentCount,
-                pricePerStudent,
+                pricePerStudent: schoolPrice,
                 amount: taxableAmount,
                 tax: taxDetails.totalTax,
                 totalAmount: taxDetails.grandTotal,
@@ -1611,6 +1814,175 @@ export class BillingService {
   }
 
   /**
+   * ── BULK INVOICE EMAIL DISPATCH (BullMQ + Resend + WebSockets) ──
+   * Dispatches invoices for all eligible schools for a specific billing month/year.
+   * Protects against duplicate sends (skips already SENT unless forceRetryFailed).
+   * Validates recipient emails and reports live WebSocket progress.
+   */
+  async sendBulkInvoices(dto: SendBulkInvoicesDto, userId: string) {
+    const { billingMonth, billingYear, forceRetryFailed } = dto;
+    const periodLabel = `${MONTH_NAMES[billingMonth]} ${billingYear}`;
+
+    // Find all generated/approved bills for this period
+    const bills = await this.prisma.bill.findMany({
+      where: {
+        billingMonth,
+        billingYear,
+        status: { in: ['GENERATED', 'APPROVED', 'SUBMITTED', 'PAID'] },
+      },
+      include: {
+        institution: { select: { id: true, name: true, code: true, email: true } },
+      },
+      orderBy: { billNumber: 'asc' },
+    });
+
+    const total = bills.length;
+    if (total === 0) {
+      throw new BadRequestException(
+        `No generated invoices found for ${periodLabel}. Please generate invoices first.`,
+      );
+    }
+
+    const jobId = `bulk_bill_email_${billingYear}_${billingMonth}_${Date.now()}`;
+
+    await this.jobProgressService.publishStarted(
+      'bulk-bill-email',
+      jobId,
+      'BULK_EMAIL_DISPATCH',
+      `Queueing invoice emails for ${total} schools (${periodLabel})...`,
+      { total, billingMonth, billingYear },
+    );
+
+    let queuedCount = 0;
+    let skippedCount = 0;
+    let missingEmailCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const bill = bills[i];
+      const schoolName = bill.institution?.name || 'School';
+      const email = bill.institution?.email;
+
+      try {
+        // Idempotency: skip if already sent and not force retry
+        if (bill.emailStatus === 'SENT' && !forceRetryFailed) {
+          skippedCount++;
+        } else if (!email || !email.includes('@')) {
+          missingEmailCount++;
+          failedCount++;
+          await this.prisma.bill.update({
+            where: { id: bill.id },
+            data: { emailStatus: 'FAILED', emailFailedReason: 'EMAIL_NOT_CONFIGURED' },
+          });
+          errors.push(`${schoolName} (${bill.billNumber}): School email is not configured.`);
+        } else {
+          // Mark QUEUED in DB
+          await this.prisma.bill.update({
+            where: { id: bill.id },
+            data: { emailStatus: 'QUEUED', emailFailedReason: null },
+          });
+
+          const emailJobId = `bill_email_${bill.id}_${Date.now()}`;
+          try {
+            await this.billEmailQueue.add(
+              'send-bill-email',
+              {
+                billId: bill.id,
+                recipientEmail: email,
+                schoolName,
+                requestedById: userId,
+              },
+              {
+                jobId: emailJobId,
+                removeOnComplete: true,
+              },
+            );
+          } catch (queueErr: any) {
+            this.logger.warn(`BullMQ queue fallback for bill ${bill.id}: ${queueErr.message}`);
+            setImmediate(async () => {
+              try {
+                const processor = this.moduleRef?.get(BillEmailProcessor, { strict: false });
+                if (processor) {
+                  await processor.process({
+                    id: emailJobId,
+                    name: 'send-bill-email',
+                    data: {
+                      billId: bill.id,
+                      recipientEmail: email,
+                      schoolName,
+                      requestedById: userId,
+                    },
+                  } as any);
+                }
+              } catch (err: any) {
+                this.logger.error(`Direct email dispatch failed: ${err.message}`);
+              }
+            });
+          }
+
+          queuedCount++;
+        }
+      } catch (err: any) {
+        failedCount++;
+        errors.push(`${schoolName}: ${err.message}`);
+      }
+
+      await this.jobProgressService.publishProgress(
+        'bulk-bill-email',
+        jobId,
+        i + 1,
+        total,
+        {
+          stage: 'SENDING_INVOICES',
+          message: `${i + 1} / ${total} processed | Queued: ${queuedCount} | Skipped (Already Sent): ${skippedCount} | Missing Email: ${missingEmailCount}`,
+          currentSchool: schoolName,
+          sent: queuedCount,
+          failed: failedCount,
+          pending: total - (i + 1),
+        },
+      );
+    }
+
+    await this.jobProgressService.publishCompleted(
+      'bulk-bill-email',
+      jobId,
+      `Invoice email dispatch completed: ${queuedCount} queued, ${skippedCount} skipped (already sent), ${missingEmailCount} missing email.`,
+      { queuedCount, skippedCount, missingEmailCount, errorsCount: errors.length },
+    );
+
+    // Audit Log for Bulk Send
+    await this.prisma.auditLog.create({
+      data: {
+        actorUserId: userId,
+        action: 'BULK_INVOICES_SENT',
+        entityType: 'BILL',
+        entityId: jobId,
+        metadata: {
+          billingMonth,
+          billingYear,
+          periodLabel,
+          totalInvoices: total,
+          queuedCount,
+          skippedCount,
+          missingEmailCount,
+          jobId,
+        },
+      },
+    });
+
+    return {
+      jobId,
+      total,
+      queuedCount,
+      skippedCount,
+      missingEmailCount,
+      errors,
+      message: `Invoice email dispatch initiated for ${periodLabel}: ${queuedCount} queued, ${skippedCount} already sent, ${missingEmailCount} missing email.`,
+    };
+  }
+
+  /**
    * ── DOWNLOAD / STREAM INVOICE PDF ──────────────────────────────
    */
   async getBillPdfBuffer(
@@ -1680,7 +2052,7 @@ export class BillingService {
 
   /**
    * ── DYNAMIC FILTER OPTIONS ─────────────────────────────────────
-   * Supplies dynamic years, months, schools, and current price setting.
+   * Supplies dynamic years, months, schools with their configured prices, and defaults.
    */
   async getFilterOptions() {
     const now = new Date();
@@ -1714,13 +2086,35 @@ export class BillingService {
       { month: 12, name: 'December' },
     ];
 
-    const schools = await this.prisma.institution.findMany({
+    const defaultPrice = await this.getPricingSetting();
+
+    const rawSchools = await this.prisma.institution.findMany({
       where: { status: { in: ['ACTIVE', 'APPROVED', 'DRAFT'] } },
-      select: { id: true, name: true, code: true, email: true, city: true },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        email: true,
+        city: true,
+        pricings: {
+          where: { isActive: true },
+          orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+          take: 1,
+          select: { pricePerStudent: true, currency: true },
+        },
+      },
       orderBy: { name: 'asc' },
     });
 
-    const currentPrice = await this.getPricingSetting();
+    const schools = rawSchools.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      code: s.code,
+      email: s.email,
+      city: s.city,
+      pricePerStudent: s.pricings?.[0]?.pricePerStudent ?? defaultPrice,
+      isCustomPrice: Boolean(s.pricings?.[0]),
+    }));
 
     const lastMonthDate = new Date(currentYear, currentMonth - 2, 1);
     const lastMonth = lastMonthDate.getMonth() + 1;
@@ -1730,7 +2124,7 @@ export class BillingService {
       availableYears,
       months,
       schools,
-      currentPrice,
+      currentPrice: defaultPrice,
       currentMonth,
       currentYear,
       lastMonth,

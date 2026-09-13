@@ -757,10 +757,22 @@ export class AdminStudentsService {
         type: 'SCHOOL',
       }));
 
-    const ALLOWED_EXAMS = ['JEE', 'NEET', 'CET'];
-    const filteredExamTargets = examTargets.filter((t) =>
-      ALLOWED_EXAMS.includes(t.name?.toUpperCase().trim())
-    );
+    const TARGET_ORDER = [
+      'JEE',
+      'CET',
+      'NEET',
+      'NEET and JEE',
+      'NEET and State CET',
+      'JEE and State CET',
+      'JEE, NEET and State CET',
+    ];
+    const filteredExamTargets = examTargets
+      .filter((t) => TARGET_ORDER.some((name) => name.toLowerCase() === t.name?.trim().toLowerCase()))
+      .sort((a, b) => {
+        const indexA = TARGET_ORDER.findIndex((name) => name.toLowerCase() === a.name?.trim().toLowerCase());
+        const indexB = TARGET_ORDER.findIndex((name) => name.toLowerCase() === b.name?.trim().toLowerCase());
+        return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
+      });
 
     return {
       states,
@@ -808,10 +820,22 @@ export class AdminStudentsService {
         }),
       ]);
 
-    const ALLOWED_EXAMS = ['JEE', 'NEET', 'CET'];
-    const filteredExamTargets = examTargets.filter((t) =>
-      ALLOWED_EXAMS.includes(t.name?.toUpperCase().trim())
-    );
+    const TARGET_ORDER = [
+      'JEE',
+      'CET',
+      'NEET',
+      'NEET and JEE',
+      'NEET and State CET',
+      'JEE and State CET',
+      'JEE, NEET and State CET',
+    ];
+    const filteredExamTargets = examTargets
+      .filter((t) => TARGET_ORDER.some((name) => name.toLowerCase() === t.name?.trim().toLowerCase()))
+      .sort((a, b) => {
+        const indexA = TARGET_ORDER.findIndex((name) => name.toLowerCase() === a.name?.trim().toLowerCase());
+        const indexB = TARGET_ORDER.findIndex((name) => name.toLowerCase() === b.name?.trim().toLowerCase());
+        return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
+      });
 
     return {
       states,
@@ -1219,5 +1243,417 @@ export class AdminStudentsService {
         districtRef: true,
       },
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PUBLIC REGISTRATIONS MODULE (Strictly Scoped to registrationSource = PUBLIC)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Get paginated list of public registration students with search, filters & sorting
+   */
+  async getPublicRegistrations(query: SuperAdminRegistrationsQueryDto) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.max(1, Math.min(100, Number(query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const where: Prisma.StudentWhereInput = {
+      registrationSource: 'PUBLIC',
+    };
+
+    if (query.status && query.status !== 'ALL') {
+      where.status = query.status as StudentStatus;
+    }
+
+    if (query.classId) where.classId = query.classId;
+    if (query.examTargetId) where.examTargetId = query.examTargetId;
+    if (query.stateId) where.stateId = query.stateId;
+    if (query.districtId) where.districtId = query.districtId;
+    if (query.institutionId) where.institutionId = query.institutionId;
+
+    if (query.examTarget && query.examTarget !== 'ALL') {
+      where.examTarget = {
+        name: { equals: query.examTarget, mode: 'insensitive' },
+      };
+    }
+
+    if (query.date === 'today') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      where.createdAt = { gte: today };
+    } else if (query.date && query.date !== 'all') {
+      const parsedDate = new Date(query.date);
+      if (!isNaN(parsedDate.getTime())) {
+        const start = new Date(parsedDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(parsedDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt = { gte: start, lte: end };
+      }
+    }
+
+    if (query.search && query.search.trim()) {
+      const q = query.search.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { studentId: { contains: q, mode: 'insensitive' } },
+        { studentCode: { contains: q, mode: 'insensitive' } },
+        { user: { mobileNumber: { contains: q, mode: 'insensitive' } } },
+        { user: { phone: { contains: q, mode: 'insensitive' } } },
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+        { schoolCollege: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const sortOrder = query.sortOrder === SortOrderEnum.ASC ? 'asc' : 'desc';
+    let orderBy: Prisma.StudentOrderByWithRelationInput = { createdAt: 'desc' };
+
+    switch (query.sortBy) {
+      case 'name':
+        orderBy = { name: sortOrder };
+        break;
+      case 'studentId':
+        orderBy = { studentId: sortOrder };
+        break;
+      case 'status':
+        orderBy = { status: sortOrder };
+        break;
+      case 'schoolCollege':
+        orderBy = { schoolCollege: sortOrder };
+        break;
+      case 'email':
+        orderBy = { user: { email: sortOrder } };
+        break;
+      case 'createdAt':
+      default:
+        orderBy = { createdAt: sortOrder };
+        break;
+    }
+
+    const [students, total] = await Promise.all([
+      this.prisma.student.findMany({
+        where,
+        orderBy,
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          studentId: true,
+          studentCode: true,
+          name: true,
+          state: true,
+          district: true,
+          schoolCollege: true,
+          status: true,
+          registrationSource: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              mobileNumber: true,
+              phone: true,
+              status: true,
+              isActive: true,
+            },
+          },
+          studentClass: {
+            select: { id: true, name: true },
+          },
+          examTarget: {
+            select: { id: true, name: true },
+          },
+          stateRef: {
+            select: { id: true, name: true, code: true },
+          },
+          districtRef: {
+            select: { id: true, name: true, code: true },
+          },
+          institution: {
+            select: { id: true, name: true, code: true },
+          },
+          _count: {
+            select: { attempts: true, paymentTransactions: true, orders: true },
+          },
+        },
+      }),
+      this.prisma.student.count({ where }),
+    ]);
+
+    const items = students.map((s) => ({
+      id: s.id,
+      studentId: s.studentId,
+      studentCode: s.studentCode || s.studentId,
+      name: s.name,
+      email: s.user?.email || '—',
+      mobile: s.user?.mobileNumber || s.user?.phone || '—',
+      schoolCollege: s.institution?.name || s.schoolCollege || '—',
+      state: s.stateRef ? { id: s.stateRef.id, name: s.stateRef.name, code: s.stateRef.code } : { name: s.state },
+      district: s.districtRef ? { id: s.districtRef.id, name: s.districtRef.name, code: s.districtRef.code } : { name: s.district },
+      class: s.studentClass ? { id: s.studentClass.id, name: s.studentClass.name } : null,
+      examTarget: s.examTarget ? { id: s.examTarget.id, name: s.examTarget.name } : null,
+      status: s.status,
+      accountStatus: s.user?.isActive ? 'ACTIVE' : 'INACTIVE',
+      registrationSource: s.registrationSource,
+      createdAt: s.createdAt,
+      totalAttempts: s._count.attempts,
+      totalPayments: s._count.paymentTransactions,
+      totalOrders: s._count.orders,
+    }));
+
+    return {
+      items,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize) || 1,
+        hasNextPage: page * pageSize < total,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  /**
+   * Get metrics & KPI stats for public registrations
+   */
+  async getPublicRegistrationStats() {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [
+      totalPublic,
+      activePublic,
+      inactivePublic,
+      todayPublic,
+      neetCount,
+      jeeCount,
+      cetCount,
+    ] = await Promise.all([
+      this.prisma.student.count({ where: { registrationSource: 'PUBLIC' } }),
+      this.prisma.student.count({ where: { registrationSource: 'PUBLIC', status: 'ACTIVE' } }),
+      this.prisma.student.count({ where: { registrationSource: 'PUBLIC', status: 'INACTIVE' } }),
+      this.prisma.student.count({
+        where: { registrationSource: 'PUBLIC', createdAt: { gte: todayStart } },
+      }),
+      this.prisma.student.count({
+        where: {
+          registrationSource: 'PUBLIC',
+          examTarget: { name: { contains: 'NEET', mode: 'insensitive' } },
+        },
+      }),
+      this.prisma.student.count({
+        where: {
+          registrationSource: 'PUBLIC',
+          examTarget: { name: { contains: 'JEE', mode: 'insensitive' } },
+        },
+      }),
+      this.prisma.student.count({
+        where: {
+          registrationSource: 'PUBLIC',
+          examTarget: { name: { contains: 'CET', mode: 'insensitive' } },
+        },
+      }),
+    ]);
+
+    return {
+      totalPublic,
+      activePublic,
+      inactivePublic,
+      todayPublic,
+      byTarget: {
+        NEET: neetCount,
+        JEE: jeeCount,
+        CET: cetCount,
+        OTHER: Math.max(0, totalPublic - (neetCount + jeeCount + cetCount)),
+      },
+    };
+  }
+
+  /**
+   * Get single public registration student profile
+   */
+  async getPublicStudentById(studentId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: {
+        OR: [{ id: studentId }, { studentId: studentId }],
+        registrationSource: 'PUBLIC',
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            mobileNumber: true,
+            phone: true,
+            status: true,
+            isActive: true,
+            isVerified: true,
+            createdAt: true,
+            lastLoginAt: true,
+          },
+        },
+        studentClass: true,
+        examTarget: true,
+        stateRef: true,
+        districtRef: true,
+        institution: true,
+        studentExamTargets: { include: { examTarget: true } },
+        attempts: {
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            exam: { select: { id: true, title: true } },
+            result: { select: { totalScore: true, percentage: true, resultStatus: true } },
+          },
+        },
+        paymentTransactions: {
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!student) {
+      throw new NotFoundException(`Public registration student with ID '${studentId}' was not found.`);
+    }
+
+    return student;
+  }
+
+  /**
+   * Safely deactivate public registration student account
+   * Sets Student.status = INACTIVE and User.isActive = false
+   * Preserves all attempts, results, payment history, relationships
+   */
+  async deactivatePublicStudent(
+    studentId: string,
+    actorUserId: string,
+    reason?: string,
+  ) {
+    const student = await this.prisma.student.findFirst({
+      where: {
+        OR: [{ id: studentId }, { studentId: studentId }],
+        registrationSource: 'PUBLIC',
+      },
+      include: { user: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(
+        `Public registration student with ID '${studentId}' was not found.`,
+      );
+    }
+
+    // Atomic update
+    await this.prisma.$transaction(async (tx) => {
+      await tx.student.update({
+        where: { id: student.id },
+        data: { status: 'INACTIVE' },
+      });
+
+      if (student.userId) {
+        await tx.user.update({
+          where: { id: student.userId },
+          data: {
+            isActive: false,
+            status: 'DISABLED',
+          },
+        });
+      }
+
+      try {
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'STUDENT_DEACTIVATED',
+            entityType: 'STUDENT',
+            entityId: student.id,
+            reason: reason || 'Super Admin deactivated public registration student',
+            metadata: {
+              studentId: student.studentId,
+              name: student.name,
+              registrationSource: 'PUBLIC',
+              deactivatedAt: new Date().toISOString(),
+            },
+          },
+        });
+      } catch (e) {
+        this.logger.warn(`Audit log creation notice: ${e}`);
+      }
+    });
+
+    return {
+      success: true,
+      message: `Student '${student.name}' (${student.studentId}) deactivated successfully.`,
+      studentId: student.id,
+      status: 'INACTIVE',
+      accountStatus: 'INACTIVE',
+    };
+  }
+
+  /**
+   * Reactivate public registration student account
+   */
+  async activatePublicStudent(studentId: string, actorUserId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: {
+        OR: [{ id: studentId }, { studentId: studentId }],
+        registrationSource: 'PUBLIC',
+      },
+      include: { user: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException(
+        `Public registration student with ID '${studentId}' was not found.`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.student.update({
+        where: { id: student.id },
+        data: { status: 'ACTIVE' },
+      });
+
+      if (student.userId) {
+        await tx.user.update({
+          where: { id: student.userId },
+          data: {
+            isActive: true,
+            status: 'ACTIVE',
+          },
+        });
+      }
+
+      try {
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'STUDENT_ACTIVATED',
+            entityType: 'STUDENT',
+            entityId: student.id,
+            reason: 'Super Admin reactivated public registration student account',
+            metadata: {
+              studentId: student.studentId,
+              name: student.name,
+              registrationSource: 'PUBLIC',
+              activatedAt: new Date().toISOString(),
+            },
+          },
+        });
+      } catch (e) {
+        this.logger.warn(`Audit log creation notice: ${e}`);
+      }
+    });
+
+    return {
+      success: true,
+      message: `Student '${student.name}' (${student.studentId}) activated successfully.`,
+      studentId: student.id,
+      status: 'ACTIVE',
+      accountStatus: 'ACTIVE',
+    };
   }
 }

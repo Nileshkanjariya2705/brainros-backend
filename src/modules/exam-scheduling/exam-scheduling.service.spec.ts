@@ -11,6 +11,9 @@ import { NotificationQueueService } from '../notification/queues/notification-qu
 import { PrismaService } from '../prisma/prisma.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import { EXAM_WINDOW_END_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
+import { EXAM_CACHE_PREPARATION_QUEUE_NAME } from '../exam-cache/interfaces/exam-cache.interface';
+import { ExamCacheService } from '../exam-cache/services/exam-cache.service';
+import { ScheduleReminderService } from './services/schedule-reminder.service';
 
 describe('Exam Scheduling & Activation Engine', () => {
   let lifecycleService: ExamLifecycleService;
@@ -41,6 +44,14 @@ describe('Exam Scheduling & Activation Engine', () => {
       create: jest.fn(),
       findMany: jest.fn(),
     },
+    auditLog: {
+      create: jest.fn().mockResolvedValue({}),
+    },
+    approvalRequest: {
+      create: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     student: {
       findUnique: jest.fn(),
     },
@@ -62,9 +73,29 @@ describe('Exam Scheduling & Activation Engine', () => {
           },
         },
         {
+          provide: ExamCacheService,
+          useValue: {
+            cachePublishedExamData: jest.fn().mockResolvedValue(undefined),
+            getExamSnapshot: jest.fn().mockResolvedValue(null),
+          },
+        },
+        {
+          provide: ScheduleReminderService,
+          useValue: {
+            scheduleExamWhatsAppReminders: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: getQueueToken(EXAM_WINDOW_END_QUEUE_NAME),
           useValue: {
             add: jest.fn().mockResolvedValue({ id: 'window-job-1' }),
+            getJob: jest.fn().mockResolvedValue(null),
+          },
+        },
+        {
+          provide: getQueueToken(EXAM_CACHE_PREPARATION_QUEUE_NAME),
+          useValue: {
+            add: jest.fn().mockResolvedValue({ id: 'cache-prep-1' }),
           },
         },
       ],

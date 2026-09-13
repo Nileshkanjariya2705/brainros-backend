@@ -30,6 +30,13 @@ enum StudentStatus {
   ARCHIVED
 }
 
+enum RegistrationSource {
+  PUBLIC
+  ADMIN
+  OPERATOR
+  OTHER
+}
+
 enum OtpPurposeEnum {
   LOGIN
   REGISTER
@@ -228,6 +235,7 @@ model User {
   approvedAnalysisReports     ExamAnalysisReport[]    @relation("ReportApprovedBy")
   billsCreated                Bill[]                  @relation("BillsCreated")
   billsApproved               Bill[]                  @relation("BillsApproved")
+  institutionPricingsUpdated  InstitutionPricing[]    @relation("InstitutionPricingsUpdated")
   paymentTransactions         PaymentTransaction[]    @relation("UserPaymentTransactions")
 
   @@index([status])
@@ -326,6 +334,7 @@ model Student {
   preferredLanguageId String            @map("preferred_language_id") @db.Uuid
   admissionYear       Int?              @map("admission_year")
   status              StudentStatus     @default(ACTIVE)
+  registrationSource  RegistrationSource @default(PUBLIC) @map("registration_source")
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
   user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -346,6 +355,7 @@ model Student {
   paymentTransactions PaymentTransaction[]    @relation("StudentPaymentTransactions")
 
   @@index([status])
+  @@index([registrationSource])
   @@index([stateId])
   @@index([districtId])
   @@index([institutionId])
@@ -2080,6 +2090,7 @@ model Institution {
   bulkUploads BulkUpload[]
   reportJobs  ReportJob[]
   bills       Bill[]
+  pricings    InstitutionPricing[]
   stateRef    State?            @relation(fields: [stateId], references: [id])
   districtRef District?         @relation(fields: [districtId], references: [id])
   students    Student[]
@@ -2101,6 +2112,27 @@ enum BillStatus {
   SENT
   PAID
   OVERDUE
+}
+
+model InstitutionPricing {
+  id              String      @id @default(uuid()) @db.Uuid
+  institutionId   String      @map("institution_id") @db.Uuid
+  pricePerStudent Float       @map("price_per_student")
+  currency        String      @default("INR")
+  effectiveFrom   DateTime    @default(now()) @map("effective_from")
+  effectiveTo     DateTime?   @map("effective_to")
+  isActive        Boolean     @default(true) @map("is_active")
+  updatedById     String      @map("updated_by_id") @db.Uuid
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  institution     Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  updatedBy       User        @relation("InstitutionPricingsUpdated", fields: [updatedById], references: [id])
+
+  @@index([institutionId])
+  @@index([isActive])
+  @@index([effectiveFrom])
+  @@map("institution_pricings")
 }
 
 model Bill {
@@ -3013,8 +3045,51 @@ model SystemSetting {
   @@map("system_settings")
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// AI TRANSLATION (Gemini-powered automatic exam translation)
+// ═══════════════════════════════════════════════════════════════════
 
+enum AiTranslationJobStatus {
+  QUEUED
+  PROCESSING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
 
+enum AiTranslationLanguageStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model AiTranslationJob {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  examId                String                      @map("exam_id") @db.Uuid
+  examVersionId         String                      @map("exam_version_id") @db.Uuid
+  scheduleId            String?                     @map("schedule_id") @db.Uuid
+  totalQuestions        Int                         @map("total_questions")
+  totalLanguages        Int                         @map("total_languages")
+  batchSize             Int                         @default(20) @map("batch_size")
+  status                AiTranslationJobStatus      @default(QUEUED)
+  overallProgress       Float                       @default(0) @map("overall_progress")
+  languageStatuses      Json                        @default("[]") @map("language_statuses")
+  startedAt             DateTime?                   @map("started_at")
+  completedAt           DateTime?                   @map("completed_at")
+  failedAt              DateTime?                   @map("failed_at")
+  errorMessage          String?                     @map("error_message") @db.Text
+  createdById           String                      @map("created_by_id") @db.Uuid
+  createdAt             DateTime                    @default(now()) @map("created_at")
+  updatedAt             DateTime                    @updatedAt @map("updated_at")
+
+  @@unique([examId, examVersionId])
+  @@index([examId])
+  @@index([status])
+  @@index([createdById])
+  @@map("ai_translation_jobs")
+}
 
 
 

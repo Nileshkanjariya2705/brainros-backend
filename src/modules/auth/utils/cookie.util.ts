@@ -46,19 +46,14 @@ export function getAccessCookieOptions(
     configService.get<string>('COOKIE_SECURE') === 'true' ||
     (isProd && sameSite === 'none');
   const domain = configService.get<string>('COOKIE_DOMAIN') || undefined;
-  const accessExpiryMs = parseDurationToMs(
-    configService.get<string>('JWT_ACCESS_EXPIRATION') ||
-      configService.get<string>('ACCESS_TOKEN_EXPIRES_IN'),
-    15 * 60 * 1000,
-  );
 
+  // Session Cookie: No maxAge or expires set so the browser removes it on close
   return {
     httpOnly: true,
     secure,
     sameSite,
     domain,
     path: '/',
-    maxAge: accessExpiryMs,
   };
 }
 
@@ -77,19 +72,14 @@ export function getRefreshCookieOptions(
     configService.get<string>('COOKIE_SECURE') === 'true' ||
     (isProd && sameSite === 'none');
   const domain = configService.get<string>('COOKIE_DOMAIN') || undefined;
-  const refreshExpiryMs = parseDurationToMs(
-    configService.get<string>('JWT_REFRESH_EXPIRATION') ||
-      configService.get<string>('REFRESH_TOKEN_EXPIRES_IN'),
-    7 * 24 * 60 * 60 * 1000,
-  );
 
+  // Session Cookie: No maxAge or expires set so the browser removes it on close
   return {
     httpOnly: true,
     secure,
     sameSite,
     domain,
     path: '/',
-    maxAge: refreshExpiryMs,
   };
 }
 

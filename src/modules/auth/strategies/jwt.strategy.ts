@@ -86,7 +86,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           throw new UnauthorizedException('Session has expired.');
         }
       }
-      // If session not found, allow (backward compatibility with tokens issued before session system)
     }
 
     const roles = user.userRoles.map((ur) => ur.role.name);

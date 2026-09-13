@@ -54,7 +54,19 @@ export class ExamSchedulingController {
     const data = await this.scheduleService.scheduleAdminExam(dto, userId);
     return {
       statusCode: 201,
-      message: 'Exam scheduled successfully.',
+      message: dto.examId ? 'Exam schedule updated successfully.' : 'Exam scheduled successfully.',
+      data,
+    };
+  }
+
+  @Get('admin/exams/:examId/schedule-detail')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'MANAGER', 'OPERATOR')
+  async getExamScheduleDetail(
+    @Param('examId', ParseUUIDPipe) examId: string,
+  ) {
+    const data = await this.scheduleService.getExamScheduleDetail(examId);
+    return {
+      statusCode: 200,
       data,
     };
   }

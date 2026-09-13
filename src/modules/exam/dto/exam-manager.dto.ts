@@ -6,6 +6,11 @@ import {
   Min,
   Max,
   IsNumber,
+  IsNotEmpty,
+  IsIn,
+  IsUUID,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -253,3 +258,58 @@ export class ExamManagerFilterDto {
   @IsOptional()
   missingQuestionPaperOnly?: boolean | string;
 }
+
+export class ManualQuestionItemDto {
+  @IsNotEmpty()
+  @IsString()
+  questionText: string;
+
+  @IsNotEmpty()
+  @IsString()
+  optionA: string;
+
+  @IsNotEmpty()
+  @IsString()
+  optionB: string;
+
+  @IsNotEmpty()
+  @IsString()
+  optionC: string;
+
+  @IsNotEmpty()
+  @IsString()
+  optionD: string;
+
+  @IsNotEmpty()
+  @IsIn(['A', 'B', 'C', 'D'])
+  correctAnswer: 'A' | 'B' | 'C' | 'D';
+
+  @IsOptional()
+  @IsString()
+  explanation?: string;
+
+  @IsOptional()
+  @IsUUID()
+  subjectId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  chapterId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  marks?: number;
+
+  @IsOptional()
+  @IsNumber()
+  negativeMarks?: number;
+}
+
+export class SubmitManualQuestionsDto {
+  @IsNotEmpty()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ManualQuestionItemDto)
+  questions: ManualQuestionItemDto[];
+}
+

@@ -83,6 +83,10 @@ export class ExportRegistryService {
       case 'results':
         return this.exportResults(ctx);
 
+      case 'public_registrations':
+      case 'public-registrations':
+        return this.exportPublicRegistrations(ctx, isSuperAdmin);
+
       case 'rank_list':
         return this.exportRankList(ctx);
 
@@ -94,7 +98,7 @@ export class ExportRegistryService {
 
       default:
         throw new BadRequestException(
-          `Resource '${resource}' is not supported for PDF export. Supported: students, schools, staff, invoices, bills, exams, registrations, batches, questions, translations, approval_queue, completed_exams, results, rank_list, institution_students, chapters.`,
+          `Resource '${resource}' is not supported for PDF export. Supported: public_registrations, students, schools, staff, invoices, bills, exams, registrations, batches, questions, translations, approval_queue, completed_exams, results, rank_list, institution_students, chapters.`,
         );
     }
   }
@@ -194,6 +198,115 @@ export class ExportRegistryService {
       options: {
         title: 'Student Directory Report',
         subtitle: `Total Matching Records: ${totalCount} | Exported: ${data.length}`,
+        orientation: 'landscape',
+        columns,
+        data,
+        filterSummary: {
+          Status: filters.status || 'All',
+          Search: search || 'None',
+          Target: filters.examTargetName || filters.examTargetId || 'All',
+          State: filters.stateName || filters.stateId || 'All',
+        },
+      },
+      totalCount,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 1B. PUBLIC REGISTRATIONS DIRECTORY (registrationSource = PUBLIC)
+  // ─────────────────────────────────────────────────────────────
+  private async exportPublicRegistrations(
+    ctx: ExportRequestContext,
+    isSuperAdmin: boolean,
+  ): Promise<ResolvedExportConfig> {
+    const { filters = {}, search, sort, limit = 5000, offset = 0 } = ctx;
+    const where: Prisma.StudentWhereInput = {
+      registrationSource: 'PUBLIC',
+    };
+
+    if (filters.status) where.status = filters.status as StudentStatus;
+    if (filters.classId) where.classId = filters.classId;
+    if (filters.examTargetId) where.examTargetId = filters.examTargetId;
+    if (filters.stateId) where.stateId = filters.stateId;
+    if (filters.districtId) where.districtId = filters.districtId;
+
+    if (filters.schoolId || filters.institutionId) {
+      const instId = filters.schoolId || filters.institutionId;
+      where.institutionId = instId;
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { studentId: { contains: q, mode: 'insensitive' } },
+        { studentCode: { contains: q, mode: 'insensitive' } },
+        { user: { mobileNumber: { contains: q, mode: 'insensitive' } } },
+        { user: { phone: { contains: q, mode: 'insensitive' } } },
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+
+    const orderBy: Prisma.StudentOrderByWithRelationInput = sort?.field
+      ? { [sort.field]: sort.direction || 'desc' }
+      : { createdAt: 'desc' };
+
+    const [items, totalCount] = await Promise.all([
+      this.prisma.student.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy,
+        include: {
+          user: { select: { email: true, mobileNumber: true, phone: true, status: true, isActive: true } },
+          examTarget: { select: { id: true, name: true } },
+          studentClass: { select: { id: true, name: true } },
+          stateRef: { select: { name: true } },
+          districtRef: { select: { name: true } },
+          institution: { select: { name: true } },
+        },
+      }),
+      this.prisma.student.count({ where }),
+    ]);
+
+    const columns: ColumnDefinition[] = [
+      { header: '#', key: '_index', width: 0.5, align: 'center' },
+      { header: 'Student Name', key: 'name', width: 2.2 },
+      { header: 'Student ID', key: 'studentId', width: 1.2 },
+      { header: 'Mobile', key: 'mobile', width: 1.2 },
+      { header: 'Email', key: 'email', width: 2.0 },
+      { header: 'State', key: 'state', width: 1.2 },
+      { header: 'District/City', key: 'district', width: 1.2 },
+      { header: 'School/Institute', key: 'schoolCollege', width: 2.0 },
+      { header: 'Target', key: 'targetName', width: 1.0 },
+      { header: 'Reg Date', key: 'registeredAt', width: 1.2 },
+      { header: 'Status', key: 'status', width: 1.0, align: 'center' },
+    ];
+
+    const data = items.map((s, idx) => {
+      const stateName = s.stateRef?.name || s.state || '—';
+      const districtName = s.districtRef?.name || s.district || '—';
+      const schoolName = s.institution?.name || s.schoolCollege || '—';
+
+      return {
+        _index: offset + idx + 1,
+        name: s.name,
+        studentId: s.studentCode || s.studentId || '—',
+        mobile: s.user?.mobileNumber || s.user?.phone || '—',
+        email: s.user?.email || '—',
+        state: stateName,
+        district: districtName,
+        schoolCollege: schoolName,
+        targetName: s.examTarget?.name || '—',
+        registeredAt: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—',
+        status: s.status,
+      };
+    });
+
+    return {
+      options: {
+        title: 'Public Registration Students Directory',
+        subtitle: `Authorized Super Admin Export — Total Matching: ${totalCount} | Exported: ${data.length}`,
         orientation: 'landscape',
         columns,
         data,

@@ -19,6 +19,7 @@ import { AdminStudentBulkController } from './controllers/admin-student-bulk.con
 import { CompletedExamReportsController } from './controllers/completed-exam-reports.controller';
 import { AdminStudentsController } from './controllers/admin-students.controller';
 import { SuperAdminRegistrationsController } from './controllers/super-admin-registrations.controller';
+import { SuperAdminPublicRegistrationsController } from './controllers/super-admin-public-registrations.controller';
 import { AdminSchoolsController } from './controllers/admin-schools.controller';
 import { AdminStaffController } from './controllers/admin-staff.controller';
 
@@ -77,6 +78,7 @@ import { StudentApprovalHandler } from './approval/handlers/student-approval.han
     CompletedExamReportsController,
     AdminStudentsController,
     SuperAdminRegistrationsController,
+    SuperAdminPublicRegistrationsController,
     AdminSchoolsController,
     AdminStaffController,
   ],

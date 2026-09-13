@@ -87,10 +87,10 @@ export class NotificationQueueService {
         {
           jobId,
           delay: delayMs > 0 ? delayMs : undefined,
-          attempts: 5,
+          attempts: 3,
           backoff: {
             type: 'exponential',
-            delay: 5000, // 5s, 10s, 20s, 40s, 80s
+            delay: 10000, // 10s, 20s, 40s
           },
           removeOnComplete: 200,
           removeOnFail: 1000,

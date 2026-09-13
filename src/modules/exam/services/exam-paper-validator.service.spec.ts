@@ -43,7 +43,7 @@ describe('ExamPaperValidatorService', () => {
         optionB: '3',
         optionC: '4',
         optionD: '5',
-      },
+      } as any,
     ];
 
     const result = await service.validatePaper(rows);
@@ -61,7 +61,7 @@ describe('ExamPaperValidatorService', () => {
         questionText: '', // missing!
         optionA: 'Opt 1',
         optionB: '', // missing!
-      },
+      } as any,
     ];
 
     const result = await service.validatePaper(rows);

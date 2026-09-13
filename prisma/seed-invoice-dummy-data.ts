@@ -217,7 +217,6 @@ async function main() {
 
       // Student count varies slightly by month and school
       const studentCount = inst.defaultStudents + (i * 20) - (p.month * 5);
-      const totalAmount = studentCount * p.price;
       const periodLabel = `${MONTH_NAMES[p.month]} ${p.year}`;
 
       seq++;
@@ -238,13 +237,18 @@ async function main() {
         },
       });
 
+      const subtotal = studentCount * p.price;
+      const tax = Math.round(subtotal * 0.18 * 100) / 100;
+      const totalAmount = Math.round((subtotal + tax) * 100) / 100;
+
       if (existing) {
         await prisma.bill.update({
           where: { id: existing.id },
           data: {
             studentCount,
             pricePerStudent: p.price,
-            amount: totalAmount,
+            amount: subtotal,
+            tax,
             totalAmount,
             status,
             emailStatus,
@@ -263,8 +267,8 @@ async function main() {
             billingYear: p.year,
             studentCount,
             pricePerStudent: p.price,
-            amount: totalAmount,
-            tax: 0,
+            amount: subtotal,
+            tax,
             totalAmount,
             status,
             emailStatus,

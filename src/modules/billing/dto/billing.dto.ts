@@ -119,6 +119,43 @@ export class UpdatePricingDto {
   pricePerStudent: number;
 }
 
+export class UpdateSchoolPricingDto {
+  @Type(() => Number)
+  @IsNumber({}, { message: 'Price per student must be a valid number.' })
+  @Min(1, { message: 'Price per student must be at least ₹1.' })
+  pricePerStudent: number;
+
+  @IsOptional()
+  @IsDateString({}, { message: 'Invalid effective from date format.' })
+  effectiveFrom?: string;
+
+  @IsOptional()
+  @IsDateString({}, { message: 'Invalid effective to date format.' })
+  effectiveTo?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean = true;
+}
+
+export class SendBulkInvoicesDto {
+  @Type(() => Number)
+  @IsInt({ message: 'Billing month must be an integer (1 - 12).' })
+  @Min(1, { message: 'Billing month cannot be less than 1 (January).' })
+  @Max(12, { message: 'Billing month cannot be greater than 12 (December).' })
+  billingMonth: number;
+
+  @Type(() => Number)
+  @IsInt({ message: 'Billing year must be an integer.' })
+  @Min(2020, { message: 'Billing year must be 2020 or later.' })
+  @Max(2100, { message: 'Billing year cannot exceed 2100.' })
+  billingYear: number;
+
+  @IsOptional()
+  @IsBoolean()
+  forceRetryFailed?: boolean = false;
+}
+
 export class BillFilterDto {
   @IsOptional()
   @Type(() => Number)

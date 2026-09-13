@@ -14,6 +14,7 @@ import { QuestionShuffleService } from './services/question-shuffle.service';
 import { RedisService } from '../redis/redis.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import { EVALUATION_QUEUE_NAME } from '../result/interfaces/result-lifecycle.interface';
+import { ExamCacheService } from '../exam-cache/services/exam-cache.service';
 
 // ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
 // ─── Minimal Prisma Mock ──────────────────────────────────────────────────────
@@ -124,6 +125,13 @@ describe('ExamAttemptService', () => {
             get: jest.fn().mockResolvedValue(null),
             set: jest.fn().mockResolvedValue('OK'),
             del: jest.fn().mockResolvedValue(1),
+          },
+        },
+        {
+          provide: ExamCacheService,
+          useValue: {
+            cachePublishedExamData: jest.fn().mockResolvedValue(undefined),
+            getExamSnapshot: jest.fn().mockResolvedValue(null),
           },
         },
         {

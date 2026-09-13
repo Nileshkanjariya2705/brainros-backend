@@ -92,10 +92,10 @@ export class UpdateStaffDto {
 
 export class UpdateStaffStatusDto {
   @IsString()
-  @IsIn(['ACTIVE', 'INACTIVE', 'SUSPENDED'], {
-    message: 'Status must be ACTIVE, INACTIVE, or SUSPENDED.',
+  @IsIn(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'DISABLED'], {
+    message: 'Status must be ACTIVE, INACTIVE, SUSPENDED, or DISABLED.',
   })
-  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DISABLED';
 }
 
 export class StaffFilterDto {

@@ -139,7 +139,7 @@ describe('StudentService (Profile & Contact Management)', () => {
         schoolCollege: 'New School',
         classId: 'class-1',
         preferredLanguageId: 'lang-1',
-      });
+      } as any);
 
       expect(prismaMock.student.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -168,7 +168,7 @@ describe('StudentService (Profile & Contact Management)', () => {
         studentService.updateProfile('user-id-1', {
           stateId: 'state-1',
           districtId: 'dist-2',
-        }),
+        } as any),
       ).rejects.toThrow(BadRequestException);
     });
   });

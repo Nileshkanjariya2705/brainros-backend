@@ -6,6 +6,7 @@ import {
   JobProgressData,
 } from '../dto/job-progress.dto';
 import { RedisService } from '../../redis/redis.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { parseBooleanFlag } from '../../feature-flag/feature-flag.constants';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class JobProgressService {
   constructor(
     @Optional() private readonly gateway?: JobProgressGateway,
     @Optional() private readonly redisService?: RedisService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   private getCacheKey(queue: string, jobId: string): string {
@@ -337,6 +339,70 @@ export class JobProgressService {
         // Fallback silently if Redis error occurs
       }
     }
+
+    // Database persistent fallback for known queues
+    if (this.prisma) {
+      try {
+        if (queue === 'ai-translation' || queue.startsWith('ai-translation')) {
+          const job = await this.prisma.aiTranslationJob.findUnique({
+            where: { id: jobId },
+          });
+          if (job) {
+            const percentage = job.overallProgress || 0;
+            const status: JobStatus =
+              job.status === 'COMPLETED' || job.status === 'PARTIALLY_COMPLETED'
+                ? 'COMPLETED'
+                : job.status === 'FAILED'
+                ? 'FAILED'
+                : job.status === 'PROCESSING'
+                ? 'PROCESSING'
+                : 'QUEUED';
+
+            const event: JobProgressEventDto = {
+              event:
+                status === 'COMPLETED'
+                  ? 'job.completed'
+                  : status === 'FAILED'
+                  ? 'job.failed'
+                  : status === 'PROCESSING'
+                  ? 'job.progress'
+                  : 'job.queued',
+              job: {
+                queue,
+                jobId,
+                type: 'AI Question Paper Translation',
+                status,
+                stage:
+                  status === 'COMPLETED'
+                    ? 'COMPLETED'
+                    : status === 'FAILED'
+                    ? 'FAILED'
+                    : 'Translating regional languages',
+                userId: job.createdById,
+                examId: job.examId,
+              },
+              progress: {
+                current: Math.round(((job.overallProgress || 0) / 100) * (job.totalQuestions || 1)),
+                total: job.totalQuestions || 1,
+                percentage,
+              },
+              message:
+                status === 'COMPLETED'
+                  ? 'All language translations completed successfully.'
+                  : status === 'FAILED'
+                  ? (job.errorMessage || 'Translation failed.')
+                  : `Translation in progress (${percentage}%).`,
+              timestamp: job.updatedAt ? job.updatedAt.toISOString() : new Date().toISOString(),
+            };
+            this.statusCache.set(cacheKey, event);
+            return event;
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`Failed database lookup for job ${queue}:${jobId}: ${err?.message}`);
+      }
+    }
+
     return null;
   }
 

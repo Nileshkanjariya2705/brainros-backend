@@ -1127,6 +1127,7 @@ export class StudentBulkRegistrationService {
                 examTargetId: data.examTargetId,
                 preferredLanguageId: data.preferredLanguageId,
                 status: 'ACTIVE',
+                registrationSource: 'OPERATOR',
               },
             });
 

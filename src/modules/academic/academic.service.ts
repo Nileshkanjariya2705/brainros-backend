@@ -244,7 +244,26 @@ export class AcademicService {
    * Find chapters for a specific subject (with caching for active chapters)
    */
   async findChaptersBySubject(subjectId: string, includeInactive: boolean = false) {
-    const cacheKey = this.getChapterCacheKey(subjectId, includeInactive);
+    if (!subjectId) return [];
+
+    let targetSubjectId = subjectId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subjectId);
+    if (!isUuid) {
+      const subject = await this.prisma.subject.findFirst({
+        where: {
+          OR: [
+            { code: { equals: subjectId, mode: 'insensitive' } },
+            { name: { equals: subjectId, mode: 'insensitive' } },
+          ],
+        },
+      });
+      if (!subject) {
+        return [];
+      }
+      targetSubjectId = subject.id;
+    }
+
+    const cacheKey = this.getChapterCacheKey(targetSubjectId, includeInactive);
 
     // Try Redis cache
     try {
@@ -258,7 +277,7 @@ export class AcademicService {
 
     const chapters = await this.prisma.chapter.findMany({
       where: {
-        subjectId,
+        subjectId: targetSubjectId,
         ...(includeInactive ? {} : { isActive: true }),
       },
       include: {

@@ -180,12 +180,112 @@ export class ExamWindowEndProcessor extends WorkerHost {
         }
       }
 
-      // ─── STEP 2.5: Official Exam Completion Notification Gate ───
-      // Authoritative Requirement:
-      // When an official/live exam reaches official End Time, do NOT immediately calculate final exam results.
-      // Instead, notify SUPER_ADMIN and GENERAL_MANAGER: "Exam Completed — Please Upload Answer Key".
-      // Authoritative final calculation begins ONLY after Answer Key is uploaded and validated.
+      // ─── STEP 3: Automatically Trigger Batch Evaluation for Eligible Attempts ───
+      // The Question Paper already contains the correct answers saved at upload time.
+      // Batch evaluation starts automatically on official exam completion.
 
+      const eligibleAttempts = await this.prisma.attempt.findMany({
+        where: {
+          examId,
+          status: { name: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
+          OR: [
+            { result: null },
+            {
+              result: {
+                resultStatus: {
+                  in: [
+                    ResultStatusEnum.PENDING_WINDOW_CLOSE,
+                    ResultStatusEnum.PROCESSING,
+                    ResultStatusEnum.FAILED,
+                  ],
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+
+      let enqueuedCount = 0;
+      if (eligibleAttempts.length > 0) {
+        this.logger.log(
+          `[ExamWindowEndWorker] Enqueueing ${eligibleAttempts.length} eligible student attempts for automated batch evaluation for exam '${exam.title}'.`,
+        );
+
+        for (const att of eligibleAttempts) {
+          await this.prisma.result.upsert({
+            where: { attemptId: att.id },
+            update: {
+              resultStatus: ResultStatusEnum.PROCESSING,
+              metadata: {
+                batchEvaluated: true,
+                automatedPostWindow: true,
+                enqueuedAt: now.toISOString(),
+              },
+            },
+            create: {
+              attemptId: att.id,
+              resultStatus: ResultStatusEnum.PROCESSING,
+              totalQuestions: 0,
+              correctAnswers: 0,
+              wrongAnswers: 0,
+              unattempted: 0,
+              totalScore: 0,
+              maxScore: 0,
+              percentage: 0,
+              accuracy: 0,
+              metadata: {
+                batchEvaluated: true,
+                automatedPostWindow: true,
+                enqueuedAt: now.toISOString(),
+              },
+            },
+          });
+
+          await this.evaluationQueue.add(
+            'EVALUATE_ATTEMPT',
+            {
+              attemptId: att.id,
+              triggeredAt: now.toISOString(),
+              evaluationMode: 'AUTOMATED_POST_WINDOW',
+            },
+            {
+              jobId: `eval_${att.id}`,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 2000 },
+              removeOnComplete: true,
+            },
+          );
+          enqueuedCount++;
+        }
+      }
+
+      // Update Publication Record
+      const existingPub = await this.prisma.examResultPublication.findFirst({
+        where: { examId },
+        orderBy: { publicationVersion: 'desc' },
+      });
+      const pubVersion = existingPub ? existingPub.publicationVersion : 1;
+
+      await this.prisma.examResultPublication.upsert({
+        where: {
+          examId_publicationVersion: {
+            examId,
+            publicationVersion: pubVersion,
+          },
+        },
+        update: {
+          status: 'PROCESSING',
+        },
+        create: {
+          examId,
+          examVersionId: (exam as any).versions?.[0]?.id || null,
+          status: 'PROCESSING',
+          publicationVersion: 1,
+        },
+      });
+
+      // ─── STEP 4: Notify Administrators (Super Admin & General Manager) ───
       const targetSchedule = scheduleId
         ? await this.prisma.examSchedule.findUnique({ where: { id: scheduleId } })
         : await this.prisma.examSchedule.findFirst({
@@ -216,14 +316,11 @@ export class ExamWindowEndProcessor extends WorkerHost {
       const endTimeStr = targetSchedule?.endTime
         ? targetSchedule.endTime.toISOString()
         : now.toISOString();
-      const answerKeyStatusStr = targetSchedule?.hasAnswerKey
-        ? 'UPLOADED'
-        : 'PENDING';
       const scheduleRefId = targetSchedule?.id || scheduleId || '';
-      const actionUrl = `/super-admin/exam-manager/answer-key/${scheduleRefId}`;
+      const actionUrl = `/admin/reports`;
 
       this.logger.log(
-        `[ExamWindowEndWorker] Official exam '${exam.title}' has ended. Notifying ${adminUsers.length} administrators (Super Admin / General Manager) to upload Answer Key.`,
+        `[ExamWindowEndWorker] Official exam '${exam.title}' ended. Notifying ${adminUsers.length} administrators of automated result calculation start.`,
       );
 
       for (const adminUser of adminUsers) {
@@ -235,9 +332,9 @@ export class ExamWindowEndProcessor extends WorkerHost {
             type: NotificationType.EXAM_ENDED,
             priority: NotificationPriority.HIGH,
             variables: {
-              title: 'Exam Completed — Please Upload Answer Key',
-              subject: `Exam Completed — Please Upload Answer Key: ${exam.title}`,
-              message: `Official exam "${exam.title}" (${targetExamName}) has reached its official end time. Total attempts: ${totalAttemptsCount}. Answer key status: ${answerKeyStatusStr}. Please upload the answer key to begin batch result evaluation.`,
+              title: 'Exam Completed — Result Calculation Started',
+              subject: `Exam Completed — Result Calculation Started: ${exam.title}`,
+              message: `Official exam "${exam.title}" (${targetExamName}) has reached its official end time. Total attempts: ${totalAttemptsCount}. Batch evaluation has started automatically for all student attempts.`,
               examTitle: exam.title,
               examId: exam.id,
               scheduleId: scheduleRefId,
@@ -245,13 +342,12 @@ export class ExamWindowEndProcessor extends WorkerHost {
               examType: (exam as any).examType || 'LIVE',
               endTime: endTimeStr,
               totalAttempts: totalAttemptsCount,
-              answerKeyStatus: answerKeyStatusStr,
               actionUrl,
               data: {
                 actionUrl,
                 scheduleId: scheduleRefId,
                 examId: exam.id,
-                entityType: 'ANSWER_KEY',
+                entityType: 'EXAM_RESULT',
               },
             },
             idempotencyKey: `exam_ended_inapp_${exam.id}_${adminUser.id}`,
@@ -265,8 +361,8 @@ export class ExamWindowEndProcessor extends WorkerHost {
               type: NotificationType.EXAM_ENDED,
               priority: NotificationPriority.HIGH,
               variables: {
-                subject: `Exam Completed — Please Upload Answer Key: ${exam.title}`,
-                body: `Official exam "${exam.title}" (${targetExamName}) reached its scheduled end time at ${endTimeStr}.\n\nTotal Attempts: ${totalAttemptsCount}\nAnswer Key Status: ${answerKeyStatusStr}\n\nPlease upload the answer key to begin batch result evaluation.`,
+                subject: `Exam Completed — Result Calculation Started: ${exam.title}`,
+                body: `Official exam "${exam.title}" (${targetExamName}) reached its scheduled end time at ${endTimeStr}.\n\nTotal Attempts: ${totalAttemptsCount}\n\nAutomated batch result evaluation has started. You can view live evaluation progress on the administration dashboard.`,
                 examTitle: exam.title,
                 examId: exam.id,
                 scheduleId: scheduleRefId,
@@ -274,13 +370,12 @@ export class ExamWindowEndProcessor extends WorkerHost {
                 examType: (exam as any).examType || 'LIVE',
                 endTime: endTimeStr,
                 totalAttempts: totalAttemptsCount,
-                answerKeyStatus: answerKeyStatusStr,
                 actionUrl,
                 data: {
                   actionUrl,
                   scheduleId: scheduleRefId,
                   examId: exam.id,
-                  entityType: 'ANSWER_KEY',
+                  entityType: 'EXAM_RESULT',
                 },
               },
               idempotencyKey: `exam_ended_email_${exam.id}_${adminUser.id}`,
@@ -294,14 +389,13 @@ export class ExamWindowEndProcessor extends WorkerHost {
       }
 
       await this.jobProgressService.publishCompleted(EXAM_WINDOW_END_QUEUE_NAME, jobId, {
-        message: `Official exam window closed for '${exam.title}'. Notified Super Admin & General Manager to upload Answer Key.`,
+        message: `Official exam window closed for '${exam.title}'. Automated batch evaluation queued for ${enqueuedCount} attempts.`,
         examId,
         resultSummary: {
           autoSubmittedCount,
           totalAttempts: totalAttemptsCount,
-          answerKeyStatus: answerKeyStatusStr,
-          deferred: true,
-          reason: 'AWAITING_ANSWER_KEY_UPLOAD',
+          enqueuedEvaluationJobs: enqueuedCount,
+          status: 'EVALUATION_IN_PROGRESS',
         },
       });
 
@@ -311,10 +405,9 @@ export class ExamWindowEndProcessor extends WorkerHost {
         examTitle: exam.title,
         autoSubmittedCount,
         totalAttempts: totalAttemptsCount,
-        answerKeyStatus: answerKeyStatusStr,
+        enqueuedEvaluationJobs: enqueuedCount,
         notifiedAdminsCount: adminUsers.length,
-        deferred: true,
-        reason: 'AWAITING_ANSWER_KEY_UPLOAD',
+        status: 'EVALUATION_IN_PROGRESS',
       };
     } catch (err: any) {
       await this.jobProgressService.publishFailed(

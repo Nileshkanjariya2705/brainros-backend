@@ -273,6 +273,53 @@ export class AuthService {
   // ═══════════════════════════════════════════════════════════════
 
   /**
+   * Check if mobile number or email is already registered in the system
+   */
+  async checkAvailability(phone?: string, email?: string) {
+    if (phone) {
+      const normalizedMobile = this.otpService.normalizeMobileNumber(phone);
+      const digitsOnly = phone.replace(/\D/g, '');
+      const existingUserByMobile = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { mobileNumber: normalizedMobile },
+            { phone: normalizedMobile },
+            { mobileNumber: digitsOnly },
+            { phone: digitsOnly },
+          ],
+        },
+      });
+
+      if (existingUserByMobile) {
+        return {
+          available: false,
+          field: 'phone',
+          message: 'A user with this mobile number already exists.',
+        };
+      }
+    }
+
+    if (email && email.trim()) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const existingUserByEmail = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+      if (existingUserByEmail) {
+        return {
+          available: false,
+          field: 'email',
+          message: 'A user with this email address already exists.',
+        };
+      }
+    }
+
+    return {
+      available: true,
+      message: 'Mobile number and email are available.',
+    };
+  }
+
+  /**
    * Submit registration data: validates input and master records,
    * stores temporary state in Redis, sends OTP, and returns requiresOtp.
    * Does NOT activate User or create Student ID before OTP verification.
@@ -878,6 +925,7 @@ export class AuthService {
           preferredLanguageId: registration.preferredLanguageId,
           examTargetId: registration.examTargetId,
           status: 'PENDING',
+          registrationSource: 'PUBLIC',
         },
       });
 
@@ -1484,6 +1532,7 @@ export class AuthService {
             preferredLanguageId: resolvedLanguageId,
             examTargetId: resolvedExamTargetId,
             status: 'ACTIVE',
+            registrationSource: 'PUBLIC',
           },
         });
 
@@ -2204,7 +2253,17 @@ export class AuthService {
   }
 
   async getRegisterOptions() {
-    const [classes, languages, examTargets, states] = await Promise.all([
+    const targetOrder = [
+      'JEE',
+      'CET',
+      'NEET',
+      'NEET and JEE',
+      'NEET and State CET',
+      'JEE and State CET',
+      'JEE, NEET and State CET',
+    ];
+
+    const [classes, languages, rawTargets, states] = await Promise.all([
       this.prisma.studentClass.findMany({
         where: { name: { not: 'FOUNDATION' } },
         select: { id: true, name: true },
@@ -2214,11 +2273,7 @@ export class AuthService {
         select: { id: true, name: true, code: true },
       }),
       this.prisma.examTarget.findMany({
-        where: {
-          name: { in: ['JEE', 'NEET', 'CET'], mode: 'insensitive' },
-        },
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' },
+        select: { id: true, name: true, description: true },
       }),
       this.prisma.state.findMany({
         where: { isActive: true },
@@ -2235,6 +2290,15 @@ export class AuthService {
         orderBy: { name: 'asc' },
       }),
     ]);
+
+    // Sort exam targets strictly by targetOrder, and filter to the 7 valid targets
+    const examTargets = targetOrder
+      .map((targetName) =>
+        rawTargets.find(
+          (t) => t.name.trim().toLowerCase() === targetName.trim().toLowerCase(),
+        ),
+      )
+      .filter((t): t is { id: string; name: string; description: string | null } => Boolean(t));
 
     return { classes, languages, examTargets, states };
   }

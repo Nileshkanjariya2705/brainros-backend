@@ -79,6 +79,7 @@ export class ExamPaperValidatorService {
     let calculatedTotalMarks = 0;
     const sectionMap = new Map<string, { name: string; subject: string; questionCount: number }>();
     const seenQuestionTexts = new Set<string>();
+    const seenQuestionNumbers = new Set<number>();
 
     const validatedRows: Array<{
       rowNumber: number;
@@ -103,6 +104,12 @@ export class ExamPaperValidatorService {
         row.questionNumber <= 0
       ) {
         rowErrors.push('Valid Question Number (question_number) is required.');
+      } else {
+        if (seenQuestionNumbers.has(row.questionNumber)) {
+          rowErrors.push(`Duplicate question number: ${row.questionNumber}.`);
+        } else {
+          seenQuestionNumbers.add(row.questionNumber);
+        }
       }
 
       // 2. Validate Question Text
@@ -128,6 +135,35 @@ export class ExamPaperValidatorService {
       }
       if (!optC && !optD) {
         rowWarnings.push('Option C and Option D are missing for this question.');
+      }
+
+      // 4. Validate Correct Answer (A, B, C, D)
+      const rawAns = (row.correctAnswer || '').trim().toUpperCase();
+      const qNumLabel = row.questionNumber ? `question ${row.questionNumber}` : `row ${row.rowNumber}`;
+      const qType = (row.questionType || 'SINGLE_CORRECT').toUpperCase();
+
+      if (!rawAns) {
+        rowErrors.push(`Correct Answer (correct_answer) is required for ${qNumLabel}.`);
+      } else if (qType === 'SINGLE_CORRECT') {
+        if (!['A', 'B', 'C', 'D'].includes(rawAns)) {
+          rowErrors.push(
+            `Invalid correct answer '${row.correctAnswer}' for ${qNumLabel}. Must be one of A, B, C, D.`,
+          );
+        } else {
+          if (rawAns === 'A' && !optA) {
+            rowErrors.push(`Option A is empty but Correct Answer is A for ${qNumLabel}.`);
+          } else if (rawAns === 'B' && !optB) {
+            rowErrors.push(`Option B is empty but Correct Answer is B for ${qNumLabel}.`);
+          } else if (rawAns === 'C' && !optC) {
+            rowErrors.push(`Option C is empty but Correct Answer is C for ${qNumLabel}.`);
+          } else if (rawAns === 'D' && !optD) {
+            rowErrors.push(`Option D is empty but Correct Answer is D for ${qNumLabel}.`);
+          }
+        }
+      } else if (qType === 'NUMERICAL') {
+        if (isNaN(Number(rawAns))) {
+          rowErrors.push(`Numerical answer required for ${qNumLabel}.`);
+        }
       }
 
       const marks = row.marks !== undefined ? row.marks : 4.0;

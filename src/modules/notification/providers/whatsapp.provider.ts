@@ -41,21 +41,30 @@ export class WhatsAppProvider implements INotificationProvider {
    * See: https://www.twilio.com/docs/api/errors
    */
   private static readonly PERMANENT_ERROR_CODES = new Set([
+    20003, // Authentication Error / Account Suspended / Invalid Credentials
+    20404, // Resource Not Found
     21211, // Invalid 'To' phone number
-    21614, // 'To' number is not a valid mobile number
     21408, // Permission to send an SMS has not been enabled for the region
+    21608, // The 'To' phone number is unverified (Twilio trial accounts)
     21610, // Attempt to send to unsubscribed recipient
     21612, // The 'To' phone number is not currently reachable
-    63003, // Channel could not authenticate the request
-    63005, // Channel failed to deliver the message
-    63007, // WhatsApp account is not registered
-    63016, // Message not created — template not found or not approved
-    63021, // WhatsApp template params count mismatch
+    21614, // 'To' number is not a valid mobile number
     30003, // Unreachable destination handset
     30005, // Unknown destination handset
     30006, // Landline or unreachable carrier
     30007, // Message filtered by carrier
     30008, // Unknown error (permanent)
+    572002, // No Twilio trial phone number is assigned / unverified destination number
+    63001, // Channel not available
+    63002, // Channel rate limit for WhatsApp template (permanent if template rejected)
+    63003, // Channel could not authenticate the request
+    63005, // Channel failed to deliver the message
+    63007, // WhatsApp account is not registered
+    63015, // Channel Sandbox: Cannot send to recipient that has not joined sandbox
+    63016, // Message not created — template not found or not approved
+    63019, // WhatsApp Business account restricted
+    63021, // WhatsApp template params count mismatch
+    63038, // Daily messaging limit reached
   ]);
 
   /**
@@ -154,6 +163,21 @@ export class WhatsAppProvider implements INotificationProvider {
           errorCode: 'INVALID_PHONE',
           errorMessage: `Invalid phone number format: ${maskPhone(payload.recipientAddress)}`,
           isRetryable: false,
+        };
+      }
+
+      // Optional bypass for local development or if disabled via environment variable
+      if (
+        this.configService.get<string>('ENABLE_WHATSAPP') === 'false' ||
+        this.configService.get<string>('DISABLE_WHATSAPP') === 'true'
+      ) {
+        this.logger.log(
+          `[WhatsApp] Delivery bypassed (ENABLE_WHATSAPP=false) for ${maskPhone(whatsappTo)}`,
+        );
+        return {
+          success: true,
+          provider: this.providerName,
+          providerMessageId: `mock_wa_${Date.now()}`,
         };
       }
 

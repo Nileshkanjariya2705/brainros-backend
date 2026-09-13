@@ -24,6 +24,8 @@ import {
   BillFilterDto,
   GenerateInvoiceDto,
   UpdatePricingDto,
+  UpdateSchoolPricingDto,
+  SendBulkInvoicesDto,
 } from '../dto/billing.dto';
 
 @Controller('billing')
@@ -33,7 +35,7 @@ export class BillingController {
 
   /**
    * GET /billing/pricing
-   * Retrieve current price per student per month setting
+   * Retrieve current global price per student per month fallback setting
    */
   @Get('pricing')
   @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT')
@@ -48,7 +50,7 @@ export class BillingController {
 
   /**
    * PUT /billing/pricing
-   * Update price per student per month setting (applies to future invoices)
+   * Update global price per student per month fallback setting
    */
   @Put('pricing')
   @Roles('SUPER_ADMIN')
@@ -61,6 +63,55 @@ export class BillingController {
       statusCode: 200,
       message: data.message,
       data,
+    };
+  }
+
+  /**
+   * GET /billing/schools/pricing
+   * Retrieve configured school-wise pricing list
+   */
+  @Get('schools/pricing')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT')
+  async getSchoolPricings() {
+    const data = await this.billingService.getSchoolPricings();
+    return {
+      statusCode: 200,
+      message: 'School pricings retrieved successfully.',
+      data,
+    };
+  }
+
+  /**
+   * GET /billing/schools/:id/pricing
+   * Retrieve specific school pricing configuration & history
+   */
+  @Get('schools/:id/pricing')
+  @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ACCOUNTANT')
+  async getSchoolPricing(@Param('id', ParseUUIDPipe) id: string) {
+    const data = await this.billingService.getSchoolPricing(id);
+    return {
+      statusCode: 200,
+      message: 'School pricing details retrieved successfully.',
+      data,
+    };
+  }
+
+  /**
+   * PUT /billing/schools/:id/pricing
+   * Update school-specific price per student per month
+   */
+  @Put('schools/:id/pricing')
+  @Roles('SUPER_ADMIN')
+  async updateSchoolPricing(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('userId') userId: string,
+    @Body() dto: UpdateSchoolPricingDto,
+  ) {
+    const data = await this.billingService.updateSchoolPricing(id, dto, userId);
+    return {
+      statusCode: 200,
+      message: data.message,
+      data: data.pricing,
     };
   }
 
@@ -161,6 +212,24 @@ export class BillingController {
     return {
       statusCode: 201,
       message: `Invoice ${data.billNumber} generated successfully.`,
+      data,
+    };
+  }
+
+  /**
+   * POST /billing/invoices/send-all
+   * Send all generated invoices for the selected billing period via BullMQ + Resend
+   */
+  @Post('invoices/send-all')
+  @Roles('SUPER_ADMIN', 'ACCOUNTANT')
+  async sendBulkInvoices(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: SendBulkInvoicesDto,
+  ) {
+    const data = await this.billingService.sendBulkInvoices(dto, userId);
+    return {
+      statusCode: 200,
+      message: data.message,
       data,
     };
   }

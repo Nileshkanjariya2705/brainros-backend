@@ -26,21 +26,22 @@ export class PrismaService
     const dbUrl = process.env.DATABASE_URL || '';
     const poolMax = process.env.DATABASE_POOL_MAX
       ? parseInt(process.env.DATABASE_POOL_MAX, 10)
-      : 20;
+      : 10;
     let poolConfig: PoolConfig = {};
 
     if (dbUrl) {
       const parsed = parse(dbUrl);
       poolConfig = {
-        ...parsed,
         host: parsed.host || undefined,
         port: parsed.port ? parseInt(parsed.port, 10) : undefined,
         user: parsed.user || undefined,
         password: parsed.password || undefined,
         database: parsed.database || undefined,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 15000,
         idleTimeoutMillis: 30000,
         max: poolMax,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10000,
         ssl:
           dbUrl.includes('supabase.com') ||
           dbUrl.includes('aivencloud.com') ||
@@ -78,6 +79,10 @@ export class PrismaService
 
   get isReady(): boolean {
     return this._isReady;
+  }
+
+  get shuttingDown(): boolean {
+    return this.isShuttingDown;
   }
 
   onModuleInit() {

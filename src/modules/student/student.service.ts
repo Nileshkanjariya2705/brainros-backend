@@ -157,6 +157,7 @@ export class StudentService {
           preferredLanguageId: firstLang.id,
           examTargetId: firstTarget.id,
           status: 'ACTIVE',
+          registrationSource: 'ADMIN',
         },
         include: {
           studentClass: true,

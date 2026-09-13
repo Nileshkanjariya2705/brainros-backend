@@ -3,6 +3,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
 
+import { SessionService } from './services/session.service';
+
 describe('AuthController', () => {
   let controller: AuthController;
   let authServiceMock: any;

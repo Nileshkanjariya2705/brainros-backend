@@ -1,7 +1,12 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { Job } from 'bullmq';
-import { NotificationChannel, NotificationPriority, NotificationStatus, NotificationType } from '@prisma/client';
+import {
+  NotificationChannel,
+  NotificationPriority,
+  NotificationStatus,
+  NotificationType,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsAppProvider } from '../providers/whatsapp.provider';
 import {
@@ -18,18 +23,24 @@ import { NotificationPayload } from '../interfaces/notification.interface';
  * - Exam reminders (24H and 1H before exam start)
  * - Exam result publication notifications
  *
- * IDEMPOTENCY:
- * Each job carries a `notificationId` that maps to a `Notification` DB record.
- * If the record is already SENT, the job is skipped — preventing duplicate sends
- * even when BullMQ retries the job after a transient failure.
+ * RATE LIMITING & CONCURRENCY:
+ * - Concurrency is set to 1 and limiter to 1/sec to strictly comply with
+ *   Twilio API rate limits (avoiding code 20429 errors).
  *
- * FAILURE ISOLATION:
- * - Permanent Twilio errors (invalid phone, template issues) → status=FAILED, job completes
- * - Retryable Twilio errors (5xx, rate limit) → status=RETRYING, job throws to trigger BullMQ retry
- * - Exam/result state is NEVER affected by notification failures
+ * IDEMPOTENCY & LOOP PREVENTION:
+ * - Checks DB status before send (skips if already SENT).
+ * - Caps maximum attempts (never throws past max attempts, preventing infinite retry loops).
+ * - Gracefully handles server shutdown and database disconnections without crash-looping.
+ * - Permanent Twilio errors (e.g. trial unverified numbers, bad templates) fail immediately without retries.
  */
-@Processor(WHATSAPP_REMINDER_QUEUE_NAME)
-export class WhatsAppReminderProcessor extends WorkerHost {
+@Processor(WHATSAPP_REMINDER_QUEUE_NAME, {
+  concurrency: 1,
+  limiter: {
+    max: 1,
+    duration: 1000,
+  },
+})
+export class WhatsAppReminderProcessor extends WorkerHost implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsAppReminderProcessor.name);
 
   constructor(
@@ -39,6 +50,14 @@ export class WhatsAppReminderProcessor extends WorkerHost {
     super();
   }
 
+  async onModuleDestroy() {
+    try {
+      if (this.worker) {
+        await this.worker.close();
+      }
+    } catch {}
+  }
+
   @OnWorkerEvent('error')
   onError(err: Error) {
     this.logger.warn(
@@ -46,12 +65,38 @@ export class WhatsAppReminderProcessor extends WorkerHost {
     );
   }
 
+  private isDbUnavailable(error?: any): boolean {
+    if (this.prisma.shuttingDown || !this.prisma.isReady) {
+      return true;
+    }
+    if (error) {
+      const msg = error.message || String(error);
+      return (
+        msg.includes('Engine is not yet connected') ||
+        msg.includes('Response from the Engine was empty') ||
+        msg.includes('Connection closed') ||
+        msg.includes('Cannot use a pool after calling end')
+      );
+    }
+    return false;
+  }
+
   async process(job: Job<WhatsAppReminderJobData>): Promise<any> {
     const { notificationId, reminderType, examId, examTitle } = job.data;
+    const currentAttempt = (job.attemptsMade ?? 0) + 1;
+    const maxAttempts = job.opts?.attempts || 3;
+
+    // 0. Check application shutdown / database availability
+    if (this.isDbUnavailable()) {
+      this.logger.warn(
+        `[WhatsApp Worker] Skipping job [${job.id}] — DB offline or application shutting down.`,
+      );
+      return { status: 'SKIPPED_SHUTDOWN', notificationId };
+    }
 
     this.logger.log(
       `[WhatsApp Worker] Processing job [${job.id}] — Type: ${reminderType}, Exam: ${examId}, ` +
-        `Notification: ${notificationId}, Attempt: ${(job.attemptsMade ?? 0) + 1}`,
+        `Notification: ${notificationId}, Attempt: ${currentAttempt}/${maxAttempts}`,
     );
 
     // 1. Load the Notification record
@@ -61,10 +106,16 @@ export class WhatsAppReminderProcessor extends WorkerHost {
         where: { id: notificationId },
       });
     } catch (dbErr: any) {
+      if (this.isDbUnavailable(dbErr)) {
+        this.logger.warn(
+          `[WhatsApp Worker] DB offline while loading notification '${notificationId}'. Aborting cleanly.`,
+        );
+        return { status: 'ABORTED_SHUTDOWN', notificationId };
+      }
       this.logger.error(
         `[WhatsApp Worker] DB error loading notification '${notificationId}': ${dbErr.message}`,
       );
-      throw dbErr; // Retryable: DB may be temporarily unavailable
+      throw dbErr; // Retryable transient DB glitch
     }
 
     if (!notification) {
@@ -82,6 +133,17 @@ export class WhatsAppReminderProcessor extends WorkerHost {
       return { status: 'SKIPPED_ALREADY_SENT', notificationId };
     }
 
+    // If already marked FAILED or CANCELLED, do not process
+    if (
+      notification.status === NotificationStatus.FAILED ||
+      notification.status === NotificationStatus.CANCELLED
+    ) {
+      this.logger.log(
+        `[WhatsApp Worker] Notification '${notificationId}' is already ${notification.status}. Skipping.`,
+      );
+      return { status: `SKIPPED_${notification.status}`, notificationId };
+    }
+
     // 3. Mark as PROCESSING (atomic update, safe to retry)
     try {
       await this.prisma.notification.update({
@@ -92,6 +154,12 @@ export class WhatsAppReminderProcessor extends WorkerHost {
         },
       });
     } catch (updateErr: any) {
+      if (this.isDbUnavailable(updateErr)) {
+        this.logger.warn(
+          `[WhatsApp Worker] DB offline while updating '${notificationId}' to PROCESSING. Aborting.`,
+        );
+        return { status: 'ABORTED_SHUTDOWN', notificationId };
+      }
       this.logger.error(
         `[WhatsApp Worker] Failed to mark notification '${notificationId}' as PROCESSING: ${updateErr.message}`,
       );
@@ -99,8 +167,7 @@ export class WhatsAppReminderProcessor extends WorkerHost {
     }
 
     // 4. Build the provider payload
-    const phone =
-      job.data.phone || notification.recipientAddress || '';
+    const phone = job.data.phone || notification.recipientAddress || '';
 
     const notificationPayload: NotificationPayload = {
       notificationId,
@@ -131,26 +198,35 @@ export class WhatsAppReminderProcessor extends WorkerHost {
 
     if (result.success) {
       // 6a. Success path
-      await this.prisma.notification.update({
-        where: { id: notificationId },
-        data: {
-          status: NotificationStatus.SENT,
-          sentAt: responseTime,
-        },
-      });
+      try {
+        await this.prisma.notification.update({
+          where: { id: notificationId },
+          data: {
+            status: NotificationStatus.SENT,
+            sentAt: responseTime,
+            lastError: null,
+          },
+        });
 
-      await this.prisma.notificationLog.create({
-        data: {
-          notificationId,
-          channel: NotificationChannel.WHATSAPP,
-          provider: this.whatsAppProvider.providerName,
-          providerMessageId: result.providerMessageId || null,
-          attemptNumber: (job.attemptsMade ?? 0) + 1,
-          status: NotificationStatus.SENT,
-          requestTime,
-          responseTime,
-        },
-      });
+        await this.prisma.notificationLog.create({
+          data: {
+            notificationId,
+            channel: NotificationChannel.WHATSAPP,
+            provider: this.whatsAppProvider.providerName,
+            providerMessageId: result.providerMessageId || null,
+            attemptNumber: currentAttempt,
+            status: NotificationStatus.SENT,
+            requestTime,
+            responseTime,
+          },
+        });
+      } catch (dbErr: any) {
+        if (!this.isDbUnavailable(dbErr)) {
+          this.logger.warn(
+            `[WhatsApp Worker] Warning logging success for '${notificationId}': ${dbErr.message}`,
+          );
+        }
+      }
 
       this.logger.log(
         `[WhatsApp Worker] Successfully sent ${reminderType} to ${maskPhone(phone)}. ` +
@@ -164,49 +240,61 @@ export class WhatsAppReminderProcessor extends WorkerHost {
       };
     } else {
       // 6b. Failure path
-      const isRetryable = result.isRetryable !== false; // default retryable
+      const isRetryable = result.isRetryable !== false;
+      const hasExhaustedRetries = currentAttempt >= maxAttempts;
 
-      const newStatus = isRetryable
-        ? NotificationStatus.RETRYING
-        : NotificationStatus.FAILED;
+      // When retries are exhausted or failure is permanent, status is FAILED
+      const newStatus =
+        isRetryable && !hasExhaustedRetries
+          ? NotificationStatus.RETRYING
+          : NotificationStatus.FAILED;
 
-      await this.prisma.notification.update({
-        where: { id: notificationId },
-        data: {
-          status: newStatus,
-          lastError: result.errorMessage || 'WhatsApp delivery failed',
-        },
-      });
+      try {
+        await this.prisma.notification.update({
+          where: { id: notificationId },
+          data: {
+            status: newStatus,
+            lastError: (result.errorMessage || 'WhatsApp delivery failed').slice(0, 1000),
+          },
+        });
 
-      await this.prisma.notificationLog.create({
-        data: {
-          notificationId,
-          channel: NotificationChannel.WHATSAPP,
-          provider: this.whatsAppProvider.providerName,
-          attemptNumber: (job.attemptsMade ?? 0) + 1,
-          status: NotificationStatus.FAILED,
-          requestTime,
-          responseTime,
-          errorCode: result.errorCode || 'WHATSAPP_ERROR',
-          errorMessage: result.errorMessage || 'WhatsApp delivery failed',
-        },
-      });
+        await this.prisma.notificationLog.create({
+          data: {
+            notificationId,
+            channel: NotificationChannel.WHATSAPP,
+            provider: this.whatsAppProvider.providerName,
+            attemptNumber: currentAttempt,
+            status: NotificationStatus.FAILED,
+            requestTime,
+            responseTime,
+            errorCode: (result.errorCode || 'WHATSAPP_ERROR').slice(0, 50),
+            errorMessage: (result.errorMessage || 'WhatsApp delivery failed').slice(0, 1000),
+          },
+        });
+      } catch (dbErr: any) {
+        if (this.isDbUnavailable(dbErr)) {
+          return { status: 'ABORTED_SHUTDOWN', notificationId };
+        }
+        this.logger.warn(
+          `[WhatsApp Worker] Could not write failure log for '${notificationId}': ${dbErr.message}`,
+        );
+      }
 
       this.logger.warn(
-        `[WhatsApp Worker] ${isRetryable ? 'Retryable' : 'Permanent'} failure for notification '${notificationId}': ` +
+        `[WhatsApp Worker] ${isRetryable && !hasExhaustedRetries ? 'Retryable' : 'Permanent'} failure for notification '${notificationId}' (Attempt ${currentAttempt}/${maxAttempts}): ` +
           `code=${result.errorCode}, message=${result.errorMessage}`,
       );
 
-      if (isRetryable) {
-        // Rethrow so BullMQ schedules a retry with backoff
+      // Only rethrow if it is retryable AND we haven't reached max attempts
+      if (isRetryable && !hasExhaustedRetries) {
         throw new Error(
           `WhatsApp retryable failure [${result.errorCode}]: ${result.errorMessage}`,
         );
       }
 
-      // Permanent failure — do NOT rethrow, job completes as failed (no further retries)
+      // Permanent failure or max retries reached: COMPLETE the job cleanly (NO loop)
       return {
-        status: 'FAILED_PERMANENT',
+        status: hasExhaustedRetries ? 'FAILED_MAX_RETRIES' : 'FAILED_PERMANENT',
         notificationId,
         errorCode: result.errorCode,
         errorMessage: result.errorMessage,

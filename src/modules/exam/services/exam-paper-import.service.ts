@@ -396,6 +396,11 @@ export class ExamPaperImportService {
         marks: number;
         negativeMarks: number;
       }> = [];
+      const createdQuestionTuples: Array<{
+        questionId: string;
+        sourceRow: any;
+        options: Array<{ id: string; optionKey: string; optionText: string; isCorrect: boolean }>;
+      }> = [];
 
       for (let qIdx = 0; qIdx < totalRows; qIdx++) {
         const row = validationResult.validatedRows[qIdx];
@@ -498,6 +503,8 @@ export class ExamPaperImportService {
 
         const correctOptionIds: string[] = [];
 
+        const createdQuestionOptions: Array<{ id: string; optionKey: string; optionText: string; isCorrect: boolean }> = [];
+
         for (let oIdx = 0; oIdx < optionKeys.length; oIdx++) {
           const key = optionKeys[oIdx];
           const optText = (data as any)[`option${key}`];
@@ -512,6 +519,13 @@ export class ExamPaperImportService {
                 isCorrect,
                 displayOrder: oIdx + 1,
               },
+            });
+
+            createdQuestionOptions.push({
+              id: opt.id,
+              optionKey: key,
+              optionText: optText.trim(),
+              isCorrect,
             });
 
             if (isCorrect) correctOptionIds.push(opt.id);
@@ -557,6 +571,12 @@ export class ExamPaperImportService {
           displayOrder: qIdx + 1,
           marks: data.marks || 4.0,
           negativeMarks: data.negativeMarks || 1.0,
+        });
+
+        createdQuestionTuples.push({
+          questionId: question.id,
+          sourceRow: data,
+          options: createdQuestionOptions,
         });
 
         // Incremental progress
@@ -611,10 +631,54 @@ export class ExamPaperImportService {
         },
       });
 
-      // Update schedule to link to this version if schedule exists
+      // Populate ExamVersionQuestions & Options
+      let vSeq = 1;
+      for (const tuple of createdQuestionTuples) {
+        const vq = await tx.examVersionQuestion.create({
+          data: {
+            examVersionId: examVersion.id,
+            sourceQuestionId: tuple.questionId,
+            sequenceNumber: vSeq++,
+            sectionName: tuple.sourceRow.sectionName || tuple.sourceRow.subject || 'General',
+            subjectName: tuple.sourceRow.subject || 'General',
+            type: tuple.sourceRow.questionType || 'SINGLE_CORRECT',
+            difficultyLevel: tuple.sourceRow.difficulty || 'MEDIUM',
+            marks: tuple.sourceRow.marks || 4.0,
+            negativeMarks: tuple.sourceRow.negativeMarks || 1.0,
+            passage: tuple.sourceRow.passageText || null,
+            assertion: tuple.sourceRow.assertionText || null,
+            reason: tuple.sourceRow.reasonText || null,
+            questionText: tuple.sourceRow.questionText || 'Question statement',
+            explanation: tuple.sourceRow.explanation || null,
+            correctAnswer: tuple.sourceRow.correctAnswer ? { key: tuple.sourceRow.correctAnswer } : undefined,
+          },
+        });
+
+        for (let oIdx = 0; oIdx < tuple.options.length; oIdx++) {
+          const opt = tuple.options[oIdx];
+          await tx.examVersionOption.create({
+            data: {
+              examVersionQuestionId: vq.id,
+              sourceOptionId: opt.id,
+              displayOrder: oIdx + 1,
+              optionKey: opt.optionKey,
+              optionLabel: opt.optionKey,
+              optionText: opt.optionText || '',
+              isCorrect: opt.isCorrect,
+            },
+          });
+        }
+      }
+
+      // Update schedule to link to this version & mark answer key as ready
       await tx.examSchedule.updateMany({
         where: { examId: exam.id },
-        data: { examVersionId: examVersion.id },
+        data: {
+          examVersionId: examVersion.id,
+          hasAnswerKey: true,
+          answerKeyUploadedAt: new Date(),
+          answerKeyUploadedById: userId,
+        },
       });
 
       // 8. Update import session
@@ -1364,6 +1428,7 @@ export class ExamPaperImportService {
       'option_b',
       'option_c',
       'option_d',
+      'correct_answer',
     ];
 
     const sampleRows = [
@@ -1374,6 +1439,7 @@ export class ExamPaperImportService {
         option_b: '3',
         option_c: '4',
         option_d: '5',
+        correct_answer: 'C',
       },
       {
         question_number: 2,
@@ -1382,14 +1448,34 @@ export class ExamPaperImportService {
         option_b: 'Delhi',
         option_c: 'Chennai',
         option_d: 'Kolkata',
+        correct_answer: 'B',
       },
       {
         question_number: 3,
-        question: 'Which is a gas?',
-        option_a: 'Iron',
-        option_b: 'Oxygen',
-        option_c: 'Copper',
-        option_d: 'Gold',
+        question: 'Which is a prime number?',
+        option_a: '4',
+        option_b: '6',
+        option_c: '7',
+        option_d: '8',
+        correct_answer: 'C',
+      },
+      {
+        question_number: 4,
+        question: 'What is H2O?',
+        option_a: 'Oxygen',
+        option_b: 'Hydrogen',
+        option_c: 'Water',
+        option_d: 'Carbon Dioxide',
+        correct_answer: 'C',
+      },
+      {
+        question_number: 5,
+        question: 'Which planet is known as the Red Planet?',
+        option_a: 'Earth',
+        option_b: 'Mars',
+        option_c: 'Jupiter',
+        option_d: 'Venus',
+        correct_answer: 'B',
       },
     ];
 
@@ -1423,6 +1509,7 @@ export class ExamPaperImportService {
       { header: 'Option B', key: 'option_b', width: 22 },
       { header: 'Option C', key: 'option_c', width: 22 },
       { header: 'Option D', key: 'option_d', width: 22 },
+      { header: 'Correct Answer', key: 'correct_answer', width: 18 },
     ];
 
     const headerRow = worksheet.getRow(1);
@@ -2547,6 +2634,343 @@ export class ExamPaperImportService {
   ): Promise<void> {
     // Permitted for all admin question paper uploads across all exam states (Draft, Approved, Scheduled, Live/Active)
     return;
+  }
+
+  /**
+   * Submit Manually Entered Questions for an Exam
+   * Creates Questions, Options, Translations, ExamQuestions, ExamVersion, and AnswerKey records atomically.
+   */
+  async submitManualQuestions(
+    examId: string,
+    dto: { questions: any[] },
+    userId: string,
+  ) {
+    if (!dto.questions || !Array.isArray(dto.questions) || dto.questions.length === 0) {
+      throw new BadRequestException('Please provide at least one question.');
+    }
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        examTarget: true,
+        sections: { include: { subject: true }, orderBy: { displayOrder: 'asc' } },
+        blueprints: {
+          include: {
+            rules: {
+              include: {
+                chapter: true,
+                subject: true,
+              },
+            },
+          },
+        },
+        schedules: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID '${examId}' not found.`);
+    }
+
+    // Question count validation against exam configuration
+    if (exam.totalQuestions && dto.questions.length !== exam.totalQuestions) {
+      throw new BadRequestException(
+        `Exam requires exactly ${exam.totalQuestions} questions, but ${dto.questions.length} question(s) were submitted.`,
+      );
+    }
+
+    // Detailed question and option validation
+    for (let i = 0; i < dto.questions.length; i++) {
+      const q = dto.questions[i];
+      const qNum = i + 1;
+
+      if (!q.questionText || !q.questionText.trim()) {
+        throw new BadRequestException(`Question ${qNum}: Question text is required.`);
+      }
+      if (!q.optionA || !q.optionA.trim()) {
+        throw new BadRequestException(`Question ${qNum}: Option A is required.`);
+      }
+      if (!q.optionB || !q.optionB.trim()) {
+        throw new BadRequestException(`Question ${qNum}: Option B is required.`);
+      }
+      if (!q.optionC || !q.optionC.trim()) {
+        throw new BadRequestException(`Question ${qNum}: Option C is required.`);
+      }
+      if (!q.optionD || !q.optionD.trim()) {
+        throw new BadRequestException(`Question ${qNum}: Option D is required.`);
+      }
+      if (!q.correctAnswer || !['A', 'B', 'C', 'D'].includes(q.correctAnswer)) {
+        throw new BadRequestException(`Question ${qNum}: Correct answer must be A, B, C, or D.`);
+      }
+
+      const optMap: Record<string, string> = {
+        A: q.optionA.trim(),
+        B: q.optionB.trim(),
+        C: q.optionC.trim(),
+        D: q.optionD.trim(),
+      };
+      if (!optMap[q.correctAnswer]) {
+        throw new BadRequestException(
+          `Question ${qNum}: Correct answer '${q.correctAnswer}' corresponds to an empty option.`,
+        );
+      }
+    }
+
+    // Default language resolution
+    const defaultLang =
+      (await this.prisma.preferredLanguage.findFirst({
+        where: { code: { in: ['en', 'EN', 'English'] } },
+      })) ||
+      (await this.prisma.preferredLanguage.findFirst());
+
+    if (!defaultLang) {
+      throw new BadRequestException('Default language not configured in database.');
+    }
+
+    // Sections and chapter mapping
+    let sections = exam.sections;
+    if (sections.length === 0) {
+      const defaultSubject = await this.prisma.subject.findFirst({
+        where: exam.examTargetId ? { examTargetId: exam.examTargetId } : undefined,
+      });
+      if (defaultSubject) {
+        const sec = await this.prisma.examSection.create({
+          data: {
+            examId: exam.id,
+            subjectId: defaultSubject.id,
+            name: `${defaultSubject.name} Section`,
+            totalQuestions: dto.questions.length,
+            displayOrder: 1,
+          },
+          include: { subject: true },
+        });
+        sections = [sec];
+      }
+    }
+
+    const defaultSubjectId = sections[0]?.subjectId || (await this.prisma.subject.findFirst())?.id;
+    if (!defaultSubjectId) {
+      throw new BadRequestException('No valid academic subject found in database.');
+    }
+
+    // Version management
+    const existingVersion = await this.prisma.examVersion.findFirst({
+      where: { examId: exam.id },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const versionNumber = (existingVersion?.versionNumber || 0) + 1;
+
+    const marksPerQ = exam.defaultMarksPerQuestion || 4;
+    const negMarks = exam.defaultNegativeMarks !== undefined ? exam.defaultNegativeMarks : 1;
+
+    // Atomic Database Transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Create new published ExamVersion
+      const version = await tx.examVersion.create({
+        data: {
+          examId: exam.id,
+          versionNumber,
+          status: 'PUBLISHED',
+          totalQuestions: dto.questions.length,
+          durationMinutes: exam.durationMinutes,
+          totalMarks: dto.questions.length * marksPerQ,
+          generatedById: userId,
+          publishedAt: new Date(),
+        },
+      });
+
+      // 2. Clean up previous exam questions if replacing paper
+      await tx.examQuestion.deleteMany({ where: { examId: exam.id } });
+
+      let currentSecIdx = 0;
+      let secQuestionsPlaced = 0;
+
+      for (let idx = 0; idx < dto.questions.length; idx++) {
+        const qDto = dto.questions[idx];
+        const displayOrder = idx + 1;
+
+        // Assign section
+        let assignedSection = sections[currentSecIdx] || sections[0];
+        if (
+          assignedSection &&
+          secQuestionsPlaced >= (assignedSection.totalQuestions || 9999) &&
+          currentSecIdx < sections.length - 1
+        ) {
+          currentSecIdx++;
+          assignedSection = sections[currentSecIdx];
+          secQuestionsPlaced = 0;
+        }
+        secQuestionsPlaced++;
+
+        const subId = qDto.subjectId || assignedSection?.subjectId || defaultSubjectId;
+        const chapId = qDto.chapterId || undefined;
+
+        // Create Question in Question Bank
+        const question = await tx.question.create({
+          data: {
+            subjectId: subId,
+            chapterId: chapId,
+            defaultLanguageId: defaultLang.id,
+            type: QuestionTypeEnum.SINGLE_CORRECT,
+            difficultyLevel: QuestionDifficultyEnum.MEDIUM,
+            marks: qDto.marks !== undefined ? Number(qDto.marks) : marksPerQ,
+            negativeMarks: qDto.negativeMarks !== undefined ? Number(qDto.negativeMarks) : negMarks,
+            createdById: userId,
+            isActive: true,
+          },
+        });
+
+        // Create Options (A, B, C, D)
+        const optDefs = [
+          { key: 'A', text: qDto.optionA.trim() },
+          { key: 'B', text: qDto.optionB.trim() },
+          { key: 'C', text: qDto.optionC.trim() },
+          { key: 'D', text: qDto.optionD.trim() },
+        ];
+
+        const createdOptions: any[] = [];
+        for (let oIdx = 0; oIdx < optDefs.length; oIdx++) {
+          const od = optDefs[oIdx];
+          const isCorrect = qDto.correctAnswer === od.key;
+          const opt = await tx.questionOption.create({
+            data: {
+              questionId: question.id,
+              optionKey: od.key,
+              optionLabel: od.key,
+              optionText: od.text,
+              isCorrect,
+              displayOrder: oIdx + 1,
+            },
+          });
+          createdOptions.push(opt);
+        }
+
+        // Create Default Translation
+        await tx.questionTranslation.create({
+          data: {
+            questionId: question.id,
+            languageId: defaultLang.id,
+            questionText: qDto.questionText.trim(),
+            explanation: qDto.explanation?.trim() || null,
+          },
+        });
+
+        // Link Question to Exam
+        if (assignedSection) {
+          await tx.examQuestion.create({
+            data: {
+              examId: exam.id,
+              sectionId: assignedSection.id,
+              questionId: question.id,
+              displayOrder,
+              marks: qDto.marks !== undefined ? Number(qDto.marks) : marksPerQ,
+              negativeMarks: qDto.negativeMarks !== undefined ? Number(qDto.negativeMarks) : negMarks,
+            },
+          });
+        }
+
+        // Create ExamVersion Question Snapshot
+        const vQuestion = await tx.examVersionQuestion.create({
+          data: {
+            examVersionId: version.id,
+            sourceQuestionId: question.id,
+            sourceQuestionVersion: 1,
+            sequenceNumber: displayOrder,
+            sectionName: assignedSection?.name || 'Main Section',
+            subjectName: assignedSection?.subject?.name || 'General',
+            type: QuestionTypeEnum.SINGLE_CORRECT,
+            difficultyLevel: QuestionDifficultyEnum.MEDIUM,
+            marks: qDto.marks !== undefined ? Number(qDto.marks) : marksPerQ,
+            negativeMarks: qDto.negativeMarks !== undefined ? Number(qDto.negativeMarks) : negMarks,
+            questionText: qDto.questionText.trim(),
+            explanation: qDto.explanation?.trim() || null,
+            correctAnswer: { key: qDto.correctAnswer },
+          },
+        });
+
+        // Create ExamVersion Options Snapshot
+        for (let oIdx = 0; oIdx < createdOptions.length; oIdx++) {
+          const opt = createdOptions[oIdx];
+          await tx.examVersionOption.create({
+            data: {
+              examVersionQuestionId: vQuestion.id,
+              sourceOptionId: opt.id,
+              displayOrder: opt.displayOrder,
+              optionKey: opt.optionKey,
+              optionLabel: opt.optionLabel,
+              optionText: opt.optionText,
+              isCorrect: opt.isCorrect,
+            },
+          });
+        }
+
+        // Create ExamVersion Translation Snapshot
+        await tx.examVersionTranslation.create({
+          data: {
+            examVersionQuestionId: vQuestion.id,
+            languageId: defaultLang.id,
+            languageCode: defaultLang.code || 'en',
+            questionText: qDto.questionText.trim(),
+            explanation: qDto.explanation?.trim() || null,
+          },
+        });
+      }
+
+      // 3. Update ExamSchedule & AnswerKey state
+      const schedule = await tx.examSchedule.findFirst({
+        where: { examId: exam.id },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (schedule) {
+        await tx.examSchedule.update({
+          where: { id: schedule.id },
+          data: {
+            examVersionId: version.id,
+            hasAnswerKey: true,
+            answerKeyUploadedAt: new Date(),
+            answerKeyUploadedById: userId,
+          },
+        });
+      }
+
+      // 4. Audit Log
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'QUESTION_PAPER_MANUAL_ENTRY',
+          entityType: 'EXAM_VERSION',
+          entityId: version.id,
+          beforeState: { previousVersion: existingVersion?.id || null },
+          afterState: {
+            examId: exam.id,
+            versionId: version.id,
+            totalQuestions: dto.questions.length,
+          },
+          metadata: {
+            examId: exam.id,
+            examTitle: exam.title,
+            questionCount: dto.questions.length,
+            versionNumber,
+            enteredBy: userId,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      return {
+        examId: exam.id,
+        examVersionId: version.id,
+        versionNumber,
+        questionsCount: dto.questions.length,
+      };
+    });
+
+    return {
+      success: true,
+      message: `Successfully saved ${dto.questions.length} questions for ${exam.title}.`,
+      data: result,
+    };
   }
 }
 

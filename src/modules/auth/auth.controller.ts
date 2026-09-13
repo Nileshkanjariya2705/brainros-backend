@@ -95,6 +95,16 @@ export class AuthController {
   }
 
   /**
+   * Check if mobile number or email is available before proceeding through registration
+   * POST /auth/check-availability
+   */
+  @Post('check-availability')
+  @HttpCode(HttpStatus.OK)
+  async checkAvailability(@Body() body: { phone?: string; email?: string }) {
+    return this.authService.checkAvailability(body.phone, body.email);
+  }
+
+  /**
    * Full Student Registration: creates pending registration state in Redis,
    * sends OTP to mobile number, and returns requiresOtp.
    * POST /auth/register

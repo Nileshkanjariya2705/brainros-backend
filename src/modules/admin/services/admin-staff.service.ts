@@ -466,12 +466,16 @@ export class AdminStaffService {
       throw new NotFoundException(`Staff user with ID '${id}' not found.`);
     }
 
-    const isActive = dto.status === 'ACTIVE';
+    let userStatus: any = dto.status;
+    if (userStatus === 'INACTIVE') {
+      userStatus = 'DISABLED';
+    }
+    const isActive = userStatus === 'ACTIVE';
 
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
-        status: dto.status as any,
+        status: userStatus,
         isActive,
       },
     });

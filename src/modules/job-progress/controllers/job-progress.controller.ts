@@ -29,13 +29,16 @@ export class JobProgressController {
     }
 
     // Authorization check: User must own the job or have admin permissions
-    const roles = user.roles || (user.role ? [user.role] : []);
+    const roles = user?.roles || (user?.role ? [user.role] : []);
     const isAdmin =
       roles.includes('ADMIN') ||
       roles.includes('SUPER_ADMIN') ||
       roles.includes('INSTITUTION_ADMIN');
 
-    if (!isAdmin && status.job.userId && status.job.userId !== user.userId) {
+    const jobUserId = status.job?.userId;
+    const currentUserId = user?.userId || user?.id;
+
+    if (!isAdmin && jobUserId && currentUserId && jobUserId !== currentUserId) {
       throw new ForbiddenException(
         'You are not authorized to view status for this job.',
       );
